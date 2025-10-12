@@ -1,7 +1,15 @@
-# Seconds to Gyr
+# ====================
+# ==== Converters ====
+# ====================
+
+# Seconds to Gyr converter
 sec2Gyr(s) = s / (3.1536e16)
 
-# StagData constructor (hardcoded)
+# =========================
+# ==== Reading Backend ====
+# =========================
+
+# StagData constructor (parameters.dat)
 function aggregate_StagData(Sname::String, filename::String, timedata::Array{Float64,2})
     # Read strings
     lines = split.(readlines(filename), "=")
@@ -121,36 +129,78 @@ function read_StagYY_rproffile(filename::String, Stag::StagData)
         header = split(String(@view map[1:(map[lf-1]==0x0D ? lf-2 : lf-1)]))
     # --- Compute number of rows and byte range for separator lines (Export rate of rprof is different than time.dat)
         nblocks = (length(map) - lf) ÷ (Stag.nz*line_bytes + separator_bytes) # Number of data blocks
-        nrows = nblocks * (Stag.nz+1) + 1 # Total number of rows including separators
-        separator_ranges = Vector{UnitRange{Int}}(undef, nblocks) # Byte ranges for separators
-        sepline_idx_at_tstep(t) = (lf+1) + (t-1)*(separator_bytes + Stag.nz*line_bytes)
-        for block in 1:nblocks
-            s, e = sepline_idx_at_tstep(block), sepline_idx_at_tstep(block)+separator_bytes-2
-            test = String(@view map[s:(map[e]==0x0D ? e-1 : e)])
-            separator_ranges[block] = s:e
-        end
 
     # Preallocate data array
         data = Array{Float64}(undef, Stag.nz, nblocks, length(header))
 
     # Chunk configuration
         runners = Threads.nthreads()
-        div, rem = divrem(nrows, runners)
-        # Raw file coordinates
-        startrow(r) = (r-1)*div + min(r-1, rem) + 1
-        nrows_on_thread(r) = div + (r <= rem ? 1 : 0)
-        endrow(r) = startrow(r) + nrows_on_thread(r) - 1
-        # Data coordinates
-        startdatarow(r) = startrow(r)
+        div, rem = divrem(nblocks, runners)
+    # --- Raw file coordinates
+        startblock(r) = (r-1)*div + min(r-1, rem) + 1
+        nblocks_on_thread(r) = div + (r <= rem ? 1 : 0)
+        endblock(r) = startblock(r) + nblocks_on_thread(r) - 1
+    # --- Block coordinates
+        startbyte(b) = lf + (b-1)*(Stag.nz*line_bytes+separator_bytes) + 1
+        function endbyte(b) 
+            e = (startbyte(b) + (Stag.nz*line_bytes+separator_bytes) - 1)
+            (map[e]==0x0A) && (e -= 1)
+            (e>=startbyte(b) && map[e]==0x0D) && (e -= 1)
+            return e
+        end
+        block_to_byte_range(b) = startbyte(b) : endbyte(b)
+        function row_to_byte_range(row, block_start_byte)
+            Δ = separator_bytes + (row-1)*line_bytes
+            return (block_start_byte + Δ) : (block_start_byte + Δ + line_bytes - 2)
+        end
 
     # Parallel-read
-    for r in 1:runners
+    Threads.@threads for r in 1:runners
         # Thread range
-        sr, er = startrow(r), endrow(r)
-        firstsep = findfirst(sr .<= first.(separator_ranges))
-        start_R, start_t = 
-        # Destination block
-        dest = @view data[sr:er, :]
+        sb, eb = startblock(r), endblock(r)
+        # Destination view array
+        dest = @view data[:, sb:eb, :]
+        # Block iterator
+        @inbounds for block in sb:eb
+            # Block range
+            block_range = block_to_byte_range(block)
+            # Row iterator
+            @inbounds for row in 1:Stag.nz
+                row_range = row_to_byte_range(row, first(block_range))
+                fld = split(String(@view map[row_range]))
+                dest[row, block-sb+1, :] .= Parsers.parse.(Float64, fld)
+            end
+        end
     end
+    return data, header
 
 end
+
+# High-level output reader
+function aggregate_StagData(sroot::String, Sname::String)
+    Tfname = sroot * "_time.dat"
+    Rfname = sroot * "_rprof.dat"
+    time_data, time_header = read_StagYY_timefile(Tfname);
+    Stag = aggregate_StagData(Sname, sroot * "_parameters.dat", time_data);
+    rprof_data, rprof_header = read_StagYY_rproffile(Rfname, Stag);
+    return Stag, DataBlock(Sname, time_header, rprof_header, time_data, rprof_data)
+end
+
+# ==================
+# ==== Encoding ====
+# ==================
+
+# Create dictionary encoding for time and rprof blocks
+function data_encoding(time_header, rprof_header)
+    # Time header encoding
+        time_encoding = Dict{String,Int64}()
+        [time_encoding[name] = i for (i, name) in enumerate(time_header)]
+    # Rprof header encoding
+        rprof_encoding = Dict{String,Int64}()
+        [rprof_encoding[name] = i for (i, name) in enumerate(rprof_header)]
+    return time_encoding, rprof_encoding
+end
+
+# ======================
+# ==== Auxilliaries ====
+# ======================

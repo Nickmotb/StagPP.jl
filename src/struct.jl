@@ -1,3 +1,7 @@
+# ====================
+# ==== Structures ====
+# ====================
+
 struct DataBlock
     name        :: String               # Name of the data block
     timeheader  :: Array{String,1}      # Time header

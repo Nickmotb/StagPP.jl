@@ -10,6 +10,6 @@ module StagPP
     # === Checks
         include("checks.jl")
 
-    export read_StagYY_timefile, aggregate_StagData, StagData
+    export aggregate_StagData, StagData, DataBlock
 
 end
