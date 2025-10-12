@@ -9,7 +9,12 @@ module StagPP
         include("backend.jl")
     # === Checks
         include("checks.jl")
+    # === Public API
+        include("api.jl")
 
-    export aggregate_StagData, StagData, DataBlock
+    # Structure export
+    export StagData, DataBlock
+    # Function export
+    export aggregate_StagData, time_vs_field
 
 end
