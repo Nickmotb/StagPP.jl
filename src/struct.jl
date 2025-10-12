@@ -8,6 +8,7 @@ struct DataBlock
     rprofheader :: Array{String,1}      # Azimuthal-averaged profile header
     timedata    :: Array{Float64,2}     # Time data (2D array)
     rprofdata   :: Array{Float64,3}     # Azimuthal-averaged profile block (nfields x 2D arrays)
+    rproftime   :: Array{Float64,1}     # Time vector for rprof data (Sampled)
 end
 
 struct StagData

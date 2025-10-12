@@ -132,6 +132,7 @@ function read_StagYY_rproffile(filename::String, Stag::StagData)
 
     # Preallocate data array
         data = Array{Float64}(undef, Stag.nz, nblocks, length(header))
+        time = Array{Float64}(undef, nblocks)
 
     # Chunk configuration
         runners = Threads.nthreads()
@@ -164,6 +165,11 @@ function read_StagYY_rproffile(filename::String, Stag::StagData)
         @inbounds for block in sb:eb
             # Block range
             block_range = block_to_byte_range(block)
+            # Time entry
+            time_range = first(block_range):first(block_range)+separator_bytes
+            t = tryparse(Float64, split(String(map[time_range]))[6])
+            @assert !isnothing(t) "Failed to parse time entry in rprof.dat"
+            time[block] = t
             # Row iterator
             @inbounds for row in 1:Stag.nz
                 row_range = row_to_byte_range(row, first(block_range))
@@ -172,7 +178,7 @@ function read_StagYY_rproffile(filename::String, Stag::StagData)
             end
         end
     end
-    return data, header
+    return data, header, time
 
 end
 
@@ -182,8 +188,10 @@ function aggregate_StagData(sroot::String, Sname::String)
     Rfname = sroot * "_rprof.dat"
     time_data, time_header = read_StagYY_timefile(Tfname);
     Stag = aggregate_StagData(Sname, sroot * "_parameters.dat", time_data);
-    rprof_data, rprof_header = read_StagYY_rproffile(Rfname, Stag);
-    return Stag, DataBlock(Sname, time_header, rprof_header, time_data, rprof_data)
+    rprof_data, rprof_header, rprof_time = read_StagYY_rproffile(Rfname, Stag);
+    time_data[:,2] .= sec2Gyr.(time_data[:,2]); # Convert time to Gyr
+    rprof_time .= sec2Gyr.(rprof_time); # Convert time to Gyr
+    return Stag, DataBlock(Sname, time_header, rprof_header, time_data, rprof_data, rprof_time)
 end
 
 # ==================
