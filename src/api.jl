@@ -23,13 +23,15 @@ LTN = Dict(
 # rprof.dat field --> String
 LRN = Dict(
     "Tmean" => L"Mean\;mantle\;temperature\;[K]", "logTmean" => L"Mean\;mantle\;temperature\;[log_{10}K]",
-    "Vrms"  => L"RMS\;velocity\;[cm/yr]", "logVrms" => L"RMS\;velocity\;[log_{10}(cm/yr)]",
+    "vrms"  => L"RMS\;velocity\;[cm/yr]", "logvrms" => L"RMS\;velocity\;[log_{10}(cm/yr)]",
     "eta_amean" => L"Mean\;viscosity\;[Pa\cdot s]", "logeta_amean" => L"Mean\;viscosity\;[log_{10}(Pa\cdot s)]",
     "eta_mean"  => L"Mean\;viscosity\;[Pa\cdot s]", "logeta_mean"  => L"Mean\;viscosity\;[log_{10}(Pa\cdot s)]",
     "Water" => L"H_2O\;content\;[wt%]", "logWater" => L"H_2O\;content\;[log_{10}wt%]",
     "Wsol" => L"H_2O\;storage\;capacity\;[wt%]", "logWsol" => L"H_2O\;storage\;capacity\;[log_{10}wt%]",
     "fO2" => L"fO_2\;[log_{10}FMQ]", "logfO2" => L"fO_2\;[log_{10}FMQ]",
     "H2Ofree" => L"Free\;H_2O\;[wt%]", "logH2Ofree" => L"Free\;H_2O\;[log_{10}wt%]",
+    "rhomean" => L"Mean\;density\;[kg/m^3]", "logrhomean" => L"Mean\;density\;[log_{10}(kg/m^3)]",
+    "bsmean" => L"Mean\;basalt\;fraction", "logbsmean" => L"Mean\;basalt\;fraction\;[log_{10}]",
 )
 
 # =============
@@ -105,14 +107,14 @@ function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(800, 600), cmap
 
     # Get encoding
     idxT, idxR = data_encoding(Dblock.timeheader, Dblock.rprofheader)
-    @assert haskey(idxR, field) "Field $field not found in time header"
+    @assert haskey(idxR, field) "Field $field not found in rprof header"
 
     # Plot
     fig = Figure(size = fsize)
     ax = Axis(fig[2,1], xlabel = L"Time\;[Gyr]", ylabel = L"Radius\;[km]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
     yp = log ? log10.(Dblock.rprofdata[:,:,idxR[field]]) : Dblock.rprofdata[:,:,idxR[field]]
     log && (field="log"*field)
-    hm = heatmap!(ax, Dblock.rproftime, Dblock.rprofdata[:,idxR["r"],1], yp', colormap=cmap)
+    hm = heatmap!(ax, Dblock.rproftime, 1e-3Dblock.rprofdata[:,idxR["r"],1], yp', colormap=cmap)
     Colorbar(fig[1,1], hm; label = LRN[field], labelsize=25, ticklabelsize=15, vertical=false, labelpadding=13)
     # second_axis!(fig, Dblock.rproftime, 1e-3abs.(Dblock.rprofdata[:,idxR["r"],1] .- Dblock.rprofdata[end,idxR["r"],1]), "Pressure", 25, 17, 15, true)
     display(fig)

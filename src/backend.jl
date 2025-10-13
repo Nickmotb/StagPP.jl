@@ -3,7 +3,10 @@
 # =========================
 
 # StagData constructor (parameters.dat)
-function aggregate_StagData(Sname::String, filename::String, timedata::Array{Float64,2}, timeheader::Array{String,1})
+function aggregate_StagData(Sname::String, filename::String, timevec::Union{Array{Float64,1}, Nothing})
+    # Parameter file
+    filename = filename * "_parameters.dat"
+    @assert isfile(filename) "$filename not found"
     # Read strings
     lines = split.(readlines(filename), "=")
     newlines = fill("", length(lines), 2)
@@ -35,8 +38,8 @@ function aggregate_StagData(Sname::String, filename::String, timedata::Array{Flo
     rkm     = 1e-3pass_field("D_DIMENSIONAL")
     rcmb    = 1e-3pass_field("R_CMB")
     nz      = pass_field("NZTOT")
-    tend = sec2Gyr*timedata[end,findfirst(timeheader.=="time")]
-    ndts = timedata[end,1]
+    tend = isnothing(timevec) ? nothing : sec2Gyr*timevec[end]
+    ndts = isnothing(timevec) ? nothing : length(timevec)
     # Simulation Parameters
     T_tracked   = pass_field("TRACERS_TEMPERATURE")
     H₂O_tracked = pass_field("TRACEELEMENT_WATER")
@@ -67,14 +70,11 @@ function read_StagYY_timefile(filename::String, rm_Cmass_error::Bool=true)
     # Chunk configuration
         runners = Threads.nthreads()
         div, rem = divrem(nrows, runners)
-        startrow(r) = (r-1)*div + min(r-1, rem) + 1
-        nrows_on_thread(r) = div + (r <= rem ? 1 : 0)
-        endrow(r) = startrow(r) + nrows_on_thread(r) - 1
 
     # Parallel-read
-        Threads.@threads for r in 1:runners
+        Threads.@threads :static for r in 1:runners
             # Thread range
-            sr, er = startrow(r), endrow(r)
+            sr, er = startrow(r, div, rem), endrow(r, div, rem)
             # Destination block
             dest = @view data[sr:er, :]
             # Chunk stream
@@ -130,34 +130,17 @@ function read_StagYY_rproffile(filename::String, Stag::StagData)
     # Chunk configuration
         runners = Threads.nthreads()
         div, rem = divrem(nblocks, runners)
-    # --- Raw file coordinates
-        startblock(r) = (r-1)*div + min(r-1, rem) + 1
-        nblocks_on_thread(r) = div + (r <= rem ? 1 : 0)
-        endblock(r) = startblock(r) + nblocks_on_thread(r) - 1
-    # --- Block coordinates
-        startbyte(b) = lf + (b-1)*(Stag.nz*line_bytes+separator_bytes) + 1
-        function endbyte(b) 
-            e = (startbyte(b) + (Stag.nz*line_bytes+separator_bytes) - 1)
-            (map[e]==0x0A) && (e -= 1)
-            (e>=startbyte(b) && map[e]==0x0D) && (e -= 1)
-            return e
-        end
-        block_to_byte_range(b) = startbyte(b) : endbyte(b)
-        function row_to_byte_range(row, block_start_byte)
-            Δ = separator_bytes + (row-1)*line_bytes
-            return (block_start_byte + Δ) : (block_start_byte + Δ + line_bytes - 2)
-        end
 
     # Parallel-read
     Threads.@threads :static for r in 1:runners
         # Thread range
-        sb, eb = startblock(r), endblock(r)
+        sb, eb = startrow(r, div, rem), endrow(r, div, rem)
         # Destination view array
         dest = @view data[:, sb:eb, :]
         # Block iterator
         @inbounds for block in sb:eb
             # Block range
-            block_range = block_to_byte_range(block)
+            block_range = block_to_byte_range(map, block, lf, Stag.nz, line_bytes, separator_bytes)
             # Time entry
             time_range = first(block_range):first(block_range)+separator_bytes
             t = tryparse(Float64, split(String(map[time_range]))[6])
@@ -165,7 +148,7 @@ function read_StagYY_rproffile(filename::String, Stag::StagData)
             time[block] = t
             # Row iterator
             @inbounds for row in 1:Stag.nz
-                row_range = row_to_byte_range(row, first(block_range))
+                row_range = row_to_byte_range(row, first(block_range), line_bytes, separator_bytes)
                 fld = split(String(@view map[row_range]))
                 dest[row, block-sb+1, :] .= Parsers.parse.(Float64, fld)
             end
@@ -175,18 +158,87 @@ function read_StagYY_rproffile(filename::String, Stag::StagData)
 
 end
 
+# Backend for reading StagYY "plates_analyse.dat"s
+function read_StagYY_platesfile(filename::String)
+    # Memory map setup
+        map = Mmap.mmap(filename)
+    # --- Compute header + fixed line bytes
+        lf = findnext(==(0x0A), map, 1)
+        lf2 = findnext(==(0x0A), map, lf+1)
+        @assert !isnothing(lf) "$filename appears to be empty"
+        @assert !isnothing(lf2) "$filename appears to have no data"
+        line_bytes = lf2 - lf
+    # --- Extract Header content
+        header = split(String(@view map[1:(map[lf-1]==0x0D ? lf-2 : lf-1)]))
+        header = replace.(header, "#" => "")
+    # --- Compute number of rows and Character range for columns
+        nrows = (length(map) - lf) ÷ line_bytes
+
+    # Preallocate data array
+        data = Array{Float64}(undef, nrows, length(header))
+
+    # Chunk configuration
+        runners = Threads.nthreads()
+        div, rem = divrem(nrows, runners)
+
+    # Parallel-read
+        Threads.@threads :static for r in 1:runners
+            # Thread range
+            sr, er = startrow(r, div, rem), endrow(r, div, rem)
+            # Destination block
+            dest = @view data[sr:er, :]
+            # Chunk stream
+            @inbounds for i in sr:er
+                # Define row in bytes
+                srow = lf + (i-1)*line_bytes + 1
+                erow = srow + line_bytes - 1
+                # Remove endline characters (\n = 0x0A) for both Unix and Windows + extra windows return if present (\r = 0x0D).
+                e = erow
+                (map[e]==0x0A) && (e -= 1)
+                (e>=srow && map[e]==0x0D) && (e -= 1)
+                # Extract row string
+                rowstr = String(@view map[srow:e])
+                colranges = collect(findall(r"\S+", rowstr))
+                # Column parsing
+                j = 1
+                @inbounds for rcol in colranges
+                    fld = @view rowstr[rcol]
+                    dest[i-sr+1, j] = Parsers.parse(Float64, fld)
+                    j+=1
+                end
+            end
+        end
+    return data, String.(header)
+end
+
 # High-level output reader
-function aggregate_StagData(sroot::String, Sname::String)
+function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=true, plates::Bool=false)
+    # Filenames
     Tfname = sroot * "_time.dat"
     Rfname = sroot * "_rprof.dat"
-    time_data, time_header = read_StagYY_timefile(Tfname);
-    Stag = aggregate_StagData(Sname, sroot * "_parameters.dat", time_data, time_header);
-    rprof_data, rprof_header, rprof_time = read_StagYY_rproffile(Rfname, Stag);
-    idxT, idxR = data_encoding(time_header, rprof_header)
-    time_data[:,idxT["time"]] .= sec2Gyr*time_data[:,idxT["time"]]; # Convert time to Gyr
-    time_data[:,idxT["Vrms"]] .= m_s2cm_yr*time_data[:,idxT["Vrms"]]; # Convert time to Gyr
-    rprof_time .= sec2Gyr*rprof_time; # Convert time to Gyr
-    return Stag, DataBlock(Sname, time_header, rprof_header, time_data, rprof_data, rprof_time)
+    Pfname = sroot * "_plates_analyse.dat"
+    # Check files + construction
+    if time; @assert isfile(Tfname) "$Tfname not found"; time_data, time_header = read_StagYY_timefile(Tfname); end
+    if plates; @assert isfile(Pfname) "$Pfname not found"; plates_data, plates_header = read_StagYY_platesfile(Pfname); end
+    tvec = time ? time_data[:,findfirst(time_header.=="time")] : plates ? plates_data[:,findfirst(plates_header.=="time")] : nothing
+    Stag = aggregate_StagData(Sname, sroot, tvec)
+    if rprof; @assert isfile(Rfname) "$Rfname not found"; rprof_data, rprof_header, rprof_time = read_StagYY_rproffile(Rfname, Stag); end
+    # Encoding
+    idxT, idxR, idxP = data_encoding(time ? time_header : nothing, rprof ? rprof_header : nothing, plates ? plates_header : nothing)
+    if time
+        time_data[:,idxT["time"]] .= sec2Gyr*time_data[:,idxT["time"]]; # Convert time to Gyr
+        time_data[:,idxT["Vrms"]] .= m_s2cm_yr*time_data[:,idxT["Vrms"]]; # Convert time to Gyr
+    end
+    if rprof
+        rprof_data[:,:,idxR["vrms"]] .= m_s2cm_yr*rprof_data[:,:,idxR["vrms"]]; # Convert time to Gyr
+    end
+    if plates
+        plates_data[:,idxP["mobility"]] .= m_s2cm_yr*plates_data[:,idxP["mobility"]]; # Convert mobility to cm/yr
+    end
+    return Stag, DataBlock(Sname, 
+                    time ? time_header : nothing, rprof ? rprof_header : nothing, plates ? plates_header : nothing,
+                    time ? time_data : nothing, rprof ? rprof_data : nothing, plates ? plates_data : nothing, 
+                    plates ? sec2Gyr*plates_data[:,2] : rprof ? sec2Gyr*rprof_time : nothing)
 end
 
 # ==================
@@ -194,16 +246,44 @@ end
 # ==================
 
 # Create dictionary encoding for time and rprof blocks
-function data_encoding(time_header, rprof_header)
+function data_encoding(time_header, rprof_header, plates_header)
+    # Initialize
+    time_encoding, rprof_encoding, plates_encoding = nothing, nothing, nothing
     # Time header encoding
+    if !isnothing(time_header)
         time_encoding = Dict{String,Int64}()
         [time_encoding[name] = i for (i, name) in enumerate(time_header)]
+    end
     # Rprof header encoding
+    if !isnothing(rprof_header)
         rprof_encoding = Dict{String,Int64}()
         [rprof_encoding[name] = i for (i, name) in enumerate(rprof_header)]
-    return time_encoding, rprof_encoding
+    end
+    # Plates header encoding
+    if !isnothing(plates_header)
+        plates_encoding = Dict{String,Int64}()
+        [plates_encoding[name] = i for (i, name) in enumerate(plates_header)]
+    end
+    return time_encoding, rprof_encoding, plates_encoding
 end
 
 # ======================
 # ==== Auxilliaries ====
 # ======================
+    # Sequential row/block <-> byte-finder for chunking
+        startrow(r, div, rem) = (r-1)*div + min(r-1, rem) + 1   # Return first row on time.dat or plates_analyse.dat; block on rprof.dat
+        nrows_on_thread(r, div, rem) = div + (r <= rem ? 1 : 0) #
+        endrow(r, div, rem) = startrow(r, div, rem) + nrows_on_thread(r, div, rem) - 1 # Return last row on time.dat or plates_analyse.dat; block on rprof.dat
+    # Irregular block <-> byte range finder (rprof.dat)
+        startbyte(b, header_bytes, nz, line_bytes, separator_bytes) = header_bytes + (b-1)*(nz*line_bytes+separator_bytes) + 1
+        function endbyte(map, b, header_bytes, nz, line_bytes, separator_bytes) 
+            e = (startbyte(b, header_bytes, nz, line_bytes, separator_bytes) + (nz*line_bytes+separator_bytes) - 1)
+            (map[e]==0x0A) && (e -= 1)
+            (e>=startbyte(b, header_bytes, nz, line_bytes, separator_bytes) && map[e]==0x0D) && (e -= 1)
+            return e
+        end
+        block_to_byte_range(map, b, header_bytes, nz, line_bytes, separator_bytes) = startbyte(b, header_bytes, nz, line_bytes, separator_bytes) : endbyte(map, b, header_bytes, nz, line_bytes, separator_bytes)
+        function row_to_byte_range(row, block_start_byte, line_bytes, separator_bytes)
+            Δ = separator_bytes + (row-1)*line_bytes
+            return (block_start_byte + Δ) : (block_start_byte + Δ + line_bytes - 2)
+        end

@@ -20,6 +20,6 @@ module StagPP
     # Structure export
     export StagData, DataBlock
     # Function export
-    export aggregate_StagData, time_vs_field, rprof_vs_field
+    export load_sim, time_vs_field, rprof_vs_field
 
 end
