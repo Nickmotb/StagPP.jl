@@ -1,16 +1,9 @@
-# ====================
-# ==== Converters ====
-# ====================
-
-# Seconds to Gyr converter
-sec2Gyr(s) = s / (3.1536e16)
-
 # =========================
 # ==== Reading Backend ====
 # =========================
 
 # StagData constructor (parameters.dat)
-function aggregate_StagData(Sname::String, filename::String, timedata::Array{Float64,2})
+function aggregate_StagData(Sname::String, filename::String, timedata::Array{Float64,2}, timeheader::Array{String,1})
     # Read strings
     lines = split.(readlines(filename), "=")
     newlines = fill("", length(lines), 2)
@@ -42,7 +35,7 @@ function aggregate_StagData(Sname::String, filename::String, timedata::Array{Flo
     rkm     = 1e-3pass_field("D_DIMENSIONAL")
     rcmb    = 1e-3pass_field("R_CMB")
     nz      = pass_field("NZTOT")
-    tend = sec2Gyr(timedata[end,2])
+    tend = sec2Gyr*timedata[end,findfirst(timeheader.=="time")]
     ndts = timedata[end,1]
     # Simulation Parameters
     T_tracked   = pass_field("TRACERS_TEMPERATURE")
@@ -110,7 +103,7 @@ function read_StagYY_timefile(filename::String, rm_Cmass_error::Bool=true)
             end
         end
     
-    return data, header
+    return data, String.(header)
 end
 
 # Backend for reading StagYY "rprof.dat"s
@@ -156,7 +149,7 @@ function read_StagYY_rproffile(filename::String, Stag::StagData)
         end
 
     # Parallel-read
-    Threads.@threads for r in 1:runners
+    Threads.@threads :static for r in 1:runners
         # Thread range
         sb, eb = startblock(r), endblock(r)
         # Destination view array
@@ -178,7 +171,7 @@ function read_StagYY_rproffile(filename::String, Stag::StagData)
             end
         end
     end
-    return data, header, time
+    return data, String.(header), time
 
 end
 
@@ -187,10 +180,12 @@ function aggregate_StagData(sroot::String, Sname::String)
     Tfname = sroot * "_time.dat"
     Rfname = sroot * "_rprof.dat"
     time_data, time_header = read_StagYY_timefile(Tfname);
-    Stag = aggregate_StagData(Sname, sroot * "_parameters.dat", time_data);
+    Stag = aggregate_StagData(Sname, sroot * "_parameters.dat", time_data, time_header);
     rprof_data, rprof_header, rprof_time = read_StagYY_rproffile(Rfname, Stag);
-    time_data[:,2] .= sec2Gyr.(time_data[:,2]); # Convert time to Gyr
-    rprof_time .= sec2Gyr.(rprof_time); # Convert time to Gyr
+    idxT, idxR = data_encoding(time_header, rprof_header)
+    time_data[:,idxT["time"]] .= sec2Gyr*time_data[:,idxT["time"]]; # Convert time to Gyr
+    time_data[:,idxT["Vrms"]] .= m_s2cm_yr*time_data[:,idxT["Vrms"]]; # Convert time to Gyr
+    rprof_time .= sec2Gyr*rprof_time; # Convert time to Gyr
     return Stag, DataBlock(Sname, time_header, rprof_header, time_data, rprof_data, rprof_time)
 end
 
