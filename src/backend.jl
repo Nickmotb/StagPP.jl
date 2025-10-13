@@ -38,14 +38,16 @@ function aggregate_StagData(Sname::String, filename::String, timevec::Union{Arra
     rkm     = 1e-3pass_field("D_DIMENSIONAL")
     rcmb    = 1e-3pass_field("R_CMB")
     nz      = pass_field("NZTOT")
-    tend = isnothing(timevec) ? nothing : sec2Gyr*timevec[end]
-    ndts = isnothing(timevec) ? nothing : length(timevec)
+    tend    = isnothing(timevec) ? nothing : sec2Gyr*timevec[end]
+    ndts    = isnothing(timevec) ? nothing : length(timevec)
+    totH₂O  = pass_field("INITIALOCEANMASS")
     # Simulation Parameters
     T_tracked   = pass_field("TRACERS_TEMPERATURE")
     H₂O_tracked = pass_field("TRACEELEMENT_WATER")
     Crb_tracked = pass_field("TRACEELEMENT_CARBON")
 
-    return StagData(name, shape, rkm, rcmb, nz, tend, ndts, T_tracked, H₂O_tracked, Crb_tracked)
+    return StagData(name, shape, rkm, rcmb, nz, tend, ndts, totH₂O,
+                        T_tracked, H₂O_tracked, Crb_tracked)
 end
 
 # Backend for reading StagYY "time.dat"s
@@ -212,7 +214,8 @@ function read_StagYY_platesfile(filename::String)
 end
 
 # High-level output reader
-function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=true, plates::Bool=false)
+function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=true, plates::Bool=true)
+    @assert time || rprof || plates "No data block requested."
     # Filenames
     Tfname = sroot * "_time.dat"
     Rfname = sroot * "_rprof.dat"
@@ -225,20 +228,26 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
     if rprof; @assert isfile(Rfname) "$Rfname not found"; rprof_data, rprof_header, rprof_time = read_StagYY_rproffile(Rfname, Stag); end
     # Encoding
     idxT, idxR, idxP = data_encoding(time ? time_header : nothing, rprof ? rprof_header : nothing, plates ? plates_header : nothing)
+    # Unit conversions
     if time
         time_data[:,idxT["time"]] .= sec2Gyr*time_data[:,idxT["time"]]; # Convert time to Gyr
         time_data[:,idxT["Vrms"]] .= m_s2cm_yr*time_data[:,idxT["Vrms"]]; # Convert time to Gyr
     end
     if rprof
-        rprof_data[:,:,idxR["vrms"]] .= m_s2cm_yr*rprof_data[:,:,idxR["vrms"]]; # Convert time to Gyr
+        rprof_data[:,:,idxR["vrms"]] .= m_s2cm_yr*rprof_data[:,:,idxR["vrms"]]
+        rprof_header[idxR["vrms"]] = "Vrms"
     end
     if plates
-        plates_data[:,idxP["mobility"]] .= m_s2cm_yr*plates_data[:,idxP["mobility"]]; # Convert mobility to cm/yr
+        plates_header[idxP["Vsurf_rms"]] = "Vsurf"
+        plates_data[:,idxP["time"]] .= sec2Gyr*plates_data[:,idxP["time"]]
+        plates_data[:,idxP["Vrms"]] .= m_s2cm_yr*plates_data[:,idxP["Vrms"]]
+        plates_data[:,idxP["Vsurf_rms"]] .= m_s2cm_yr*plates_data[:,idxP["Vsurf_rms"]]
     end
-    return Stag, DataBlock(Sname, 
+    return DataBlock(Sname, 
                     time ? time_header : nothing, rprof ? rprof_header : nothing, plates ? plates_header : nothing,
                     time ? time_data : nothing, rprof ? rprof_data : nothing, plates ? plates_data : nothing, 
-                    plates ? sec2Gyr*plates_data[:,2] : rprof ? sec2Gyr*rprof_time : nothing)
+                    plates ? plates_data[:,2] : rprof ? sec2Gyr*rprof_time : nothing,
+                    Stag)
 end
 
 # ==================

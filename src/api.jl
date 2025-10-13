@@ -9,8 +9,8 @@ LTN = Dict(
     "eta_mean"  => L"Mean\;viscosity\;[Pa\cdot s]",
     "erupta" => L"Erupted\;material\;[kg]",
     "erupt_rate" => L"Eruption\;rate\;[kg/s]",
-    "T_cmb" => L"CMB\;temperature\;[K]",
-    "T_surf" => L"Surface\;temperature\;[K]",
+    "Tcmb" => L"CMB\;temperature\;[K]",
+    "Tsurf" => L"Surface\;temperature\;[K]",
     "Tpotl" => L"Potential\;temperature\;[K]",
     "cH2O_mean" => L"Mean\;mantle\;H_2O\;content\;[wt%]",
     "IngassedH2O" => L"Total\;ingassed\;H_2O\;[kg]",
@@ -18,12 +18,14 @@ LTN = Dict(
     "EruptedH2O" => L"Erupted\;H_2O\;[kg]",
     "SurfOceanMass3D" => L"Surface\;ocean\;mass\;[kg]",
     "TotH2OMassOceanPlusMantle" => L"Total\;system\;H_2O\;[kg]",
+    "Mob" => L"Lithosphere\;mobility\;[v_{surf}/v_{rms}]",
+    "Vsurf" => L"Surface\;velocity\;[cm/yr]",
 )
 
 # rprof.dat field --> String
 LRN = Dict(
     "Tmean" => L"Mean\;mantle\;temperature\;[K]", "logTmean" => L"Mean\;mantle\;temperature\;[log_{10}K]",
-    "vrms"  => L"RMS\;velocity\;[cm/yr]", "logvrms" => L"RMS\;velocity\;[log_{10}(cm/yr)]",
+    "Vrms"  => L"RMS\;velocity\;[cm/yr]", "logvrms" => L"RMS\;velocity\;[log_{10}(cm/yr)]",
     "eta_amean" => L"Mean\;viscosity\;[Pa\cdot s]", "logeta_amean" => L"Mean\;viscosity\;[log_{10}(Pa\cdot s)]",
     "eta_mean"  => L"Mean\;viscosity\;[Pa\cdot s]", "logeta_mean"  => L"Mean\;viscosity\;[log_{10}(Pa\cdot s)]",
     "Water" => L"H_2O\;content\;[wt%]", "logWater" => L"H_2O\;content\;[log_{10}wt%]",
@@ -68,27 +70,36 @@ LRN = Dict(
 """
 function time_vs_field(Dblock::DataBlock, field::String; fsize=(800, 600), subsample=0, color=:blue, xlabelsize=25, ylabelsize=25, xgrid=true, ygrid=true,
                             xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15, yreversed=false,
-                            scatter=false,
+                            scatter=true,
                                 markersize=10, 
                                 marker=:circle,
                             line=true,
                                 linewidth=2.5, 
                                 linestyle=:solid,
                             )
+    
+    # Field in plates.dat flag
+    in_plates = (field=="Mob") || (field=="Vsurf")
+    
     # Get encoding
-    idxT, idxR = data_encoding(Dblock.timeheader, Dblock.rprofheader)
-    @assert haskey(idxT, field) "Field $field not found in time header"
+    idxT, idxR, idxP = data_encoding(Dblock.timeheader, Dblock.rprofheader, Dblock.platesheader)
+    in_plates ? (@assert haskey(idxP, field) "Field $field not found in plates header") : (@assert haskey(idxT, field) "Field $field not found in time header")
 
     # Automatic subsample
-    (subsample==0) && (subsample = max(1, Int(size(Dblock.timedata, 1) ÷ 500)))
+    (subsample==0 && !in_plates) && (subsample = max(1, Int(size(Dblock.timedata, 1) ÷ 500)))
+    (subsample==0) && (subsample = max(1, Int(size(Dblock.platesdata, 1) ÷ 500)))
+
+    # Vectors
+    xvec = in_plates ? Dblock.platesdata[1:subsample:end, idxP["time"]] : Dblock.timedata[1:subsample:end,idxT["time"]]
+    yvec = in_plates ? Dblock.platesdata[1:subsample:end, idxP[field]] : Dblock.timedata[1:subsample:end, idxT[field]]
 
     # Plot
     fig = Figure(size = fsize)
     ax = Axis(fig[1, 1], xlabel = L"Time\;[Gyr]", ylabel = LTN[field], xlabelsize=xlabelsize, ylabelsize=ylabelsize, xgridvisible=xgrid, ygridvisible=ygrid,
                xticklabelsize=xticklabelsize, yticklabelsize=yticklabelsize, xticksize=xticksize, yticksize=yticksize, xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding)
-    scatter && scatter!(ax, Dblock.timedata[1:subsample:end,2], Dblock.timedata[1:subsample:end, idxT[field]], color = color, markersize=markersize, marker=marker)
-    line && lines!(ax, Dblock.timedata[1:subsample:end,2], Dblock.timedata[1:subsample:end, idxT[field]], color = color, linewidth=linewidth, linestyle=linestyle)
-    second_axis!(fig, Dblock.timedata[1:subsample:end,2], Dblock.timedata[1:subsample:end, idxT[field]], field, ylabelsize, yticklabelsize, ylabelpadding, yreversed)
+    scatter && scatter!(ax, xvec, yvec, color = color, markersize=markersize, marker=marker)
+    line && lines!(ax, xvec, yvec, color = color, linewidth=linewidth, linestyle=linestyle)
+    second_axis!(fig, xvec, yvec, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, true)
     display(fig)
 end
 
@@ -99,24 +110,27 @@ end
 
     Optional arguments (kwargs):
         - fsize::Tuple{Int64,Int64} \t-->\t Figure size in pixels [default: (800, 600)]
+        - Paxis::Bool \t\t\t-->\t Adds a pressure axis on the right [default: false]
         - cmap::Symbol \t\t\t-->\t Colormap [default: :vik100]
+        - cmap_reverse::Bool \t\t-->\t Reverses colormap [default: false]
         - log::Bool \t\t\t-->\t Plots log₁₀ of the field [default: false]
 
 """
-function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(800, 600), cmap=:vik100, log=false)
+function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap=:vik100, log=false, cmap_reverse=false, Paxis=false)
 
     # Get encoding
-    idxT, idxR = data_encoding(Dblock.timeheader, Dblock.rprofheader)
+    idxT, idxR, idxP = data_encoding(Dblock.timeheader, Dblock.rprofheader, Dblock.platesheader)
     @assert haskey(idxR, field) "Field $field not found in rprof header"
 
     # Plot
     fig = Figure(size = fsize)
-    ax = Axis(fig[2,1], xlabel = L"Time\;[Gyr]", ylabel = L"Radius\;[km]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
+    ax = Axis(fig[Paxis ? 2 : 1, 1], xlabel = L"Time\;[Gyr]", ylabel = L"Radius\;[km]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
     yp = log ? log10.(Dblock.rprofdata[:,:,idxR[field]]) : Dblock.rprofdata[:,:,idxR[field]]
     log && (field="log"*field)
+    cmap_reverse && (cmap = Reverse(cmap))
     hm = heatmap!(ax, Dblock.rproftime, 1e-3Dblock.rprofdata[:,idxR["r"],1], yp', colormap=cmap)
-    Colorbar(fig[1,1], hm; label = LRN[field], labelsize=25, ticklabelsize=15, vertical=false, labelpadding=13)
-    # second_axis!(fig, Dblock.rproftime, 1e-3abs.(Dblock.rprofdata[:,idxR["r"],1] .- Dblock.rprofdata[end,idxR["r"],1]), "Pressure", 25, 17, 15, true)
+    Colorbar(fig[1, Paxis ? 1 : 2], hm; label = LRN[field], labelsize=25, ticklabelsize=15, vertical= Paxis ? false : true, labelpadding=13)
+    Paxis && second_axis!(fig, Dblock.rproftime, 1e-3abs.(Dblock.rprofdata[:,idxR["r"],1] .- Dblock.rprofdata[end,idxR["r"],1]), "Pressure", 25, 17, 15, true, false)
     display(fig)
 
 end
@@ -125,7 +139,7 @@ end
 # ==== Auxilliaries ====
 # ======================
 
-function second_axis!(fig, x, y, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed)
+function second_axis!(fig, x, y, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, timeplot)
 
     function transform_data(y, field)
         yp = [first(y), last(y)]
@@ -134,9 +148,10 @@ function second_axis!(fig, x, y, field, ylabelsize, yticklabelsize, ylabelpaddin
         return nothing, nothing
     end
     yp, ylab = transform_data(y, field); (isnothing(yp)) && return
-    ax2 = Axis(fig[2,1], yticklabelcolor = :black, yaxisposition = :right, ylabel = ylab, ylabelsize=ylabelsize, yticklabelsize=yticklabelsize, ylabelpadding=ylabelpadding,
+    ax2 = Axis(fig[timeplot ? 1 : 2, 1], yticklabelcolor = :black, yaxisposition = :right, ylabel = ylab, ylabelsize=ylabelsize, yticklabelsize=yticklabelsize, ylabelpadding=ylabelpadding,
                 xgridvisible=false, ygridvisible=false, yreversed=yreversed)
     scatter!(ax2, first(x)*ones(2), yp, alpha=0.0)
+    yreversed && ylims!(ax2, maximum(yp), minimum(yp))
     hidespines!(ax2); hidexdecorations!(ax2)
 end
 

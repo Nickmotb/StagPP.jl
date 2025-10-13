@@ -1,7 +1,8 @@
 using Revise, StagPP, BenchmarkTools
 
-Stag, Dblock = load_sim(joinpath(@__DIR__, "test_data", "EW"), "y20e20");
+Dblock = load_sim(joinpath(@__DIR__, "test_data", "EW"), "y20e20";)
 
-rprof_vs_field(Dblock, "bsmean"; fsize=(1200, 700), cmap=:vik, log=false)
+# time_vs_field(Dblock, "Mob"; fsize=(1200, 700))
+# rprof_vs_field(Dblock, "Water"; Paxis=true, log=true, cmap=:vik100, cmap_reverse=true)
 
-# Read also plates. time vector is the same as rprof and contains mobility.
+# Try to modify reading routines such that parsers acts direclty on memory map, avoiding split-string
