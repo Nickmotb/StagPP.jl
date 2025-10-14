@@ -63,6 +63,7 @@ function read_StagYY_timefile(filename::String, rm_Cmass_error::Bool=true)
     # --- Extract Header content
         header = split(String(@view map[1:(map[lf-1]==0x0D ? lf-2 : lf-1)]))
         Cmass_idx = findfirst(header.=="Cmass_error")
+        isnothing(Cmass_idx) && (rm_Cmass_error = false) # Disable if not present
     # --- Compute number of rows and Character range for columns
         nrows = (length(map) - lf) ÷ line_bytes
 
@@ -94,7 +95,7 @@ function read_StagYY_timefile(filename::String, rm_Cmass_error::Bool=true)
                 # Column parsing
                 j = 1
                 @inbounds for rcol in colranges
-                    if rm_Cmass_error && !isnothing(Cmass_idx) && j==Cmass_idx
+                    if rm_Cmass_error && j==Cmass_idx
                         dest[i-sr+1, j] = 0.0
                     else
                         fld = @view rowstr[rcol]

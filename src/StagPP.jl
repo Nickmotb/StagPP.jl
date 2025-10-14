@@ -2,6 +2,7 @@ module StagPP
 
     # Dependencies
     using CairoMakie, DelimitedFiles, Printf, BenchmarkTools, Mmap, Parsers, Interpolations
+    using Statistics, EasyFit
 
     # Constants
     const sec2Gyr = 3.1536e-17 # Gyr s⁻¹

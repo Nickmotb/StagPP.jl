@@ -46,9 +46,10 @@ LRN = Dict(
     \t Basic usage: \t time_vs_field(Dblock::DataBlock, field::String; kwargs...)
 
     Optional arguments (kwargs):
+
+      • -- Canvas arguments --
+
         - fsize::Tuple{Int64,Int64} \t-->\t Figure size in pixels [default: (800, 600)]
-        - subsample::Int64 \t\t-->\t Subsample factor for plotting [default: 0 (automatic)]
-        - color::Symbol \t\t\t-->\t Line/scatter color [default: :blue]
         - xlabelsize::Int64 \t\t-->\t X-axis label font size [default: 25]
         - ylabelsize::Int64 \t\t-->\t Y-axis label font size [default: 25]
         - xgrid::Bool \t\t\t-->\t Show x-grid [default: true]
@@ -60,16 +61,27 @@ LRN = Dict(
         - xlabelpadding::Int64 \t\t-->\t X-axis label padding [default: 15]
         - ylabelpadding::Int64 \t\t-->\t Y-axis label padding [default: 15]
         - yreversed::Bool \t\t-->\t Reverse y-axis [default: false]
+        - savein::String \t\t-->\t Save figure in file [default: "" (no saving)]
+
+      • -- Data arguments --
+
+        - subsample::Int64 \t\t-->\t Subsample factor for plotting [default: 0 (automatic)]
+        - tstart::Union{Float64, Nothing} \t-->\t Start time [default: nothing (first time)]
+        - tend::Union{Float64, Nothing} \t-->\t End time [default: nothing (last time)]
+        - color::Symbol \t\t\t-->\t Line/scatter color [default: :blue]
         - scatter::Bool \t\t\t-->\t Enables scatters [default: false]
             - markersize::Int64 \t\t-->\t Marker size [default: 10]
             - marker::Symbol \t\t-->\t Marker type [default: :circle]
         - line::Bool \t\t\t-->\t Enables lines [default: true]
             - linewidth::Float64 \t\t-->\t Line width [default: 2.5]
             - linestyle::Symbol \t\t-->\t Line style [default: :solid]
+        - mov_avg::Bool \t\t\t-->\t Enables moving average [default: false]
+            - mov_avg_window::Int64 \t-->\t Moving average window [default: 0 (automatic)]
 
 """
 function time_vs_field(Dblock::DataBlock, field::String; fsize=(800, 600), subsample=0, color=:blue, xlabelsize=25, ylabelsize=25, xgrid=true, ygrid=true,
-                            xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15, yreversed=false,
+                            xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15, yreversed=false, 
+                            mov_avg=false, mov_avg_window=0, savein="", tstart=nothing, tend=nothing,
                             scatter=true,
                                 markersize=10, 
                                 marker=:circle,
@@ -92,15 +104,27 @@ function time_vs_field(Dblock::DataBlock, field::String; fsize=(800, 600), subsa
     # Vectors
     xvec = in_plates ? Dblock.platesdata[1:subsample:end, idxP["time"]] : Dblock.timedata[1:subsample:end,idxT["time"]]
     yvec = in_plates ? Dblock.platesdata[1:subsample:end, idxP[field]] : Dblock.timedata[1:subsample:end, idxT[field]]
+    isnothing(tstart) && (tstart  = first(xvec))
+    isnothing(tend) && (tend    = last(xvec))
+
+    # Define mov_avg window automatically if not given
+    (mov_avg && mov_avg_window == 0) && (mov_avg_window = max(3, Int(size(yvec, 1) ÷ 50)))
 
     # Plot
     fig = Figure(size = fsize)
-    ax = Axis(fig[1, 1], xlabel = L"Time\;[Gyr]", ylabel = LTN[field], xlabelsize=xlabelsize, ylabelsize=ylabelsize, xgridvisible=xgrid, ygridvisible=ygrid,
+    ax = Axis(fig[1, 1], xlabel = L"Time\;[Gyr]", ylabel = LTN[field], xlabelsize=xlabelsize, ylabelsize=ylabelsize, xgridvisible=xgrid, ygridvisible=ygrid, yreversed=yreversed,
                xticklabelsize=xticklabelsize, yticklabelsize=yticklabelsize, xticksize=xticksize, yticksize=yticksize, xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding)
-    scatter && scatter!(ax, xvec, yvec, color = color, markersize=markersize, marker=marker)
-    line && lines!(ax, xvec, yvec, color = color, linewidth=linewidth, linestyle=linestyle)
-    second_axis!(fig, xvec, yvec, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, true)
+    scatter && scatter!(ax, xvec, yvec, color=color, markersize=markersize, marker=marker, alpha = mov_avg ? 0.3 : 1.0)
+    line && lines!(ax, xvec, yvec, color=color, linewidth=linewidth, linestyle=linestyle, alpha = mov_avg ? 0.3 : 1.0)
+    mov_avg && lines!(ax, xvec, EasyFit.movavg(yvec, mov_avg_window).x, color=color, linewidth=linewidth, linestyle=:solid)
+    tstartidx = findfirst(xvec .>= tstart); (isnothing(tstartidx)) && error("tstart=$tstart beyond data range")
+    tendidx   = findlast(xvec .<= tend); (isnothing(tendidx)) && error("tend=$tend beyond data range")
+    localmin, localmax = 0.9minimum(yvec[tstartidx:tendidx]), 1.1maximum(yvec[tstartidx:tendidx])
+    second_axis!(fig, xvec, yvec, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, true, (tstart, tend), (localmin, localmax))
+    xlims!(ax, tstart, tend)
+    (tstart!=0. || tend!=4.5) && (yreversed ? ylims!(ax, localmax, localmin) : ylims!(ax, localmin, localmax))
     display(fig)
+    (savein != "") && save(savein*".png", fig)
 end
 
 """
@@ -114,23 +138,30 @@ end
         - cmap::Symbol \t\t\t-->\t Colormap [default: :vik100]
         - cmap_reverse::Bool \t\t-->\t Reverses colormap [default: false]
         - log::Bool \t\t\t-->\t Plots log₁₀ of the field [default: false]
+        - tstart::Union{Float64, Nothing} \t-->\t Start time [default: nothing (first time)]
+        - tend::Union{Float64, Nothing} \t-->\t End time [default: nothing (last time)]
 
 """
-function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap=:vik100, log=false, cmap_reverse=false, Paxis=false)
+function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap=:vik100, log=false, cmap_reverse=false, Paxis=true, tstart=nothing, tend=nothing)
 
     # Get encoding
     idxT, idxR, idxP = data_encoding(Dblock.timeheader, Dblock.rprofheader, Dblock.platesheader)
     @assert haskey(idxR, field) "Field $field not found in rprof header"
 
+    # Vectors
+    yp = log ? log10.(Dblock.rprofdata[:,:,idxR[field]]) : Dblock.rprofdata[:,:,idxR[field]]
+    isnothing(tstart) && (tstart = first(Dblock.rproftime))
+    isnothing(tend) && (tend = last(Dblock.rproftime))
+
     # Plot
     fig = Figure(size = fsize)
     ax = Axis(fig[Paxis ? 2 : 1, 1], xlabel = L"Time\;[Gyr]", ylabel = L"Radius\;[km]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
-    yp = log ? log10.(Dblock.rprofdata[:,:,idxR[field]]) : Dblock.rprofdata[:,:,idxR[field]]
     log && (field="log"*field)
     cmap_reverse && (cmap = Reverse(cmap))
     hm = heatmap!(ax, Dblock.rproftime, 1e-3Dblock.rprofdata[:,idxR["r"],1], yp', colormap=cmap)
     Colorbar(fig[1, Paxis ? 1 : 2], hm; label = LRN[field], labelsize=25, ticklabelsize=15, vertical= Paxis ? false : true, labelpadding=13)
-    Paxis && second_axis!(fig, Dblock.rproftime, 1e-3abs.(Dblock.rprofdata[:,idxR["r"],1] .- Dblock.rprofdata[end,idxR["r"],1]), "Pressure", 25, 17, 15, true, false)
+    Paxis && second_axis!(fig, Dblock.rproftime, 1e-3abs.(Dblock.rprofdata[:,idxR["r"],1] .- Dblock.rprofdata[end,idxR["r"],1]), "Pressure", 25, 17, 15, true, false, (tstart, tend), (nothing, nothing))
+    xlims!(ax, tstart, tend)
     display(fig)
 
 end
@@ -139,7 +170,7 @@ end
 # ==== Auxilliaries ====
 # ======================
 
-function second_axis!(fig, x, y, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, timeplot)
+function second_axis!(fig, x, y, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, timeplot, trange, locals)
 
     function transform_data(y, field)
         yp = [first(y), last(y)]
@@ -152,6 +183,8 @@ function second_axis!(fig, x, y, field, ylabelsize, yticklabelsize, ylabelpaddin
                 xgridvisible=false, ygridvisible=false, yreversed=yreversed)
     scatter!(ax2, first(x)*ones(2), yp, alpha=0.0)
     yreversed && ylims!(ax2, maximum(yp), minimum(yp))
+    (trange[1]!=0. || trange[2]!=4.5) && timeplot && (yreverse ? ylims!(ax2, reverse(locals)) : (ylims!(ax2, locals)))
+    xlims!(ax2, trange)
     hidespines!(ax2); hidexdecorations!(ax2)
 end
 
