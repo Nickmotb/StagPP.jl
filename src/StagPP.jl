@@ -23,6 +23,7 @@ module StagPP
     # Constant export
     export sec2Gyr, om, m_s2cm_yr
     # Function export
-    export load_sim, time_vs_field, rprof_vs_field
-
+    export load_sim, data_encoding
+    # Plot exports
+    export time_vs_field, rprof_vs_field, field_vs_field, mantle_water
 end

@@ -33,6 +33,7 @@ struct DataBlock
     platesdata  :: Union{Array{Float64,2}, Nothing} # Plates block (nfields x 2D arrays) (can be nothing)
     # Extra
     rproftime   :: Union{Array{Float64,1}, Nothing}     # Time vector for rprof/plates data (Sampled)
+    rprofdV     :: Union{Array{Float64,1}, Nothing}     # Radial volume differentials for rprof data
     # Metadata
     metadata    :: StagData     # Metadata structure
 end

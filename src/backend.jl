@@ -233,10 +233,19 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
     if time
         time_data[:,idxT["time"]] .= sec2Gyr*time_data[:,idxT["time"]]; # Convert time to Gyr
         time_data[:,idxT["Vrms"]] .= m_s2cm_yr*time_data[:,idxT["Vrms"]]; # Convert time to Gyr
+        # Outgassing
+        if Stag.H₂O_tracked
+            time_header = vcat(time_header, "OutgassedH2O")
+            time_data = hcat(time_data, (time_data[:,idxT["OutputtedNotEruptedH2O"]].+time_data[:,idxT["EruptedH2O"]].+time_data[:,idxT["SaturationOutgassH2O"]]))
+        end
     end
     if rprof
         rprof_data[:,:,idxR["vrms"]] .= m_s2cm_yr*rprof_data[:,:,idxR["vrms"]]
         rprof_header[idxR["vrms"]] = "Vrms"
+        if haskey(idxR, "rhomean")
+            rprof_header = vcat(rprof_header, "dM")
+            rprof_data = cat(rprof_data, ∂M(rprof_data[:, :, idxR["r"]], Stag.rcmb, rprof_data[:, :, idxR["rhomean"]]), dims=3)
+        end
     end
     if plates
         plates_header[idxP["Vsurf_rms"]] = "Vsurf"
@@ -244,10 +253,17 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
         plates_data[:,idxP["Vrms"]] .= m_s2cm_yr*plates_data[:,idxP["Vrms"]]
         plates_data[:,idxP["Vsurf_rms"]] .= m_s2cm_yr*plates_data[:,idxP["Vsurf_rms"]]
     end
+
+    if time && rprof && haskey(idxR, "rhomean")
+        # Compensates a current bug for ocean mass not being reduced after interior hydration (remove after fix)
+        Δ = ((time_data[1,idxT["SurfOceanMass3D"]] + sum(rprof_data[:, 1, idxR["Water"]].*rprof_data[:, 1, end].*1e-2)) - Stag.totH₂O)
+        time_data[:,idxT["SurfOceanMass3D"]] .-= Δ
+    end
     return DataBlock(Sname, 
                     time ? time_header : nothing, rprof ? rprof_header : nothing, plates ? plates_header : nothing,
                     time ? time_data : nothing, rprof ? rprof_data : nothing, plates ? plates_data : nothing, 
                     plates ? plates_data[:,2] : rprof ? sec2Gyr*rprof_time : nothing,
+                    haskey(idxR, "r") ? ∂V(rprof_data[:, 1, idxR["r"]], Stag.rcmb) : nothing,
                     Stag)
 end
 
@@ -276,6 +292,12 @@ function data_encoding(time_header, rprof_header, plates_header)
     end
     return time_encoding, rprof_encoding, plates_encoding
 end
+"""
+  Assess DataBlock header indexing for time, rprof and plates data.
+    
+    idxT, idxR, idxP = data_encoding(D::DataBlock)
+"""
+data_encoding(D::DataBlock) = data_encoding(D.timeheader, D.rprofheader, D.platesheader)
 
 # ======================
 # ==== Auxilliaries ====
@@ -297,3 +319,35 @@ end
             Δ = separator_bytes + (row-1)*line_bytes
             return (block_start_byte + Δ) : (block_start_byte + Δ + line_bytes - 2)
         end
+
+    # Shell volume/mass differentials
+       ∂V(r, rcmb) = 4π/3 * diff(vcat(1e3rcmb, r.+1e3rcmb).^3)
+       ∂M(r, rcmb, ρ) = 4π/3 * diff(cat(1e3rcmb, r.+1e3rcmb, dims=1).^3, dims=1) .* ρ
+
+    # Get phase transitions radial coordinates
+    function idx_ph_transitions(Dblock::DataBlock; timeidx::Int=1)
+        idxR = data_encoding(Dblock)[2]
+        r = Dblock.rprofdata[:, timeidx, idxR["r"]]
+        midpoint_r = 0.5(r[1:end-1] .+ r[2:end])
+        ρ = Dblock.rprofdata[:, timeidx, idxR["rhomean"]]
+        ∂ρ_∂r = diff(ρ)./diff(r)
+        ∂²ρ_∂r² = diff(∂ρ_∂r)./diff(midpoint_r)
+        # Find radial phase boundaries
+        baseline = maximum(∂²ρ_∂r²[1:findfirst(r.>=250000.0)]) # Corresponds to the decaying ppv -> pv transition from bottom to top
+        shifted_∂²ρ_∂r² = ∂²ρ_∂r² .- baseline
+        ph_bounds, prev, current_ph = zeros(Int, 3), -1.0, 1
+        for i in eachindex(shifted_∂²ρ_∂r²)
+            # Entering peak
+            ((shifted_∂²ρ_∂r²[i] <= 0.0) && (prev < 0.0)) && continue
+            # Forward step if next value is higher
+            if (shifted_∂²ρ_∂r²[i] > prev); (prev = shifted_∂²ρ_∂r²[i]); continue; end
+            # Descend until closes to zero
+            prev = ∂²ρ_∂r²[i]
+            if (abs(∂²ρ_∂r²[i]) < prev); (prev = abs(∂²ρ_∂r²[i])); continue; end
+            # Record boundary index
+            ph_bounds[current_ph] = i-1
+            current_ph += 1
+            prev = -1.0
+        end
+        return ph_bounds
+    end

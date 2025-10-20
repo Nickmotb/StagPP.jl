@@ -1,39 +1,40 @@
 # time.dat field --> String
 LTN = Dict(
-    "time"  => L"Evolution\;time\;[Gyr]",
-    "F_top" => L"Surface\;heat\;flux\;[mW/m^2]",
-    "F_bot" => L"CMB\;heat\;flux\;[mW/m^2]",
-    "Tmean" => L"Mean\;mantle\;temperature\;[K]",
-    "Vrms"  => L"RMS\;velocity\;[cm/yr]",
-    "eta_amean" => L"Mean\;viscosity\;[Pa\cdot s]",
-    "eta_mean"  => L"Mean\;viscosity\;[Pa\cdot s]",
-    "erupta" => L"Erupted\;material\;[kg]",
-    "erupt_rate" => L"Eruption\;rate\;[kg/s]",
-    "Tcmb" => L"CMB\;temperature\;[K]",
-    "Tsurf" => L"Surface\;temperature\;[K]",
-    "Tpotl" => L"Potential\;temperature\;[K]",
-    "cH2O_mean" => L"Mean\;mantle\;H_2O\;content\;[wt%]",
-    "IngassedH2O" => L"Total\;ingassed\;H_2O\;[kg]",
-    "SaturationOutgassH2O" => L"Saturation\;outgassed\;H_2O\;[kg]",
-    "EruptedH2O" => L"Erupted\;H_2O\;[kg]",
-    "SurfOceanMass3D" => L"Surface\;ocean\;mass\;[kg]",
-    "TotH2OMassOceanPlusMantle" => L"Total\;system\;H_2O\;[kg]",
-    "Mob" => L"Lithosphere\;mobility\;[v_{surf}/v_{rms}]",
-    "Vsurf" => L"Surface\;velocity\;[cm/yr]",
+    "time"  => L"Evolution\;time\;[\mathrm{Gyr}]",
+    "F_top" => L"Surface\;heat\;flux\;[\mathrm{mW/m^2}]",
+    "F_bot" => L"CMB\;heat\;flux\;[\mathrm{mW/m^2}]",
+    "Tmean" => L"Mean\;mantle\;temperature\;[\mathrm{K}]",
+    "Vrms"  => L"RMS\;velocity\;[\mathrm{cm/yr}]",
+    "eta_amean" => L"Mean\;viscosity\;[\mathrm{Pa\cdot s}]",
+    "eta_mean"  => L"Mean\;viscosity\;[\mathrm{Pa\cdot s}]",
+    "erupta" => L"Erupted\;material\;[\mathrm{kg}]",
+    "erupt_rate" => L"Eruption\;rate\;[\mathrm{kg/s}]",
+    "Tcmb" => L"CMB\;temperature\;[\mathrm{K}]",
+    "Tsurf" => L"Surface\;temperature\;[\mathrm{K}]",
+    "Tpotl" => L"Potential\;temperature\;[\mathrm{K}]",
+    "cH2O_mean" => L"Mean\;mantle\;H_2O\;content\;[\mathrm{wt%}]",
+    "IngassedH2O" => L"Total\;ingassed\;H_2O\;[\mathrm{kg}]",
+    "OutgassedH2O" => L"Total\;outgassed\;H_2O\;[\mathrm{kg}]",
+    "SaturationOutgassH2O" => L"Saturation\;outgassed\;H_2O\;[\mathrm{kg}]",
+    "EruptedH2O" => L"Erupted\;H_2O\;[\mathrm{kg}]",
+    "SurfOceanMass3D" => L"Surface\;ocean\;mass\;[\mathrm{kg}]",
+    "TotH2OMassOceanPlusMantle" => L"Total\;system\;H_2O\;[\mathrm{kg}]",
+    "Mob" => L"Lithosphere\;mobility\;[\mathrm{v_{surf}/v_{rms}}]",
+    "Vsurf" => L"Surface\;velocity\;[\mathrm{cm/yr}]",
 )
 
 # rprof.dat field --> String
 LRN = Dict(
-    "Tmean" => L"Mean\;mantle\;temperature\;[K]", "logTmean" => L"Mean\;mantle\;temperature\;[log_{10}K]",
-    "Vrms"  => L"RMS\;velocity\;[cm/yr]", "logvrms" => L"RMS\;velocity\;[log_{10}(cm/yr)]",
-    "eta_amean" => L"Mean\;viscosity\;[Pa\cdot s]", "logeta_amean" => L"Mean\;viscosity\;[log_{10}(Pa\cdot s)]",
-    "eta_mean"  => L"Mean\;viscosity\;[Pa\cdot s]", "logeta_mean"  => L"Mean\;viscosity\;[log_{10}(Pa\cdot s)]",
-    "Water" => L"H_2O\;content\;[wt%]", "logWater" => L"H_2O\;content\;[log_{10}wt%]",
-    "Wsol" => L"H_2O\;storage\;capacity\;[wt%]", "logWsol" => L"H_2O\;storage\;capacity\;[log_{10}wt%]",
+    "Tmean" => L"Mean\;mantle\;temperature\;[\mathrm{K}]", "logTmean" => L"Mean\;mantle\;temperature\;[log_{10}K]",
+    "Vrms"  => L"RMS\;velocity\;[\mathrm{cm/yr}]", "logvrms" => L"RMS\;velocity\;[log_{10}(\mathrm{cm/yr})]",
+    "eta_amean" => L"Mean\;viscosity\;[\mathrm{Pa\cdot s}]", "logeta_amean" => L"Mean\;viscosity\;[log_{10}(\mathrm{Pa\cdot s})]",
+    "eta_mean"  => L"Mean\;viscosity\;[\mathrm{Pa\cdot s}]", "logeta_mean"  => L"Mean\;viscosity\;[log_{10}(\mathrm{Pa\cdot s})]",
+    "Water" => L"H_2O\;content\;[\mathrm{wt%}]", "logWater" => L"H_2O\;content\;[log_{10}(\mathrm{wt%})]",
+    "Wsol" => L"H_2O\;storage\;capacity\;[\mathrm{wt%}]", "logWsol" => L"H_2O\;storage\;capacity\;[log_{10}(\mathrm{wt%})]",
     "fO2" => L"fO_2\;[log_{10}FMQ]", "logfO2" => L"fO_2\;[log_{10}FMQ]",
-    "H2Ofree" => L"Free\;H_2O\;[wt%]", "logH2Ofree" => L"Free\;H_2O\;[log_{10}wt%]",
-    "rhomean" => L"Mean\;density\;[kg/m^3]", "logrhomean" => L"Mean\;density\;[log_{10}(kg/m^3)]",
-    "bsmean" => L"Mean\;basalt\;fraction", "logbsmean" => L"Mean\;basalt\;fraction\;[log_{10}]",
+    "H2Ofree" => L"Free\;H_2O\;[\mathrm{wt%}]", "logH2Ofree" => L"Free\;H_2O\;[log_{10}(\mathrm{wt%})]",
+    "rhomean" => L"Mean\;density\;[\mathrm{kg/m^3}]", "logrhomean" => L"Mean\;density\;[log_{10}(\mathrm{kg/m^3})]",
+    "bsmean" => L"Mean\;basalt\;fraction", "logbsmean" => L"Mean\;basalt\;fraction\;[\mathrm{log_{10}}]",
 )
 
 # =============
@@ -66,7 +67,7 @@ LRN = Dict(
       • -- Data arguments --
 
         - subsample::Int64 \t\t-->\t Subsample factor for plotting [default: 0 (automatic)]
-        - tstart::Union{Float64, Nothing} \t-->\t Start time [default: nothing (first time)]
+        - tstart::Union{Float64, Nothing} -->\t Start time [default: nothing (first time)]
         - tend::Union{Float64, Nothing} \t-->\t End time [default: nothing (last time)]
         - color::Symbol \t\t\t-->\t Line/scatter color [default: :blue]
         - scatter::Bool \t\t\t-->\t Enables scatters [default: false]
@@ -88,6 +89,7 @@ function time_vs_field(Dblock::DataBlock, field::String; fsize=(800, 600), subsa
                             line=true,
                                 linewidth=2.5, 
                                 linestyle=:solid,
+                            fig = nothing, fpos = (1,1), disp=true
                             )
     
     # Field in plates.dat flag
@@ -111,19 +113,112 @@ function time_vs_field(Dblock::DataBlock, field::String; fsize=(800, 600), subsa
     (mov_avg && mov_avg_window == 0) && (mov_avg_window = max(3, Int(size(yvec, 1) ÷ 50)))
 
     # Plot
-    fig = Figure(size = fsize)
-    ax = Axis(fig[1, 1], xlabel = L"Time\;[Gyr]", ylabel = LTN[field], xlabelsize=xlabelsize, ylabelsize=ylabelsize, xgridvisible=xgrid, ygridvisible=ygrid, yreversed=yreversed,
+    isnothing(fig) && (fig = Figure(size = fsize))
+    ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Time\;[Gyr]", ylabel = LTN[field], xlabelsize=xlabelsize, ylabelsize=ylabelsize, xgridvisible=xgrid, ygridvisible=ygrid, yreversed=yreversed,
                xticklabelsize=xticklabelsize, yticklabelsize=yticklabelsize, xticksize=xticksize, yticksize=yticksize, xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding)
     scatter && scatter!(ax, xvec, yvec, color=color, markersize=markersize, marker=marker, alpha = mov_avg ? 0.3 : 1.0)
     line && lines!(ax, xvec, yvec, color=color, linewidth=linewidth, linestyle=linestyle, alpha = mov_avg ? 0.3 : 1.0)
     mov_avg && lines!(ax, xvec, EasyFit.movavg(yvec, mov_avg_window).x, color=color, linewidth=linewidth, linestyle=:solid)
     tstartidx = findfirst(xvec .>= tstart); (isnothing(tstartidx)) && error("tstart=$tstart beyond data range")
     tendidx   = findlast(xvec .<= tend); (isnothing(tendidx)) && error("tend=$tend beyond data range")
-    localmin, localmax = 0.9minimum(yvec[tstartidx:tendidx]), 1.1maximum(yvec[tstartidx:tendidx])
-    second_axis!(fig, xvec, yvec, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, true, (tstart, tend), (localmin, localmax))
+    localmin, localmax = minimum(yvec[tstartidx:tendidx]), maximum(yvec[tstartidx:tendidx])
+    Δ = 0.2(localmax - localmin)
+    second_axis!(fig, fpos, xvec, yvec, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, true, (tstart, tend), (localmin-Δ, localmax+Δ))
     xlims!(ax, tstart, tend)
-    (tstart!=0. || tend!=4.5) && (yreversed ? ylims!(ax, localmax, localmin) : ylims!(ax, localmin, localmax))
-    display(fig)
+    (yreversed ? ylims!(ax, localmax+Δ, localmin-Δ) : ylims!(ax, localmin-Δ, localmax+Δ))
+    disp && display(fig)
+    (savein != "") && save(savein*".png", fig)
+end
+
+"""
+    Plot the correlation between two time-dependent fields.
+    
+    \t Basic usage: \t field_vs_field(Dblock::DataBlock, fieldx::String, fieldy::String; kwargs...)
+
+    Optional arguments (kwargs):
+
+      • -- Canvas arguments --
+
+        - fsize::Tuple{Int64,Int64} \t-->\t Figure size in pixels [default: (800, 600)]
+        - xlabelsize::Int64 \t\t-->\t X-axis label font size [default: 25]
+        - ylabelsize::Int64 \t\t-->\t Y-axis label font size [default: 25]
+        - xticklabelsize::Int64 \t\t-->\t X-axis tick label font size [default: 17]
+        - yticklabelsize::Int64 \t\t-->\t Y-axis tick label font size [default: 17]
+        - xticksize::Int64 \t\t-->\t X-axis tick size [default: 10]
+        - yticksize::Int64 \t\t-->\t Y-axis tick size [default: 10]
+        - xlabelpadding::Int64 \t\t-->\t X-axis label padding [default: 15]
+        - ylabelpadding::Int64 \t\t-->\t Y-axis label padding [default: 15]
+        - savein::String \t\t-->\t Save figure in file [default: "" (no saving)]
+
+      • -- Data arguments --
+
+        - subsample_size::Int64 \t\t-->\t Number of points to plot [default: 1000]
+        - tstart::Union{Float64, Nothing} \t-->\t Start time [default: nothing (first time)]
+        - tend::Union{Float64, Nothing} \t-->\t End time [default: nothing (last time)]
+        - color::Symbol \t\t\t-->\t Line/scatter color [default: :blue]
+        - scatter::Bool \t\t\t-->\t Enables scatters [default: true]
+            - markersize::Int64 \t\t-->\t Marker size [default: 10]
+            - marker::Symbol \t\t-->\t Marker type [default: :circle]
+        - line::Bool \t\t\t-->\t Enables lines [default: true]
+            - linewidth::Float64 \t\t--
+"""
+function field_vs_field(Dblock::DataBlock, fieldx::String, fieldy::String; fsize=(800, 600), xlabelsize=25, ylabelsize=25,
+                            xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
+                            mov_avg=false, mov_avg_window=0,subsample_size=1000, color=:blue, tstart=nothing, tend=nothing,
+                            scatter=true,
+                                markersize=10,
+                                marker=:circle,
+                            line=true,
+                                linewidth=2.5,
+                                linestyle=:solid,
+                            fig=nothing, fpos=(1,1), disp=true, savein=""
+                            )
+
+    # Field in plates.dat flag
+    in_plates1 = (fieldx=="Mob") || (fieldx=="Vsurf")
+    in_plates2 = (fieldy=="Mob") || (fieldy=="Vsurf")
+
+    # Get encoding
+    idxT, idxR, idxP = data_encoding(Dblock.timeheader, Dblock.rprofheader, Dblock.platesheader)
+    @assert (haskey(idxT, fieldx) || haskey(idxP, fieldx)) "Field $fieldx not found in time header"
+    @assert (haskey(idxT, fieldy) || haskey(idxP, fieldy)) "Field $fieldy not found in time header"
+
+    # Automatic subsample
+    xvec = in_plates1 ? Dblock.platesdata[:, idxP[fieldx]] : Dblock.timedata[:, idxT[fieldx]]
+    yvec = in_plates2 ? Dblock.platesdata[:, idxP[fieldy]] : Dblock.timedata[:, idxT[fieldy]]
+    tvec1 = in_plates1 ? Dblock.platesdata[:, idxP["time"]] : Dblock.timedata[:, idxT["time"]]
+    tvec2 = in_plates2 ? Dblock.platesdata[:, idxP["time"]] : Dblock.timedata[:, idxT["time"]]
+
+    # Time window
+    isnothing(tstart) && (tstart = first(tvec1))
+    isnothing(tend) && (tend = last(tvec1))
+    tstartidx = findfirst(tvec1 .>= tstart); (isnothing(tstartidx)) && error("tstart=$tstart beyond data range")
+    tendidx   = findlast(tvec1 .<= tend); (isnothing(tendidx)) && error("tend=$tend beyond data range")
+
+    # Vectors
+    itpx, itpy = interpolate((sort(tvec1),), xvec, Gridded(Linear())), interpolate((sort(tvec2),), yvec, Gridded(Linear()))
+    subsample = max(1, Int(size(tvec1[tstartidx:tendidx], 1) ÷ subsample_size))
+    tp = tvec1[tstartidx:subsample:tendidx]
+    xp, yp = itpx(tp), itpy(tp)
+
+    # Define mov_avg window automatically if not given
+    (mov_avg && mov_avg_window == 0) && (mov_avg_window = max(3, Int(size(yp, 1) ÷ 50)))
+
+    # Plot
+    isnothing(fig) && (fig = Figure(size = fsize))
+    ax = Axis(fig[fpos[1], fpos[2]], xlabel = LTN[fieldx], ylabel = LTN[fieldy], xlabelsize=xlabelsize, ylabelsize=ylabelsize,
+               xticklabelsize=xticklabelsize, yticklabelsize=yticklabelsize, xticksize=xticksize, yticksize=yticksize,
+               xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding)
+    scatter && scatter!(ax, xp, yp, color=color, markersize=markersize, marker=marker, alpha = mov_avg ? 0.3 : 1.0)
+    line && lines!(ax, xp, yp, color=color, linewidth=linewidth, linestyle=linestyle, alpha = mov_avg ? 0.3 : 1.0)
+    mov_avg && lines!(ax, xp, EasyFit.movavg(yp, mov_avg_window).x, color=color, linewidth=linewidth, linestyle=:solid)
+
+    # Set zoom
+    localminx, localmaxx, localminy, localmaxy = 0.95minimum(xp), 1.05maximum(xp), 0.95minimum(yp), 1.05maximum(yp)
+    xlims!(ax, localminx, localmaxx); ylims!(ax, localminy, localmaxy)
+
+    # Display and save
+    disp && display(fig)
     (savein != "") && save(savein*".png", fig)
 end
 
@@ -142,7 +237,10 @@ end
         - tend::Union{Float64, Nothing} \t-->\t End time [default: nothing (last time)]
 
 """
-function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap=:vik100, log=false, cmap_reverse=false, Paxis=true, tstart=nothing, tend=nothing)
+function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap=:vik100, log=false, cmap_reverse=false, Paxis=true, tstart=nothing, tend=nothing,
+                            fig=nothing, fpos=(1,1), disp=true, savein="")
+
+    (fpos!=(1,1)) && (Paxis = false)
 
     # Get encoding
     idxT, idxR, idxP = data_encoding(Dblock.timeheader, Dblock.rprofheader, Dblock.platesheader)
@@ -154,36 +252,112 @@ function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap
     isnothing(tend) && (tend = last(Dblock.rproftime))
 
     # Plot
-    fig = Figure(size = fsize)
-    ax = Axis(fig[Paxis ? 2 : 1, 1], xlabel = L"Time\;[Gyr]", ylabel = L"Radius\;[km]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
+    isnothing(fig) && (fig = Figure(size = fsize))
+    ax = Axis(fig[Paxis ? 2 : fpos[1], fpos[2]], xlabel = L"Time\;[Gyr]", ylabel = L"Radius\;[km]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
     log && (field="log"*field)
     cmap_reverse && (cmap = Reverse(cmap))
     hm = heatmap!(ax, Dblock.rproftime, 1e-3Dblock.rprofdata[:,idxR["r"],1], yp', colormap=cmap)
-    Colorbar(fig[1, Paxis ? 1 : 2], hm; label = LRN[field], labelsize=25, ticklabelsize=15, vertical= Paxis ? false : true, labelpadding=13)
-    Paxis && second_axis!(fig, Dblock.rproftime, 1e-3abs.(Dblock.rprofdata[:,idxR["r"],1] .- Dblock.rprofdata[end,idxR["r"],1]), "Pressure", 25, 17, 15, true, false, (tstart, tend), (nothing, nothing))
+    Colorbar(fig[fpos[1], Paxis ? 1 : fpos[2]+1], hm; label = LRN[field], labelsize=25, ticklabelsize=15, vertical= Paxis ? false : true, labelpadding=13)
+    Paxis && second_axis!(fig, fpos, Dblock.rproftime, 1e-3abs.(Dblock.rprofdata[:,idxR["r"],1] .- Dblock.rprofdata[end,idxR["r"],1]), "Pressure", 25, 17, 15, true, false, (tstart, tend), (nothing, nothing))
     xlims!(ax, tstart, tend)
-    display(fig)
+    disp && display(fig)
+    (savein != "") && save(savein*".png", fig)
 
+end
+
+function mantle_water(Dblock::DataBlock, time::Float64; fig=nothing, fpos=(1,1), fsize=(900,600), disp=true, savein="",
+                        xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
+    @assert Dblock.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(Dblock.metadata.Sname)"
+    idxT, idxR, idxP = data_encoding(Dblock)
+    timeidx = findfirst(Dblock.rproftime .>= time)
+    timeidxT = findfirst(Dblock.timedata[:,idxT["time"]] .>= time)
+
+    # Initialize figure 
+    isnothing(fig) && (fig = Figure(size = fsize))
+
+    # Gather Data
+    r = Dblock.rprofdata[:, timeidx, idxR["r"]]
+    midpoint_r = 0.5(r[1:end-1] .+ r[2:end])
+    midpoint_r² = 0.5(midpoint_r[1:end-1] .+ midpoint_r[2:end])
+    ρ = Dblock.rprofdata[:, timeidx, idxR["rhomean"]]
+    ∂ρ_∂r = diff(ρ)./diff(r)
+    ∂²ρ_∂r² = diff(∂ρ_∂r)./diff(midpoint_r)
+    water = Dblock.rprofdata[:, timeidx, idxR["Water"]]
+    s = Dblock.rprofdata[:, timeidx, idxR["Wsol"]]
+    ∂M = Dblock.rprofdata[:, timeidx, idxR["dM"]]
+    H2Okg = water./om.*∂M.*1e-2 # wt% to fraction
+    sH2Okg = s./om.*∂M.*1e-2
+
+    # Find radial phase boundaries
+    pv_ring, wad_ol, lith_ol = idx_ph_transitions(Dblock; timeidx=timeidx)
+
+    # Ocean mass
+    omass = Dblock.timedata[timeidxT,idxT["SurfOceanMass3D"]]/om
+
+    # Divide by sectors
+    lm_H2Okg = sum(H2Okg[1:pv_ring])
+    tz_H2Okg = sum(H2Okg[pv_ring+1:wad_ol])
+    um_H2Okg = sum(H2Okg[wad_ol+1:lith_ol])
+    crust_H2Okg = sum(H2Okg[lith_ol+1:end])
+
+    ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Radius\;[km]", ylabel = L"Cumulative\;H_2O\;mass\;[OM]", xlabelsize=xlabelsize, ylabelsize=ylabelsize,
+               xticklabelsize=xticklabelsize, yticklabelsize=yticklabelsize, xticksize=xticksize, yticksize=yticksize,
+               xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding)
+
+    # Sector bands
+    # -- LM
+        band!(ax, 1e-3r[1:pv_ring], zeros(length(r[1:pv_ring])), lm_H2Okg*ones(length(r[1:pv_ring])), color=:orange, alpha=0.3)
+        band!(ax, 1e-3r[pv_ring:end], zeros(length(r[pv_ring:end])), lm_H2Okg*ones(length(r[pv_ring:end])), color=:orange, alpha=0.1)
+    # -- TZ
+        band!(ax, 1e-3r[1:pv_ring], lm_H2Okg*ones(length(r[1:pv_ring])), (lm_H2Okg+tz_H2Okg)*ones(length(r[1:pv_ring])), color=:green, alpha=0.1)
+        band!(ax, 1e-3r[pv_ring:wad_ol], lm_H2Okg*ones(length(r[pv_ring:wad_ol])), (lm_H2Okg+tz_H2Okg)*ones(length(r[pv_ring:wad_ol])), color=:green, alpha=0.3)
+        band!(ax, 1e-3r[wad_ol:end], lm_H2Okg*ones(length(r[wad_ol:end])), (lm_H2Okg+tz_H2Okg)*ones(length(r[wad_ol:end])), color=:green, alpha=0.1)
+    # -- UM
+        band!(ax, 1e-3r[1:wad_ol], (lm_H2Okg+tz_H2Okg)*ones(length(r[1:wad_ol])), (lm_H2Okg+tz_H2Okg+um_H2Okg)*ones(length(r[1:wad_ol])), color=:blue, alpha=0.1)
+        band!(ax, 1e-3r[wad_ol:lith_ol], (lm_H2Okg+tz_H2Okg)*ones(length(r[wad_ol:lith_ol])), (lm_H2Okg+tz_H2Okg+um_H2Okg)*ones(length(r[wad_ol:lith_ol])), color=:blue, alpha=0.3)
+        band!(ax, 1e-3r[lith_ol:end], (lm_H2Okg+tz_H2Okg)*ones(length(r[lith_ol:end])), (lm_H2Okg+tz_H2Okg+um_H2Okg)*ones(length(r[lith_ol:end])), color=:blue, alpha=0.1)
+    # -- Crust
+        band!(ax, 1e-3r[1:lith_ol], (lm_H2Okg+tz_H2Okg+um_H2Okg)*ones(length(r[1:lith_ol])), (lm_H2Okg+tz_H2Okg+um_H2Okg+crust_H2Okg)*ones(length(r[1:lith_ol])), color=:brown, alpha=0.1)
+        band!(ax, 1e-3r[lith_ol:end], (lm_H2Okg+tz_H2Okg+um_H2Okg)*ones(length(r[lith_ol:end])), (lm_H2Okg+tz_H2Okg+um_H2Okg+crust_H2Okg)*ones(length(r[lith_ol:end])), color=:brown, alpha=0.3)
+
+    # Text
+    f = 0.5
+    text!(ax, 200, f*(lm_H2Okg), text="$(round(lm_H2Okg, digits=3)) OM (Lower mantle)", color=:black, align = (:left, :center), fontsize=20)
+    text!(ax, 200, lm_H2Okg + f*tz_H2Okg, text="$(round(tz_H2Okg, digits=3)) OM (MTZ)", color=:black, align = (:left, :center), fontsize=20)
+    text!(ax, 200, lm_H2Okg + tz_H2Okg + f*um_H2Okg, text="$(round(um_H2Okg, digits=3)) OM (Upper mantle)", color=:black, align = (:left, :center), fontsize=20)
+    text!(ax, 200, lm_H2Okg + tz_H2Okg + um_H2Okg + f*crust_H2Okg, text="$(round(crust_H2Okg, digits=3)) OM (Crust)", color=:black, align = (:left, :center), fontsize=20)
+
+    # Lines
+    lines!(ax, 1e-3r, cumsum(H2Okg), color=:black, linewidth=3.0, alpha=1.0)
+    # lines!(ax, 1e-3r, cumsum(sH2Okg), color=:blue, linestyle=:dash, linewidth=2.5, alpha=0.3, label = "Mantle water capacity")
+    scatter!(ax, 0.0, 0.0, color=:black, alpha=0.0, label = "Ocean mass at $(round(time, digits=2)) Gyr : $(round(omass, digits=2)) OM")
+    # scatter!(ax, 0.0, 0.0, color=:black, alpha=0.0, label = "Parameter | Integrated Total H₂O mass at $(round(time, digits=2)) Gyr : $(round(Dblock.metadata.totH₂O/om, digits=2)) | $(round(sum(H2Okg)+omass, digits=2)) OM")
+    scatter!(ax, 0.0, 0.0, color=:black, alpha=0.0, label = "Integrated mantle H₂O mass at $(round(time, digits=2)) Gyr : $(round(sum(H2Okg), digits=2)) OM")
+    axislegend(ax, position=:rb, framevisible=true, fontsize=15, padding=10, rowgap=10)
+
+    # Display and save
+    disp && display(fig)
+    (savein != "") && save(savein*".png", fig)
 end
 
 # ======================
 # ==== Auxilliaries ====
 # ======================
 
-function second_axis!(fig, x, y, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, timeplot, trange, locals)
+function second_axis!(fig, fpos, x, y, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, timeplot, trange, locals)
 
     function transform_data(y, field)
         yp = [first(y), last(y)]
-        (field=="SurfOceanMass3D") && (return yp./om, L"Ocean\;masses") # 10^21 kg
+        (field=="SurfOceanMass3D") && (return [locals[1], locals[2]]./om, L"Ocean\;masses") # 10^21 kg
         (field=="Pressure") && (return km2GPa.(yp), L"Pressure\;[GPa]") # GPa
         return nothing, nothing
     end
     yp, ylab = transform_data(y, field); (isnothing(yp)) && return
-    ax2 = Axis(fig[timeplot ? 1 : 2, 1], yticklabelcolor = :black, yaxisposition = :right, ylabel = ylab, ylabelsize=ylabelsize, yticklabelsize=yticklabelsize, ylabelpadding=ylabelpadding,
+    ax2 = Axis(fig[timeplot ? fpos[1] : fpos[1]+1, fpos[2]], yticklabelcolor = :black, yaxisposition = :right, ylabel = ylab, ylabelsize=ylabelsize, yticklabelsize=yticklabelsize, ylabelpadding=ylabelpadding,
                 xgridvisible=false, ygridvisible=false, yreversed=yreversed)
     scatter!(ax2, first(x)*ones(2), yp, alpha=0.0)
-    yreversed && ylims!(ax2, maximum(yp), minimum(yp))
-    (trange[1]!=0. || trange[2]!=4.5) && timeplot && (yreverse ? ylims!(ax2, reverse(locals)) : (ylims!(ax2, locals)))
+    # yreversed && ylims!(ax2, maximum(yp), minimum(yp))
+    timeplot && (yreversed ? ylims!(ax2, reverse(yp)) : (ylims!(ax2, yp)))
     xlims!(ax2, trange)
     hidespines!(ax2); hidexdecorations!(ax2)
 end
