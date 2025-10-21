@@ -35,6 +35,7 @@ LRN = Dict(
     "H2Ofree" => L"Free\;H_2O\;[\mathrm{wt%}]", "logH2Ofree" => L"Free\;H_2O\;[log_{10}(\mathrm{wt%})]",
     "rhomean" => L"Mean\;density\;[\mathrm{kg/m^3}]", "logrhomean" => L"Mean\;density\;[log_{10}(\mathrm{kg/m^3})]",
     "bsmean" => L"Mean\;basalt\;fraction", "logbsmean" => L"Mean\;basalt\;fraction\;[\mathrm{log_{10}}]",
+    "etalog" => L"Viscosity\;[\mathrm{Pa\cdot s}]", "logetalog" => L"Viscosity\;[log_{10}(\mathrm{Pa\cdot s})]",
 )
 
 # =============
@@ -237,8 +238,8 @@ end
         - tend::Union{Float64, Nothing} \t-->\t End time [default: nothing (last time)]
 
 """
-function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap=:vik100, log=false, cmap_reverse=false, Paxis=true, tstart=nothing, tend=nothing,
-                            fig=nothing, fpos=(1,1), disp=true, savein="")
+function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap=:vik100, log=false, cmap_reverse=false, colorrange=(nothing, nothing), Paxis=true, tstart=nothing, tend=nothing,
+                            fig=nothing, fpos=(1,1), disp=true, savein="", interpolate=false, np=500)
 
     (fpos!=(1,1)) && (Paxis = false)
 
@@ -251,12 +252,24 @@ function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap
     isnothing(tstart) && (tstart = first(Dblock.rproftime))
     isnothing(tend) && (tend = last(Dblock.rproftime))
 
+    # Interpolate to regular grid if requested
+    if interpolate
+        itp = Interpolations.interpolate((Dblock.rprofdata[:,1,idxR["r"]], Dblock.rproftime), yp, Gridded(Linear()))
+        rgrid = LinRange(first(Dblock.rprofdata[:,1,idxR["r"]]), last(Dblock.rprofdata[:,1,idxR["r"]]), np)
+        tgrid = LinRange(tstart, tend, np)
+        yp = [itp(r, t) for t in tgrid, r in rgrid]'
+    end
+
+    # Automatic colorrange if not given
+    isnothing(colorrange[1]) && (colorrange = (minimum(yp), colorrange[2]))
+    isnothing(colorrange[2]) && (colorrange = (colorrange[1], maximum(yp)))
+
     # Plot
     isnothing(fig) && (fig = Figure(size = fsize))
     ax = Axis(fig[Paxis ? 2 : fpos[1], fpos[2]], xlabel = L"Time\;[Gyr]", ylabel = L"Radius\;[km]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
     log && (field="log"*field)
     cmap_reverse && (cmap = Reverse(cmap))
-    hm = heatmap!(ax, Dblock.rproftime, 1e-3Dblock.rprofdata[:,idxR["r"],1], yp', colormap=cmap)
+    hm = heatmap!(ax, interpolate ? tgrid : Dblock.rproftime, interpolate ? 1e-3rgrid : 1e-3Dblock.rprofdata[:,idxR["r"],1], yp', colormap=cmap, interpolate=interpolate, colorrange=colorrange)
     Colorbar(fig[fpos[1], Paxis ? 1 : fpos[2]+1], hm; label = LRN[field], labelsize=25, ticklabelsize=15, vertical= Paxis ? false : true, labelpadding=13)
     Paxis && second_axis!(fig, fpos, Dblock.rproftime, 1e-3abs.(Dblock.rprofdata[:,idxR["r"],1] .- Dblock.rprofdata[end,idxR["r"],1]), "Pressure", 25, 17, 15, true, false, (tstart, tend), (nothing, nothing))
     xlims!(ax, tstart, tend)
