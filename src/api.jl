@@ -38,9 +38,9 @@ LRN = Dict(
     "etalog" => L"Viscosity\;[\mathrm{Pa\cdot s}]", "logetalog" => L"Viscosity\;[log_{10}(\mathrm{Pa\cdot s})]",
 )
 
-# =============
-# ==== API ====
-# =============
+# =============================
+# ==== Post-Processing API ====
+# =============================
 
 """
     Plot the evolution of a field over time.
@@ -352,6 +352,39 @@ function mantle_water(Dblock::DataBlock, time::Float64; fig=nothing, fpos=(1,1),
     disp && display(fig)
     (savein != "") && save(savein*".png", fig)
 end
+
+# =================================================================================
+# =======  Water Storage Capacity (sᴴ²ᴼ) and Oxygen fugacity profile (fO₂)  =======
+# =================================================================================
+
+function solve_sH2O_fO2(P::AbstractVector{T1}, T::AbstractVector{T1};
+                        Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
+                        XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 50.0],
+                        XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 50.0],
+                        s=true, fO2=true, DBswitchP=14.0) where T1<:Real
+
+    # Compositions
+    @assert length(Clist) == length(XB) "Length of Clist and XB must match."
+    @assert length(Clist) == length(XH) "Length of Clist and XH must match."
+    Clist_stx = ["SiO2", "Al2O3", "CaO", "MgO", "FeO", "Na2O"]
+    XB_stx = Xᵢ_ig2stx(XB, Clist, Clist_stx); XH_stx = Xᵢ_ig2stx(XH, Clist, Clist_stx)
+
+    # First mesh vectorization (MAGEMin parallelization)
+    continue_ip = any(P .< DBswitchP) ? findlast(P .< DBswitchP) : length(P)-1
+    Pv, Tv = repeat(P[1:continue_ip+1], outer=length(T)), repeat(T, inner=length(P[1:continue_ip+1])) # Full P-T grid
+    XvH = map(Vector, eachrow(repeat(XH', outer=length(Pv)))) # Stable composition grid + BCs
+    XvB = map(Vector, eachrow(repeat(XB', outer=length(Pv)))) # Stable composition grid + BCs
+
+    # Sequential Minimizer calls
+    data    = Initialize_MAGEMin("ig", verbose=false);
+    outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true) # kbar and K
+    outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true) # kbar and K
+    Finalize_MAGEMin(data)
+    
+
+
+end
+
 
 # ======================
 # ==== Auxilliaries ====

@@ -1,6 +1,6 @@
-# ====================
-# ==== Structures ====
-# ====================
+# ========================
+# ==== API Structures ====
+# ========================
 
 # Metadata
 struct StagData
@@ -37,3 +37,7 @@ struct DataBlock
     # Metadata
     metadata    :: StagData     # Metadata structure
 end
+
+# =========================
+# ==== sᴴ²ᴼ Structures ====
+# =========================
