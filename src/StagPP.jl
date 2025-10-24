@@ -2,8 +2,8 @@ module StagPP
 
     # Dependencies
     using Mmap, Parsers, Interpolations, ForwardDiff
-    using Statistics, EasyFit, LsqFit, MAGEMin_C, ImageFiltering
-    using CairoMakie, DelimitedFiles, Printf, BenchmarkTools
+    using Statistics, EasyFit, LsqFit, MAGEMin_C
+    using CairoMakie, DelimitedFiles, Printf
 
     # Constants
     const R = 8.31446261815324 # J mol⁻¹ K⁻¹
@@ -30,7 +30,7 @@ module StagPP
     # Constant export
     export sec2Gyr, om, m_s2cm_yr
     # Function export
-    export load_sim, data_encoding
+    export load_sim, data_encoding, solve_sH2O_fO2
     # Plot exports
     export time_vs_field, rprof_vs_field, field_vs_field, mantle_water
 end

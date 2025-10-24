@@ -362,7 +362,7 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
                         Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
                         XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0],
                         XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
-                        Prange=(0.1, 130.0), Trange=(500.0, 4000.0)
+                        Prange=(0.1, 130.0), Trange=(500.0, 4000.0), verbose=true
                         )
 
     # Vectorized to mesh indexing
@@ -392,37 +392,41 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         # Upper mantle mesh vectorization (MAGEMin parallelization)
             mesh_vectorization!(Pum, Tum, nP, nT, Pv, Tv)
         # Minimizer call + assembly
+            verbose && println("Calculating upper mantle sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
-            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
-            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
+            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=false) # kbar and K
+            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=false) # kbar and K
             sᴴ²ᴼ_assembler!(um, outH, outB, nP*nT)
             Finalize_MAGEMin(data);
 
         # Mineral-bound sᴴ²ᴼ assembly
+            verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
             min_s = min_sᴴ²ᴼ_assembler(Int64(ceil(1.1max(nP, nT))));
 
         # Transition zone mesh vectorization
             mesh_vectorization!(Ptz, Ttz, nP, nT, Pv, Tv)
         # Minimizer call + assembly
+            verbose && println("Calculating transition zone sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("mtl", verbose=false);
-            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
-            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
+            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=false) # kbar and K
+            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=false) # kbar and K
             ∫sᴴ²ᴼ!(tz, Pv, Tv, min_s, outH, outB)
             Finalize_MAGEMin(data);
     
         # Lower mantle mesh vectorization
             mesh_vectorization!(Plm, Tlm, nP, nT, Pv, Tv)
         # Minimizer call + assembly
-            data    = Initialize_MAGEMin("sb11", verbose=false);
-            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
-            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
+            verbose && println("Calculating lower mantle sᴴ²ᴼ...")
+            data    = Initialize_MAGEMin("sb21", verbose=false);
+            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=false) # kbar and K
+            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=false) # kbar and K
             ∫sᴴ²ᴼ!(lm, Pv, Tv, min_s, outH, outB)
             Finalize_MAGEMin(data);
 
         # Return structure
-        um = cat(reshape(um[:,1], nP, nT)', reshape(um[:,2], nP, nT)', dims=3)
-        tz = cat(reshape(tz[:,1], nP, nT)', reshape(tz[:,2], nP, nT)', dims=3)
-        lm = cat(reshape(lm[:,1], nP, nT)', reshape(lm[:,2], nP, nT)', dims=3)
+        um = cat(reshape(um[:,1], nP, nT), reshape(um[:,2], nP, nT), dims=3)
+        tz = cat(reshape(tz[:,1], nP, nT), reshape(tz[:,2], nP, nT), dims=3)
+        lm = cat(reshape(lm[:,1], nP, nT), reshape(lm[:,2], nP, nT), dims=3)
         return sᴴ²ᴼ( um, tz, lm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
 
         end
