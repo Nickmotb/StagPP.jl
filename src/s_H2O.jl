@@ -72,7 +72,6 @@
 
     # Current issues: 
     # - post stishovite threshold needs to be implemented
-    # - Garnets
 
     function ∫sᴴ²ᴼ!(fmap, Pv, Tv, min_s, outH, outB)
 
@@ -128,6 +127,31 @@
                 s_phase_sum!(fmap, i, min_s, phase, ph, outB, phwt, Pv[i], Tv[i], 2)
             end
         end
+
+    end
+
+    function CaCl₂_α_PbO₂_boundary()
+
+        # CaCl₂-type post-stishovite Transition (Umemoto 2006)
+        function umemoto(x,p)
+            c = zeros(length(x)); mask = x .< 1400
+            @. c[mask] = p[1]*x[mask]^4 + p[2]*x[mask]^3 + p[3]*x[mask]^2 + p[4]*x[mask]
+            @. c[!mask] = p[5]*x[!mask]^2 + p[6]*x[!mask] + p[7]
+            return c
+        end
+        PSP = [19.00, 22.80, 26.60, 30.40, 34.20, 38.00, 41.80, 45.60, 49.40, 53.20, 57.00, 60.80, 64.60, 68.40]
+        PST = [563.2, 706.0, 833.9, 945.3, 1055, 1141, 1212, 1282, 1347, 1400, 1476, 1544, 1652, 1894]
+        fT = LinRange(300, 1894, 100)
+        fit = curve_fit(umemoto, PST, PSP, ones(7))
+        fP = umemoto(fT, fit.param)
+        CaCl₂ = extrapolate(Interpolations.interpolate((PST,), PSP, Gridded(Linear())), Line())
+
+        # α-PbO₂-type post-stishovite Transition (Murakami et al. 2007)
+        PST = ([2000., 4050.],)
+        PSP =  [110., 128.]
+        α_PbO₂ = extrapolate(Interpolations.interpolate(PST, PSP, Gridded(Linear())), Line())
+
+        return CaCl₂, α_PbO₂
 
     end
 
