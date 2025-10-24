@@ -233,12 +233,12 @@ end
         - Paxis::Bool \t\t\t-->\t Adds a pressure axis on the right [default: false]
         - cmap::Symbol \t\t\t-->\t Colormap [default: :vik100]
         - cmap_reverse::Bool \t\t-->\t Reverses colormap [default: false]
-        - log::Bool \t\t\t-->\t Plots log₁₀ of the field [default: false]
+        - logscale::Bool \t\t\t-->\t Plots log₁₀ of the field [default: false]
         - tstart::Union{Float64, Nothing} \t-->\t Start time [default: nothing (first time)]
         - tend::Union{Float64, Nothing} \t-->\t End time [default: nothing (last time)]
 
 """
-function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap=:vik100, log=false, cmap_reverse=false, colorrange=(nothing, nothing), Paxis=true, tstart=nothing, tend=nothing,
+function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap=:vik100, logscale=false, cmap_reverse=false, colorrange=(nothing, nothing), Paxis=true, tstart=nothing, tend=nothing,
                             fig=nothing, fpos=(1,1), disp=true, savein="", interpolate=false, np=500)
 
     (fpos!=(1,1)) && (Paxis = false)
@@ -248,7 +248,7 @@ function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap
     @assert haskey(idxR, field) "Field $field not found in rprof header"
 
     # Vectors
-    yp = log ? log10.(Dblock.rprofdata[:,:,idxR[field]]) : Dblock.rprofdata[:,:,idxR[field]]
+    yp = logscale ? log10.(Dblock.rprofdata[:,:,idxR[field]]) : Dblock.rprofdata[:,:,idxR[field]]
     isnothing(tstart) && (tstart = first(Dblock.rproftime))
     isnothing(tend) && (tend = last(Dblock.rproftime))
 
@@ -267,7 +267,7 @@ function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap
     # Plot
     isnothing(fig) && (fig = Figure(size = fsize))
     ax = Axis(fig[Paxis ? 2 : fpos[1], fpos[2]], xlabel = L"Time\;[Gyr]", ylabel = L"Radius\;[km]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
-    log && (field="log"*field)
+    logscale && (field="log"*field)
     cmap_reverse && (cmap = Reverse(cmap))
     hm = heatmap!(ax, interpolate ? tgrid : Dblock.rproftime, interpolate ? 1e-3rgrid : 1e-3Dblock.rprofdata[:,idxR["r"],1], yp', colormap=cmap, interpolate=interpolate, colorrange=colorrange)
     Colorbar(fig[fpos[1], Paxis ? 1 : fpos[2]+1], hm; label = LRN[field], labelsize=25, ticklabelsize=15, vertical= Paxis ? false : true, labelpadding=13)
@@ -358,11 +358,12 @@ end
 # =================================================================================
 
 function solve_sH2O_fO2(nP::Int64, nT::Int64;
-                        s=true, fO2=true, DBswitchP=7.0,
+                        s=true, fO2=true, DBswitchP=7.0, plt=false, disp_prog=true,
                         Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
                         XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0],
                         XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
-                        Prange=(0.1, 130.0), Trange=(500.0, 4000.0), verbose=true
+                        Prange=(0.1, 130.0), Trange=(500.0, 4000.0), verbose=true,
+                        cmap=:vik100, interp=false, cmap_reverse=false, logscale=true,
                         )
 
     # Vectorized to mesh indexing
@@ -379,7 +380,7 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
     if s
         # Memory allocations
         # --- Axis Vectors
-            Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 1200., nT)
+            Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 2000., nT)
             Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(1200., Trange[2], nT)
             Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(1200., Trange[2], nT)
         # --- Others
@@ -394,9 +395,10 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         # Minimizer call + assembly
             verbose && println("Calculating upper mantle sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
-            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=false) # kbar and K
-            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=false) # kbar and K
+            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
+            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
             sᴴ²ᴼ_assembler!(um, outH, outB, nP*nT)
+            um = cat(reshape(um[:,1], nP, nT), reshape(um[:,2], nP, nT), dims=3)
             Finalize_MAGEMin(data);
 
         # Mineral-bound sᴴ²ᴼ assembly
@@ -408,9 +410,10 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         # Minimizer call + assembly
             verbose && println("Calculating transition zone sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("mtl", verbose=false);
-            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=false) # kbar and K
-            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=false) # kbar and K
+            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
+            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
             ∫sᴴ²ᴼ!(tz, Pv, Tv, min_s, outH, outB)
+            tz = cat(reshape(tz[:,1], nP, nT), reshape(tz[:,2], nP, nT), dims=3)
             Finalize_MAGEMin(data);
     
         # Lower mantle mesh vectorization
@@ -418,31 +421,23 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         # Minimizer call + assembly
             verbose && println("Calculating lower mantle sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("sb21", verbose=false);
-            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=false) # kbar and K
-            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=false) # kbar and K
+            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
+            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
             ∫sᴴ²ᴼ!(lm, Pv, Tv, min_s, outH, outB)
+            lm = cat(reshape(lm[:,1], nP, nT), reshape(lm[:,2], nP, nT), dims=3)
             Finalize_MAGEMin(data);
 
         # Return structure
-        um = cat(reshape(um[:,1], nP, nT), reshape(um[:,2], nP, nT), dims=3)
-        tz = cat(reshape(tz[:,1], nP, nT), reshape(tz[:,2], nP, nT), dims=3)
-        lm = cat(reshape(lm[:,1], nP, nT), reshape(lm[:,2], nP, nT), dims=3)
-        return sᴴ²ᴼ( um, tz, lm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
+        smap = sᴴ²ᴼ( um, tz, lm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
+
+        # Plot
+        plt && plot_sᴴ²ᴼ(smap; cmap = cmap, interp = interp, cmap_reverse = cmap_reverse, logscale = logscale)
+
+        return smap
 
         end
 
 end
-
-# encountered_phases = []
-# for i in eachindex(outB)
-#     for ph in outB[i].ph
-#         !(ph in encountered_phases) && push!(encountered_phases, ph)
-#     end
-#     for ph in outH[i].ph
-#         !(ph in encountered_phases) && push!(encountered_phases, ph)
-#     end
-# end
-# print(encountered_phases)
 
 # ======================
 # ==== Auxilliaries ====

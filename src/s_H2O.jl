@@ -70,10 +70,13 @@
 # ==== Integration =======
 # ========================
 
-    # Current issues: 
-    # - post stishovite threshold needs to be implemented
-
     function ∫sᴴ²ᴼ!(fmap, Pv, Tv, min_s, outH, outB)
+
+        # Post-stishovite boundary
+        CaCl₂_st, α_PbO₂_st = CaCl₂_α_PbO₂_boundary()
+
+        # Dry phase checker
+        @inline dry_phase(ph::String) = ph ∈ ["q", "nal", "crn", "plg"]
 
         # Phase iterator call
         function s_phase_sum!(fmap, i, min_s, phase, ph, out, phwt, p, t, slot)
@@ -95,13 +98,9 @@
                 (phase=="cf")  && (fmap[i, slot] += phwt * min_s.cf)
                 (phase=="cpv"   || phase=="capv")  && (fmap[i, slot] += phwt * min_s.cpv)
                 (phase=="pv"    || phase=="mpv")   && (fmap[i, slot] += phwt * min_s.pv)
-                (phase=="stv"   || phase=="st")    && (fmap[i, slot] += phwt * min_s.st(p, t))
+                (phase=="stv"   || phase=="st")    && (fmap[i, slot] += phwt * (p<=CaCl₂_st(t) ? min_s.st(p, t) : (p<=α_PbO₂_st(t) ? min_s.CaCl₂_st(p, t) : min_s.α_PbO₂_st(p, t))))
                 (phase=="g"     || phase=="gtmj")  && (fmap[i, slot] += phwt * min_s.grt(p, t))
-
         end
-
-        # Dry phase checker
-        @inline dry_phase(ph::String) = ph ∈ ["q", "nal", "crn", "plg"]
 
         # Vectorized mesh iterator
         Threads.@threads for i in eachindex(Pv)
@@ -412,11 +411,6 @@
         n = 0.5
         A, ΔH, ΔV = fit_Keppler([P T], W, fug, n; unit="GPa")
 
-        # Unit conversion
-        A = A*1e4/sqrt(1e5) # wt%/GPa⁰⁵ → ppm/bar⁰⁵
-        ΔH, ΔV = ΔH*1e-3, ΔV*1e6*1e-9
-        verbose && println("A = $(round(A, digits=7)) ppm/bar⁰⁵ , ΔH = $(round(ΔH, digits=3)) kJ/mol, ΔV = $(round(ΔV,digits=3)) cm³/mol, n = $n")
-
         # Generate map
         CaCl₂_st = zeros(Float64, ns, ns)
         P, T = LinRange(minimum(P), maximum(P), ns), LinRange(minimum(T), maximum(T), ns)
@@ -425,6 +419,11 @@
                 CaCl₂_st[i,j] = pmodel_GPa(P[i], T[j], A, ΔH, ΔV, n, fug)
             end
         end
+
+         # Unit conversion
+        A = A*1e4/sqrt(1e5) # wt%/GPa⁰⁵ → ppm/bar⁰⁵
+        ΔH, ΔV = ΔH*1e-3, ΔV*1e6*1e-9
+        verbose && println("A = $(round(A, digits=7)) ppm/bar⁰⁵ , ΔH = $(round(ΔH, digits=3)) kJ/mol, ΔV = $(round(ΔV,digits=3)) cm³/mol, n = $n")
 
         # Interpolation
         return extrapolate(Interpolations.interpolate((P,T), CaCl₂_st, Gridded(Linear())), Flat())
@@ -442,11 +441,6 @@
         n = 0.5
         A, ΔH, ΔV = fit_Keppler([P T], W, fug, n; unit="GPa", p = [1e-6, -1e4, 1e3])
 
-        # Unit conversion
-        A = A*1e4/sqrt(1e5) # wt%/GPa⁰⁵ → ppm/bar⁰⁵
-        ΔH, ΔV = ΔH*1e-3, ΔV*1e6*1e-9
-        verbose && println("A = $(round(A, digits=7)) ppm/bar⁰⁵ , ΔH = $(round(ΔH, digits=3)) kJ/mol, ΔV = $(round(ΔV,digits=3)) cm³/mol, n = $n")
-
         # Generate map
         α_PbO₂_st = zeros(Float64, ns, ns)
         P, T = LinRange(minimum(P), maximum(P), ns), LinRange(minimum(T), maximum(T), ns)
@@ -455,6 +449,11 @@
                 α_PbO₂_st[i,j] = pmodel_GPa(P[i], T[j], A, ΔH, ΔV, n, fug)
             end
         end
+
+         # Unit conversion
+        A = A*1e4/sqrt(1e5) # wt%/GPa⁰⁵ → ppm/bar⁰⁵
+        ΔH, ΔV = ΔH*1e-3, ΔV*1e6*1e-9
+        verbose && println("A = $(round(A, digits=7)) ppm/bar⁰⁵ , ΔH = $(round(ΔH, digits=3)) kJ/mol, ΔV = $(round(ΔV,digits=3)) cm³/mol, n = $n")
 
         return extrapolate(Interpolations.interpolate((P,T), α_PbO₂_st, Gridded(Linear())), Flat())
     end
@@ -507,7 +506,42 @@
     end
 
 # ======================
-# ==== Functions =======
+# ======= Plots ========
+# ======================
+
+    function plot_sᴴ²ᴼ(s::sᴴ²ᴼ; cmap=:vik100, interp=false, cmap_reverse=false, logscale=true)
+
+        # Inputs
+        xlabsz, ylabsz, titlesz, xticklabsz, yticklabsz, xticksz, yticksz = 20, 20, 22, 16, 16, 12, 12
+
+        fig = Figure(size = (1000, 1000))
+        cmap_reverse && (cmap = Reverse(cmap))
+        # Upper Mantle
+            ax = Axis(fig[1, 1], xlabel=L"Pressure\;[\mathrm{GPa}]", ylabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted, wt%)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
+            hm = heatmap!(ax, s.Tum, s.Pum, logscale ? log10.(s.um[:,:,1]') : s.um[:,:,1]'; colormap=cmap, interpolate=interp); Colorbar(fig[1, 2], hm)
+            ax = Axis(fig[1, 3], xlabel=L"Pressure\;[\mathrm{GPa}]", ylabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched, wt%)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
+            hm = heatmap!(ax, s.Tum, s.Pum, logscale ? log10.(s.um[:,:,2]') : s.um[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[1, 4], hm)
+        # Transition zone
+            ax = Axis(fig[2, 1], xlabel=L"Pressure\;[\mathrm{GPa}]", ylabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Depleted, wt%)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
+            hm = heatmap!(ax, s.Ttz, s.Ptz, logscale ? log10.(s.tz[:,:,1]') : s.tz[:,:,1]'; colormap=cmap, interpolate=interp); Colorbar(fig[2, 2], hm)
+            ax = Axis(fig[2, 3], xlabel=L"Pressure\;[\mathrm{GPa}]", ylabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched, wt%)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
+            hm = heatmap!(ax, s.Ttz, s.Ptz, logscale ? log10.(s.tz[:,:,2]') : s.tz[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[2, 4], hm)
+        # Lower Mantle
+            ax = Axis(fig[3, 1], xlabel=L"Pressure\;[\mathrm{GPa}]", ylabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Depleted, wt%)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
+            hm = heatmap!(ax, s.Tlm, s.Plm, logscale ? log10.(s.lm[:,:,1]') : s.lm[:,:,1]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 2], hm)
+            ax = Axis(fig[3, 3], xlabel=L"Pressure\;[\mathrm{GPa}]", ylabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched, wt%)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
+            hm = heatmap!(ax, s.Tlm, s.Plm, logscale ? log10.(s.lm[:,:,2]') : s.lm[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 4], hm)
+        display(fig)
+    end
+
+# ======================
+# ======= Others =======
 # ======================
 
     function sᴴ²ᴼ_assembler!(map::Array{Float64, 2}, outH, outB, n::Int64)
