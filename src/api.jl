@@ -357,41 +357,88 @@ end
 # =======  Water Storage Capacity (sᴴ²ᴼ) and Oxygen fugacity profile (fO₂)  =======
 # =================================================================================
 
-function solve_sH2O_fO2(P::AbstractVector{T1}, T::AbstractVector{T1};
+function solve_sH2O_fO2(nP::Int64, nT::Int64;
+                        s=true, fO2=true, DBswitchP=7.0,
                         Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
                         XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0],
                         XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
-                        s=true, fO2=true, DBswitchP=7.0) where T1<:Real
+                        Prange=(0.1, 130.0), Trange=(500.0, 4000.0)
+                        )
+
+    # Vectorized to mesh indexing
+    function get_ip_it(nP, i)
+        iT = Int(ceil(i/nP)); iP = i - (iT-1)*nP;
+        return iP, iT
+    end
 
     # Checks
     (!s && !fO2) && return
     @assert length(Clist) == length(XB) "Length of Clist and XB must match."
     @assert length(Clist) == length(XH) "Length of Clist and XH must match."
 
-    # Compositions
-    Clist_stx = ["SiO2", "Al2O3", "CaO", "MgO", "FeO", "Na2O"]
-    XB_stx = Xᵢ_ig2stx(XB, Clist, Clist_stx); XH_stx = Xᵢ_ig2stx(XH, Clist, Clist_stx)
+    if s
+        # Memory allocations
+        # --- Axis Vectors
+            Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 1200., nT)
+            Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(1200., Trange[2], nT)
+            Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(1200., Trange[2], nT)
+        # --- Others
+            Pv, Tv = zeros(Float64, nP*nT), zeros(Float64, nP*nT)
+            XvH = map(Vector, eachrow(repeat(XH', outer=length(Pv))))
+            XvB = map(Vector, eachrow(repeat(XB', outer=length(Pv))))
+        # --- Maps
+            um, tz, lm = zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2) # later reshaped as 'T, P, reshape(um, nP, :)'
 
-    # First mesh vectorization (MAGEMin parallelization)
-    continue_ip = any(P .< DBswitchP) ? findlast(P .< DBswitchP) : length(P)-1
-    Pv, Tv = repeat(P[1:continue_ip+1], outer=length(T)), repeat(T, inner=length(P[1:continue_ip+1])) # Full P-T grid
-    XvH = map(Vector, eachrow(repeat(XH', outer=length(Pv)))) # Stable composition grid + BCs
-    XvB = map(Vector, eachrow(repeat(XB', outer=length(Pv)))) # Stable composition grid + BCs
+        # Upper mantle mesh vectorization (MAGEMin parallelization)
+            mesh_vectorization!(Pum, Tum, nP, nT, Pv, Tv)
+        # Minimizer call + assembly
+            data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
+            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
+            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
+            sᴴ²ᴼ_assembler!(um, outH, outB, nP*nT)
+            Finalize_MAGEMin(data);
 
-    # Sequential Minimizer calls
-    data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
-    outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
-    outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
-    Finalize_MAGEMin(data)
+        # Mineral-bound sᴴ²ᴼ assembly
+            min_s = min_sᴴ²ᴼ_assembler(Int64(ceil(1.1max(nP, nT))));
 
-    # Initialise outputs
-    s   && (sᴴ²ᴼ = zeros(Float64, length(Pv))); fO2 && (fO₂ = zeros(Float64, length(Pv)))
-    Threads.@threads for i in eachindex(Pv)
-        s && (sᴴ²ᴼ[i] = 0.0)
-    end
+        # Transition zone mesh vectorization
+            mesh_vectorization!(Ptz, Ttz, nP, nT, Pv, Tv)
+        # Minimizer call + assembly
+            data    = Initialize_MAGEMin("mtl", verbose=false);
+            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
+            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
+            ∫sᴴ²ᴼ!(tz, Pv, Tv, min_s, outH, outB)
+            Finalize_MAGEMin(data);
+    
+        # Lower mantle mesh vectorization
+            mesh_vectorization!(Plm, Tlm, nP, nT, Pv, Tv)
+        # Minimizer call + assembly
+            data    = Initialize_MAGEMin("sb11", verbose=false);
+            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
+            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv))) # kbar and K
+            ∫sᴴ²ᴼ!(lm, Pv, Tv, min_s, outH, outB)
+            Finalize_MAGEMin(data);
+
+        # Return structure
+        um = cat(reshape(um[:,1], nP, nT)', reshape(um[:,2], nP, nT)', dims=3)
+        tz = cat(reshape(tz[:,1], nP, nT)', reshape(tz[:,2], nP, nT)', dims=3)
+        lm = cat(reshape(lm[:,1], nP, nT)', reshape(lm[:,2], nP, nT)', dims=3)
+        return sᴴ²ᴼ( um, tz, lm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
+
+        end
 
 end
 
+# encountered_phases = []
+# for i in eachindex(outB)
+#     for ph in outB[i].ph
+#         !(ph in encountered_phases) && push!(encountered_phases, ph)
+#     end
+#     for ph in outH[i].ph
+#         !(ph in encountered_phases) && push!(encountered_phases, ph)
+#     end
+# end
+# print(encountered_phases)
 
 # ======================
 # ==== Auxilliaries ====

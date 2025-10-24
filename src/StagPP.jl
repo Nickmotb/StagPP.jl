@@ -2,11 +2,11 @@ module StagPP
 
     # Dependencies
     using Mmap, Parsers, Interpolations, ForwardDiff
-    using Statistics, EasyFit, MAGEMin_C
+    using Statistics, EasyFit, LsqFit, MAGEMin_C, ImageFiltering
     using CairoMakie, DelimitedFiles, Printf, BenchmarkTools
 
     # Constants
-    const R, R2 = 8.31446261815324 # J mol⁻¹ K⁻¹
+    const R = 8.31446261815324 # J mol⁻¹ K⁻¹
     const H₂O_mm = 18.01528 # g/mol
     const sec2Gyr = 3.1536e-17 # Gyr s⁻¹
     const om = 1.31e21 # Ocean mass in kg

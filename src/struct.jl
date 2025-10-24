@@ -38,6 +38,47 @@ struct DataBlock
     metadata    :: StagData     # Metadata structure
 end
 
-# =========================
-# ==== sᴴ²ᴼ Structures ====
-# =========================
+# =============================
+# ==== sᴴ²ᴼ/fO₂ Structures ====
+# =============================
+
+struct sᴴ²ᴼ
+    # maps
+    um       :: Array{Float64,3}    # Upper mantle sᴴ²ᴼ grid (nP x nT)
+    tz       :: Array{Float64,3}    # Transition zone sᴴ²ᴼ grid (nP x nT)
+    lm       :: Array{Float64,3}    # Lower mantle sᴴ²ᴼ grid (nP x nT)
+    # Vectors
+    Pum      :: Array{Float64,1}    # Upper mantle pressure vector (kbar)
+    Tum      :: Array{Float64,1}    # Upper mantle temperature vector (K
+    Ptz      :: Array{Float64,1}    # Transition zone pressure vector (kbar)
+    Ttz      :: Array{Float64,1}    # Transition zone temperature vector (
+    Plm      :: Array{Float64,1}    # Lower mantle pressure vector (kbar)
+    Tlm      :: Array{Float64,1}    # Lower mantle temperature vector (    
+end
+
+struct min_sᴴ²ᴼ{T}
+    # Interpolator fields
+    ol          :: T
+    wad         :: T
+    rw          :: T
+    grt         :: T
+    opx         :: T
+    opx_al      :: T
+    cpx_lp_di   :: T
+    cpx_lp_jd   :: T
+    cpx_hp      :: T
+    st          :: T
+    CaCl₂_st    :: T
+    α_PbO₂_st   :: T
+    coe         :: T
+    Dppv_al     :: T
+    Dppv_noal   :: T
+    # Constant fields
+    pv          :: Float64
+    cpv         :: Float64
+    cf          :: Float64
+    crst        :: Float64
+    fp          :: Float64
+    D_rw_aki    :: Float64
+    cor         :: Float64
+end
