@@ -278,6 +278,26 @@ function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap
 
 end
 
+"""
+    Plot the mantle water content profile at a given time.
+    
+    \t Basic usage: \t mantle_water(Dblock::DataBlock, time::Float64; kwargs...)
+
+    Optional arguments (kwargs):
+
+      • -- Canvas arguments --
+
+        - fsize::Tuple{Int64,Int64} \t-->\t Figure size in pixels [default: (900, 600)]
+        - xlabelsize::Int64 \t\t-->\t X-axis label font size [default: 25]
+        - ylabelsize::Int64 \t\t-->\t Y-axis label font size [default: 25]
+        - xticklabelsize::Int64 \t\t-->\t X-axis tick label font size [default: 17]
+        - yticklabelsize::Int64 \t\t-->\t Y-axis tick label font size [default: 17]
+        - xticksize::Int64 \t\t-->\t X-axis tick size [default: 10]
+        - yticksize::Int64 \t\t-->\t Y-axis tick size [default: 10]
+        - xlabelpadding::Int64 \t\t-->\t X-axis label padding [default: 15]
+        - ylabelpadding::Int64 \t\t-->\t Y-axis label padding [default: 15]
+        - savein::String \t\t-->\t Save figure in file [default: "" (no saving)]
+"""
 function mantle_water(Dblock::DataBlock, time::Float64; fig=nothing, fpos=(1,1), fsize=(900,600), disp=true, savein="",
                         xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
     @assert Dblock.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(Dblock.metadata.Sname)"
@@ -366,12 +386,6 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
                         cmap=:vik100, interp=false, cmap_reverse=false, logscale=true,
                         )
 
-    # Vectorized to mesh indexing
-    function get_ip_it(nP, i)
-        iT = Int(ceil(i/nP)); iP = i - (iT-1)*nP;
-        return iP, iT
-    end
-
     # Checks
     (!s && !fO2) && return
     @assert length(Clist) == length(XB) "Length of Clist and XB must match."
@@ -410,8 +424,8 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         # Minimizer call + assembly
             verbose && println("Calculating transition zone sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("mtl", verbose=false);
-            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
-            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
+            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
+            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
             ∫sᴴ²ᴼ!(tz, Pv, Tv, min_s, outH, outB)
             tz = cat(reshape(tz[:,1], nP, nT), reshape(tz[:,2], nP, nT), dims=3)
             Finalize_MAGEMin(data);
@@ -421,8 +435,8 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         # Minimizer call + assembly
             verbose && println("Calculating lower mantle sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("sb21", verbose=false);
-            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
-            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
+            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
+            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
             ∫sᴴ²ᴼ!(lm, Pv, Tv, min_s, outH, outB)
             lm = cat(reshape(lm[:,1], nP, nT), reshape(lm[:,2], nP, nT), dims=3)
             Finalize_MAGEMin(data);
@@ -442,6 +456,87 @@ end
 # ======================
 # ==== Auxilliaries ====
 # ======================
+
+function minmap(sector, em::String; nP=50, nT=50,
+                Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
+                XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0],
+                XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
+                ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0, interp=false, cmap=:BuPu,
+                Prange=(0.1, 130.0), Trange=(500.0, 4000.0), ncols=4, savein=""
+                )
+
+    # Check
+    @assert em in ["XH", "XB", "Custom"] "Invalid Earth mantle: $em. Choose from 'XH', 'XB', 'Custom'."
+    # Composition
+    X = em=="XB" ? XB : em=="XH" ? XH : ccomp
+    # Vectors
+    Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 2000., nT)
+    Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(1200., Trange[2], nT)
+    Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(1200., Trange[2], nT)
+    Pv, Tv = zeros(Float64, nP*nT), zeros(Float64, nP*nT)
+    Xv = map(Vector, eachrow(repeat(X', outer=length(Pv))))
+    mesh_vectorization!(sector=="um" ? Pum : sector=="tz" ? Ptz : Plm, sector=="um" ? Tum : sector=="tz" ? Ttz : Tlm, nP, nT, Pv, Tv)
+    # Minimizer
+    if sector == "um"
+        data = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
+        out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, B=ones(length(Pv)), sys_in="wt", name_solvus=true)
+    else
+        data = Initialize_MAGEMin(sector=="tz" ? "mtl" : "sb21", verbose=false);
+        out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, sys_in="wt", name_solvus=true)
+    end
+    Finalize_MAGEMin(data);
+    # Phase iterator
+    observed_phases = Dict{String, Array{Float64, 2}}()
+    for n in eachindex(out)
+        # Vectorized to mesh indexing
+        i, j = get_ip_it_nrows(nP, n)
+        # Phase iterator
+        for (idx, phase) in enumerate(out[n].ph)
+            # Initialise phase if not present
+            !haskey(observed_phases, phase) && (observed_phases[phase] = zeros(Float64, nP, nT))
+            # Assign solution phase value
+            observed_phases[phase][i, j] = out[n].ph_frac_wt[idx]
+        end
+    end
+    # plot
+    fig = Figure(size=(1000,1000)); i=1; j=1
+    xlabsz, ylabsz, titlesz, xticklabsz, yticklabsz, xticksz, yticksz = 20, 20, 22, 16, 16, 12, 12
+    for (ph, map) in observed_phases
+        ax = Axis(fig[i, j], title=ph, ylabel=L"Pressure\;[GPa]", xlabel=L"Temperature\;[K]", xlabelsize=xlabsz, ylabelsize=ylabsz,
+                    xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, titlesize=titlesz, yreversed=true)
+        hm = heatmap!(ax, sector=="um" ? Tum : sector=="tz" ? Ttz : Tlm, sector=="um" ? Pum : sector=="tz" ? Ptz : Plm, map', colormap=cmap, interpolate=interp)
+        Colorbar(fig[i, j+1], hm; labelsize=20, ticklabelsize=15, vertical=true, labelpadding=13)
+        j+=2; (j==2ncols+1) && (i+=1; j=1)
+    end
+    display(fig)
+    savein!="" && CairoMakie.save(savein*".png", fig)
+end
+
+function solve_point(P, T, em;
+                    Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
+                    XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0],
+                    XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
+                    ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0)
+
+    # Checks
+    @assert length(XB) == length(Clist) "Length of Clist and XB must match."
+    @assert length(XH) == length(Clist) "Length of Clist and XH must match."
+    @assert em in ["XH", "XB", "Custom"] "Endmember must be either: XB, XH or Custom"
+    @assert (em!="Custom" || (em=="Custom" && sum(ccomp)!=0.0)) "Please provide a custom composition if chosen"
+
+    # Minimize
+    X = em=="XB" ? XB : em=="XH" ? XH : ccomp
+    if P <= DBswitchP
+    data = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
+    out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, B=1.0, sys_in="wt", name_solvus=true)
+    else
+        data = Initialize_MAGEMin(P<=25. ? "mtl" : "sb21", verbose=false);
+        out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, sys_in="wt", name_solvus=true)
+    end
+    Finalize_MAGEMin(data);
+
+    return out
+end
 
 function second_axis!(fig, fpos, x, y, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, timeplot, trange, locals)
 

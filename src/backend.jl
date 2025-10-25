@@ -351,3 +351,14 @@ data_encoding(D::DataBlock) = data_encoding(D.timeheader, D.rprofheader, D.plate
         end
         return ph_bounds
     end
+
+    # Vectorized to reshaped indexing
+    @inline function get_ip_it_nrows(nP, i)
+        iT = Int(ceil(i/nP)); iP = i - (iT-1)*nP;
+        return iP, iT
+    end
+
+    @inline function get_ip_it_ncols(nT, i)
+        iP = Int(ceil(i/nT)); iT = i - (iP-1)*nT;
+        return iP, iT
+    end

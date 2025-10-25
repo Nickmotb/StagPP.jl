@@ -26,11 +26,11 @@ module StagPP
         include("api.jl")
 
     # Structure export
-    export DataBlock, sᴴ²ᴼ
+    export DataBlock, sᴴ²ᴼ, min_sᴴ²ᴼ
     # Constant export
     export sec2Gyr, om, m_s2cm_yr
     # Function export
-    export load_sim, data_encoding, solve_sH2O_fO2
+    export load_sim, data_encoding, solve_sH2O_fO2, min_sᴴ²ᴼ_assembler, solve_point
     # Plot exports
-    export time_vs_field, rprof_vs_field, field_vs_field, mantle_water, plot_sᴴ²ᴼ
+    export time_vs_field, rprof_vs_field, field_vs_field, mantle_water, plot_sᴴ²ᴼ, minmap
 end

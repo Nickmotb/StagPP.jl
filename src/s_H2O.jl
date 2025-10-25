@@ -509,7 +509,7 @@
 # ======= Plots ========
 # ======================
 
-    function plot_sᴴ²ᴼ(s::sᴴ²ᴼ; cmap=:vik100, interp=false, cmap_reverse=false, logscale=true)
+    function plot_sᴴ²ᴼ(s::sᴴ²ᴼ; cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, savein="")
 
         # Inputs
         xlabsz, ylabsz, titlesz, xticklabsz, yticklabsz, xticksz, yticksz = 20, 20, 22, 16, 16, 12, 12
@@ -517,27 +517,28 @@
         fig = Figure(size = (1000, 1000))
         cmap_reverse && (cmap = Reverse(cmap))
         # Upper Mantle
-            ax = Axis(fig[1, 1], xlabel=L"Pressure\;[\mathrm{GPa}]", ylabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted, wt%)", yreversed=true,
+            ax = Axis(fig[1, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted, wt%)", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
-            hm = heatmap!(ax, s.Tum, s.Pum, logscale ? log10.(s.um[:,:,1]') : s.um[:,:,1]'; colormap=cmap, interpolate=interp); Colorbar(fig[1, 2], hm)
-            ax = Axis(fig[1, 3], xlabel=L"Pressure\;[\mathrm{GPa}]", ylabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched, wt%)", yreversed=true,
+            hm = heatmap!(ax, s.Tum, s.Pum, logscale ? log10.(s.um[:,:,1]') : s.um[:,:,1]'; colormap=cmap, interpolate=interp, colorrange= logscale ? (-2., log10(maximum(s.um[:,:,1]))) : (minimum(s.um[:,:,1]), maximum(s.um[:,:,1]))); Colorbar(fig[1, 2], hm)
+            ax = Axis(fig[1, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched, wt%)", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
-            hm = heatmap!(ax, s.Tum, s.Pum, logscale ? log10.(s.um[:,:,2]') : s.um[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[1, 4], hm)
+            hm = heatmap!(ax, s.Tum, s.Pum, logscale ? log10.(s.um[:,:,2]') : s.um[:,:,2]'; colormap=cmap, interpolate=interp, colorrange= logscale ? (-2., log10(maximum(s.um[:,:,2]))) : (minimum(s.um[:,:,2]), maximum(s.um[:,:,2]))); Colorbar(fig[1, 4], hm)
         # Transition zone
-            ax = Axis(fig[2, 1], xlabel=L"Pressure\;[\mathrm{GPa}]", ylabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Depleted, wt%)", yreversed=true,
+            ax = Axis(fig[2, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Depleted, wt%)", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
             hm = heatmap!(ax, s.Ttz, s.Ptz, logscale ? log10.(s.tz[:,:,1]') : s.tz[:,:,1]'; colormap=cmap, interpolate=interp); Colorbar(fig[2, 2], hm)
-            ax = Axis(fig[2, 3], xlabel=L"Pressure\;[\mathrm{GPa}]", ylabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched, wt%)", yreversed=true,
+            ax = Axis(fig[2, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched, wt%)", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
             hm = heatmap!(ax, s.Ttz, s.Ptz, logscale ? log10.(s.tz[:,:,2]') : s.tz[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[2, 4], hm)
         # Lower Mantle
-            ax = Axis(fig[3, 1], xlabel=L"Pressure\;[\mathrm{GPa}]", ylabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Depleted, wt%)", yreversed=true,
+            ax = Axis(fig[3, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Depleted, wt%)", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
             hm = heatmap!(ax, s.Tlm, s.Plm, logscale ? log10.(s.lm[:,:,1]') : s.lm[:,:,1]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 2], hm)
-            ax = Axis(fig[3, 3], xlabel=L"Pressure\;[\mathrm{GPa}]", ylabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched, wt%)", yreversed=true,
+            ax = Axis(fig[3, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched, wt%)", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
             hm = heatmap!(ax, s.Tlm, s.Plm, logscale ? log10.(s.lm[:,:,2]') : s.lm[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 4], hm)
         display(fig)
+        savein!="" && CairoMakie.save(savein*".png", fig)
     end
 
 # ======================
