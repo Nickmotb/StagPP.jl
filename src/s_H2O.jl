@@ -154,6 +154,59 @@
 
     end
 
+# ==============================================
+# ==== Dense Hydrous Magnesium Silicates =======
+# ==============================================
+
+    function compute_path(P, H₀)
+        @inline ∂T∂P(P, H₀, Pᵣ) = @. H₀*log(P/Pᵣ)^(-1)
+        path = ∂T∂P.(P, H₀, 1) * step(P); path[1] += 500
+        path .= cumsum(path)
+        return path
+    end
+
+    # Assumes DHMS are entirely isolated within region  of stability. And only DHMS
+    # phase carries over across boundaries
+
+    # - Draw boundaries using plot extractor
+    # - Generate path
+    # - Iterate on path until first boundary crossing (in um database)
+    # - Assess atg mol% and take that as starters.
+    # - track on nmol vector the mol% of DHMS with generation/consumption of others,
+    #   meaning it can contain negative values.
+    # - when solving the system, use closes curve by assessing T difference at given pressure.
+    # - During sᴴ²ᴼ assembly, apply DHMS contribution based on limiting terms.
+
+    function path_solve(data, XH, Clist, reactions; npaths=10, ns=100)
+
+        # MAGEmin should be initialised for "um" before this call.
+
+        # Initialize variables
+        P = LinRange(1.1, 70.0, ns)
+        H₀ = LinRange(1.0, 150.0, npaths)
+        path_collection = PTpath[]
+        ph2pos = Dict("PhA" => 1, "PhE" => 2, "shB" => 3, "PhD" => 4, "PhH" => 5, "Atg" => 6, "En" => 7, "Fo" => 8, "Wad" => 9)
+
+        # Generate paths
+        for h in H₀
+            # Temperature path
+            Tpath = interpolate((P,), compute_path(P, h), Gridded(Linear()))
+            rh = fill("", ns)
+            # Mol vector assessment
+            nmol = zeros(Float64, ns, 9) # (PhA, PhE, shB, PhD, PhH, Atg, En, Fo, Wad) 
+            # Find first crossing
+            idx = findfirst(Tpath(P) .>= reactions.r1(P)) - 1
+            # Minimize crossing point
+            rm_list = remove_phases(["chl"], "um")
+            out = single_point_minimization(10*P[idx], Tpath(P[idx])-273.15, data, X=XH, Xoxides=Clist, B=1.0, sys_in="wt", name_solvus=true, rm_list=rm_list)
+            # Extract atg mol%, if none get out.
+            any(out.ph .== "atg") ? atg = out.ph_frac[findfirst(out.ph .== "atg")] : continue
+            # Now apply reactions at correct places
+
+        end
+
+    end
+
 # =======================
 # ==== Capacities =======
 # =======================

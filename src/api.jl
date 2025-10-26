@@ -409,6 +409,7 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         # Minimizer call + assembly
             verbose && println("Calculating upper mantle sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
+            rm_list = remove_phases(["chl"], "um")
             outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
             outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
             sᴴ²ᴼ_assembler!(um, outH, outB, nP*nT)
@@ -479,7 +480,8 @@ function minmap(sector, em::String; nP=50, nT=50,
     # Minimizer
     if sector == "um"
         data = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
-        out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, B=ones(length(Pv)), sys_in="wt", name_solvus=true)
+        rm_list = remove_phases(["chl"], "um")
+        out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, B=ones(length(Pv)), sys_in="wt", name_solvus=true, rm_list=rm_list)
     else
         data = Initialize_MAGEMin(sector=="tz" ? "mtl" : "sb21", verbose=false);
         out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, sys_in="wt", name_solvus=true)
@@ -528,7 +530,8 @@ function solve_point(P, T, em;
     X = em=="XB" ? XB : em=="XH" ? XH : ccomp
     if P <= DBswitchP
     data = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
-    out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, B=1.0, sys_in="wt", name_solvus=true)
+    rm_list = remove_phases(["chl"], "um")
+    out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, B=1.0, sys_in="wt", name_solvus=true, rm_list=rm_list)
     else
         data = Initialize_MAGEMin(P<=25. ? "mtl" : "sb21", verbose=false);
         out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, sys_in="wt", name_solvus=true)
