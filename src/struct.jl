@@ -81,23 +81,29 @@ struct min_sᴴ²ᴼ{T}
     fp          :: Float64
     D_rw_aki    :: Float64
     cor         :: Float64
+    # DHMS
+    PhA         :: Float64
+    PhE         :: Float64
+    shB         :: Float64
+    PhD         :: Float64
+    PhH         :: Float64
 end
 
 struct DHMS_boundaries{T}
     # See Komabayashi 2005
     # --- Entries
-        r1 :: T     # 5 Atg = 14 PhA + 142 En + 113 H₂O (2 on paper)
-        r2 :: T     # 5790 phA + 21831 En = 18757 hy-Wad + 11630 phE (8 on paper)
-        r3 :: T     # 16288 shB + 38172 St = 19265 phE + 62762 hy-Wad (55 on paper)
-        r4 :: T     # 1017 shB + 7839 St = 1800 phD + 8046 Pv (83 on paper)
-        r5 :: T     # 3 shB + 6 En = 2 phA + 11 Fo (7 on paper)
+        r1 :: T     # 5 Atg                     →   14 PhA + 142 En + 113 H₂O   (2 on paper)
+        r2 :: T     # 5790 phA + 21831 En       →   18757 hy-Wad + 11630 phE    (8 on paper)
+        r3 :: T     # 2 phA + 11 Fo             →   3 shB + 6 En                (7 on paper)
+        r4 :: T     # 19265 phE + 62762 hy-Wad  →   16288 shB + 38172 St        (55 on paper)
+        r5 :: T     # 1017 shB + 7839 St        →   1800 phD + 8046 Pv          (83 on paper)
+        r6 :: T     # 1 PhD                     →   1 PhH + 1 St                (decomposition)
     # --- Exit
         e :: T
-    
 end
 
 struct PTpath{T}
     T       :: T                   # Temperature (K) at requrest P (GPa). Interpolator object
     Bᵢ      :: Float64             # Initial antigorite budget of path
-    rhist   :: Array{String, 1}    # Reaction history of path, entries as string numbers
+    rh      :: Array{String, 1}    # Reaction history of path, entries as string numbers
 end

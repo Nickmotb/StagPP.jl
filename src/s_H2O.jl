@@ -70,7 +70,7 @@
 # ==== Integration =======
 # ========================
 
-    function ∫sᴴ²ᴼ!(fmap, Pv, Tv, min_s, outH, outB)
+    function ∫sᴴ²ᴼ!(fmap, Pv, Tv, min_s, outH, outB, DHMS, ppaths, paths)
 
         # Post-stishovite boundary
         CaCl₂_st, α_PbO₂_st = CaCl₂_α_PbO₂_boundary()
@@ -79,41 +79,36 @@
         @inline dry_phase(ph::String) = ph ∈ ["q", "nal", "crn", "plg"]
 
         # Phase iterator call
-        function s_phase_sum!(fmap, i, min_s, phase, ph, out, phwt, p, t, slot)
+        function s_phase_sum!(fmap, i, min_s, phase, ph, out, phwt, p, t, slot, nmol)
+
                 # Transition zone database (mtl)
-                (phase=="ol")      && (fmap[i, slot] += phwt * (min_s.ol(p, t) + min(out[i].SS_vec[ph].Comp[2]/0.1005, 1.0)*min_s.opx_al(p, t)))
-                (phase=="wad")     && (fmap[i, slot] += phwt * min_s.wad(p, t))
-                (phase=="ring")    && (fmap[i, slot] += phwt * min_s.rw(p, t))
-                (phase=="opx")     && (fmap[i, slot] += phwt * min_s.opx(p, t))
-                (phase=="coe")     && (fmap[i, slot] += phwt * min_s.coe(p, t))
-                (phase=="crst")    && (fmap[i, slot] += phwt * min_s.crst)
-                (phase=="fp")      && (fmap[i, slot] += phwt * min_s.fp)
-                ((phase=="hpx"))   && (fmap[i, slot] += phwt * min_s.cpx_hp(p, t))
+                (phase=="ol")      && (fmap[i, slot] += (phwt+nmol[8])/nmol[end] * min_s.ol(p, t))
+                (phase=="wad")     && (fmap[i, slot] += (phwt+nmol[9])/nmol[end] * min_s.wad(p, t))
+                (phase=="ring")    && (fmap[i, slot] += phwt/nmol[end] * min_s.rw(p, t))
+                (phase=="opx")     && (fmap[i, slot] += (phwt+nmol[7])/nmol[end] * min_s.opx(p, t)+ min(out[i].SS_vec[ph].Comp[2]/0.1005, 1.0)*min_s.opx_al(p, t))
+                (phase=="coe")     && (fmap[i, slot] += phwt/nmol[end] * min_s.coe(p, t))
+                (phase=="crst")    && (fmap[i, slot] += phwt/nmol[end] * min_s.crst)
+                (phase=="fp")      && (fmap[i, slot] += phwt/nmol[end] * min_s.fp)
+                ((phase=="hpx"))   && (fmap[i, slot] += phwt/nmol[end] * min_s.cpx_hp(p, t))
                 (phase=="cpx")     && (fmap[i, slot] += out[i].SS_vec[ph].emFrac_wt[1] * min_s.cpx_lp_di(p, t))
                 (phase=="cpx")     && (fmap[i, slot] += out[i].SS_vec[ph].emFrac_wt[4] * min_s.cpx_lp_jd(p, t))
                 # Lower mantle database (Stx)
-                (phase=="ak")  && (fmap[i, slot] += phwt * min_s.rw(p,t)/min_s.D_rw_aki)
-                (phase=="ppv") && (fmap[i, slot] += phwt * min_s.pv * (out[i].SS_vec[ph].Comp[3]*min_s.Dppv_al(p,t) + (phwt-out[i].SS_vec[ph].Comp[3])*min_s.Dppv_noal(p,t)))
+                (phase=="ak")  && (fmap[i, slot] += phwt/nmol[end] * min_s.rw(p,t)/min_s.D_rw_aki)
+                (phase=="ppv") && (fmap[i, slot] += phwt/nmol[end] * min_s.pv * (out[i].SS_vec[ph].Comp[3]*min_s.Dppv_al(p,t) + (phwt-out[i].SS_vec[ph].Comp[3])*min_s.Dppv_noal(p,t)))
                 # Found in both
-                (phase=="cf")  && (fmap[i, slot] += phwt * min_s.cf)
-                (phase=="cpv"   || phase=="capv")  && (fmap[i, slot] += phwt * min_s.cpv)
-                (phase=="pv"    || phase=="mpv")   && (fmap[i, slot] += phwt * min_s.pv)
-                (phase=="stv"   || phase=="st")    && (fmap[i, slot] += phwt * (p<=CaCl₂_st(t) ? min_s.st(p, t) : (p<=α_PbO₂_st(t) ? min_s.CaCl₂_st(p, t) : min_s.α_PbO₂_st(p, t))))
-                (phase=="g"     || phase=="gtmj")  && (fmap[i, slot] += phwt * min_s.grt(p, t))
+                (phase=="cf")  && (fmap[i, slot] += phwt/nmol[end] * min_s.cf)
+                (phase=="cpv"   || phase=="capv")  && (fmap[i, slot] += phwt/nmol[end] * min_s.cpv)
+                (phase=="pv"    || phase=="mpv")   && (fmap[i, slot] += (phwt+nmol[11])/nmol[end] * min_s.pv)
+                (phase=="stv"   || phase=="st")    && (fmap[i, slot] += (phwt+nmol[10])/nmol[end] * (p<=CaCl₂_st(t) ? min_s.st(p, t) : (p<=α_PbO₂_st(t) ? min_s.CaCl₂_st(p, t) : min_s.α_PbO₂_st(p, t))))
+                (phase=="g"     || phase=="gtmj")  && (fmap[i, slot] += phwt/nmol[end] * min_s.grt(p, t))
+
         end
 
         # Vectorized mesh iterator
         Threads.@threads for i in eachindex(Pv)
-            # Harzburgite
-            for ph in eachindex(outH[i].ph)
-                # Skip if dry phases
-                phase = outH[i].ph[ph]
-                dry_phase(phase) && continue
-                # Fraction of current phase
-                phwt = outH[i].ph_frac_wt[ph]
-                # Contribute to sum
-                s_phase_sum!(fmap, i, min_s, phase, ph, outH, phwt, Pv[i], Tv[i], 1)
-            end
+
+            # DHMS correction
+            nmol = zeros(Float64, 12); nmol[end]=1.0
 
             # Basalt
             for ph in eachindex(outB[i].ph)
@@ -121,10 +116,24 @@
                 phase = outB[i].ph[ph]
                 dry_phase(phase) && continue
                 # Fraction of current phase
-                phwt = outB[i].ph_frac_wt[ph]
+                phwt = outB[i].ph_frac[ph]
                 # Contribute to sum
-                s_phase_sum!(fmap, i, min_s, phase, ph, outB, phwt, Pv[i], Tv[i], 2)
+                s_phase_sum!(fmap, i, min_s, phase, ph, outB, phwt, Pv[i], Tv[i], 2, nmol)
             end
+
+            # Harzburgite
+            DHMS && (nmol .= DHMS_solve(outH[i], ppaths, paths))
+            for ph in eachindex(outH[i].ph)
+                # Skip if dry phases
+                phase = outH[i].ph[ph]
+                dry_phase(phase) && continue
+                # Fraction of current phase
+                phwt = outH[i].ph_frac[ph]
+                # Contribute to sum
+                s_phase_sum!(fmap, i, min_s, phase, ph, outH, phwt, Pv[i], Tv[i], 1, nmol)
+            end
+            # Dense hydrous magnesium silicates
+            DHMS && (fmap[i, 1] += (nmol[1:5]./nmol[end] ⋅ [min_s.PhA, min_s.PhE, min_s.shB, min_s.PhD, min_s.PhH]))
         end
 
     end
@@ -158,53 +167,227 @@
 # ==== Dense Hydrous Magnesium Silicates =======
 # ==============================================
 
-    function compute_path(P, H₀)
-        @inline ∂T∂P(P, H₀, Pᵣ) = @. H₀*log(P/Pᵣ)^(-1)
-        path = ∂T∂P.(P, H₀, 1) * step(P); path[1] += 500
+    function build_reactions()
+        # r1
+        P = [4.000, 4.150, 4.300, 4.450, 4.600, 4.750, 4.900, 5.050, 5.200, 5.350, 5.500]
+        T = [870.9, 864.4, 858.7, 854.1, 849.3, 841.4, 831.6, 823.5, 815.7, 805.4, 790.5]
+        r1 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
+        # r2
+        P = [12.70, 12.80, 12.90, 13.00, 13.10, 13.20, 13.30, 13.40, 13.50, 13.70, 13.705]
+        T = [1276., 1265., 1246., 1231., 1215., 1199., 1183., 1170., 1151., 1119., 1100.]
+        r2 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
+        # r3
+        P = [12.00, 12.20, 12.40, 12.60, 12.80, 13.00, 13.20, 13.40]
+        T = [805.0, 838.6, 866.7, 894.3, 922.5, 950.1, 977.6, 1005.0]
+        r3 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
+        # r4
+        P = [13.90, 14.20, 14.50, 14.80, 15.10, 15.40, 15.70, 16.00, 16.30, 16.60, 16.90, 17.20]
+        T = [1070., 1110., 1143., 1171., 1197., 1222., 1249., 1281., 1303., 1331., 1357., 1383.]
+        r4 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
+        # r5
+        P = [25.60, 25.80, 26.00, 26.20, 26.40, 26.60, 26.80, 27.00]
+        T = [1435., 1396., 1363., 1325., 1296., 1252., 1220., 1183.]
+        r5 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
+        # r6
+        P = [36.90, 37.80, 38.70, 39.60, 40.50, 41.40, 42.30, 43.20, 44.10, 45.00, 45.90, 46.80]
+        T = [1369., 1376., 1379., 1387., 1394., 1396., 1391., 1383., 1364., 1320., 1190., 1038.]
+        r6 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
+        # exit
+        P = [5.200, 5.600, 6.000, 6.400, 6.800, 7.200, 7.600, 8.000, 8.400, 8.800, 9.200, 9.600, 10.00, 
+                10.40, 10.80, 11.20, 11.60, 12.00, 12.40, 12.80, 13.20, 13.60, 14.00, 14.40, 14.80, 15.20, 
+                    15.60, 16.00, 16.40, 16.80, 17.20, 17.60, 18.00, 18.40, 18.80, 19.20, 19.60, 20.00, 20.40, 
+                        20.80, 21.20, 21.60, 22.00, 22.40, 22.80, 23.20, 23.60, 24.00, 24.40, 24.80, 25.20, 25.60, 
+                            26.00, 26.40, 26.80, 27.20, 27.60, 28.00, 28.40, 35.56, 36.40, 
+                                37.10, 37.80, 38.50, 39.20, 39.90, 40.60, 41.30, 42.00, 42.70, 43.40, 44.10, 44.80, 45.50, 
+                                    46.20, 46.90, 47.60, 48.30, 49.00, 49.70, 50.40, 51.10, 51.80, 52.50, 53.20, 53.90, 54.60, 
+                                        55.30, 56.00, 56.70, 57.40, 58.10, 58.80, 59.50, 59.90, 60.00, 60.21, 60.42, 60.52, 60.84, 
+                                            60.94, 61.26, 61.57, 61.78, 62.10, 62.31, 62.62, 62.83]
+        T = [816.9, 850.2, 881.6, 913.4, 944.6, 971.2, 1009.0, 1039.0, 1073.0, 1107.0, 1144.0, 1157.0, 1183.0, 
+            1205.0, 1222.0, 1239.0, 1254.0, 1267.0, 1273.0, 1297.0, 1397.0, 1480.0, 1474.0, 1467.0, 1459.0, 1452.0, 
+                1444.0, 1434.0, 1425.0, 1416.0, 1407.0, 1407.0, 1417.0, 1427.0, 1437.0, 1448.0, 1458.0, 1468.0, 1477.0, 
+                    1484.0, 1490.0, 1500.0, 1502.0, 1510.0, 1518.0, 1525.0, 1524.0, 1516.0, 1507.0, 1494.0, 1478.0, 1462.0, 
+                        1452.0, 1440.0, 1429.0, 1419.0, 1407.0, 1395.0, 1385.0, 1363.0, 1370.0, 
+                            1384.0, 1398.0, 1413.0, 1427.0, 1441.0, 1455.0, 1469.0, 1483.0, 1496.0, 1510.0, 1524.0, 1539.0, 1553.0, 
+                                1566.0, 1581.0, 1594.0, 1607.0, 1615.0, 1627.0, 1640.0, 1651.0, 1658.0, 1663.0, 1669.0, 1674.0, 1679.0, 
+                                    1676.0, 1673.0, 1669.0, 1659.0, 1650.0, 1628.0, 1587.0, 1553.0, 1518.0, 1481.0, 1433.0, 1390.0, 1333.0, 
+                                        1280.0, 1214.0, 1135.0, 1056.0, 984.2, 905.6, 839.7, 783.1]
+        e = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
+        return DHMS_boundaries(r1, r2, r3, r4, r5, r6, e)
+    end
+
+    function compute_path(P, s; 
+                            T1=773.0, P1=5.0,
+                            cold=(g1=10.0, g∞=1.0,  L=1.0, m=1.1),
+                            warm=(g1=100.0, g∞=40.0, L=4.0, m=1.1),
+                            bump=(A=20.0, Pb=5.0, w=4.0))
+
+        g1 = (1-s)*cold.g1 + s*warm.g1
+        g∞ = (1-s)*cold.g∞ + s*warm.g∞
+        L  = (1-s)*cold.L  + s*warm.L
+        m  = (1-s)*cold.m  + s*warm.m
+        A, Pb, w = bump.A, bump.Pb, bump.w
+        @inline ∂T∂P(P) = @. g∞ + (g1 - g∞) / (1 + ((P - P1)/L)^(m)) + A * exp(-0.5 * ((P - Pb)/w)^2)
+
+        path = ∂T∂P(P) * step(P); path[1] += T1
         path .= cumsum(path)
         return path
+
+        # # Run this outside if you want to check paths as plots
+        # P = LinRange(5.0, 70.0, 100)
+        # reactions = build_reactions()
+        # pr = LinRange(0.0, 1.0, 15)
+        # fig = Figure(size=(800,600))
+        # ax = Axis(fig[1,1])
+        # for i in eachindex(pr)
+        #     path = compute_path(P, pr[i])
+        #     plot!(ax, P, path)
+        # end
+        # lines!(ax, P[1:20], reactions.r1(P[1:20]), color=:red, linewidth=2)
+        # lines!(ax, P[1:20], reactions.r2(P[1:20]), color=:green, linewidth=2)
+        # lines!(ax, P[1:20], reactions.r3(P[1:20]), color=:orange, linewidth=2)
+        # lines!(ax, P, reactions.r4(P), color=:purple, linewidth=2)
+        # lines!(ax, P, reactions.r5(P), color=:brown, linewidth=2)
+        # lines!(ax, P, reactions.e(P), color=:blue, linewidth=2)
+        # ylims!(ax, 0.0, 2500.)
+        # display(fig)
+
     end
 
     # Assumes DHMS are entirely isolated within region  of stability. And only DHMS
     # phase carries over across boundaries
 
-    # - Draw boundaries using plot extractor
-    # - Generate path
-    # - Iterate on path until first boundary crossing (in um database)
-    # - Assess atg mol% and take that as starters.
-    # - track on nmol vector the mol% of DHMS with generation/consumption of others,
-    #   meaning it can contain negative values.
     # - when solving the system, use closes curve by assessing T difference at given pressure.
     # - During sᴴ²ᴼ assembly, apply DHMS contribution based on limiting terms.
 
-    function path_solve(data, XH, Clist, reactions; npaths=10, ns=100)
+    function path_solve(data, XH, Clist, phase_out; npaths=50, ns=100, Pend=130.0)
 
         # MAGEmin should be initialised for "um" before this call.
 
         # Initialize variables
-        P = LinRange(1.1, 70.0, ns)
-        H₀ = LinRange(1.0, 150.0, npaths)
+        P = LinRange(5.0, Pend, ns)
+        blends = LinRange(0.0, 1.0, npaths)
         path_collection = PTpath[]
-        ph2pos = Dict("PhA" => 1, "PhE" => 2, "shB" => 3, "PhD" => 4, "PhH" => 5, "Atg" => 6, "En" => 7, "Fo" => 8, "Wad" => 9)
+        reactions = build_reactions()
 
         # Generate paths
-        for h in H₀
+        for s in blends
             # Temperature path
-            Tpath = interpolate((P,), compute_path(P, h), Gridded(Linear()))
+            Tpath = interpolate((P,), compute_path(P, s), Gridded(Linear()))
+            # Reaction history vector
             rh = fill("", ns)
-            # Mol vector assessment
-            nmol = zeros(Float64, ns, 9) # (PhA, PhE, shB, PhD, PhH, Atg, En, Fo, Wad) 
             # Find first crossing
-            idx = findfirst(Tpath(P) .>= reactions.r1(P)) - 1
+            idx = max(findfirst(Tpath(P) .>= reactions.r1(P))-1, 1)
             # Minimize crossing point
-            rm_list = remove_phases(["chl"], "um")
+            rm_list = remove_phases(phase_out, "um")
             out = single_point_minimization(10*P[idx], Tpath(P[idx])-273.15, data, X=XH, Xoxides=Clist, B=1.0, sys_in="wt", name_solvus=true, rm_list=rm_list)
             # Extract atg mol%, if none get out.
-            any(out.ph .== "atg") ? atg = out.ph_frac[findfirst(out.ph .== "atg")] : continue
-            # Now apply reactions at correct places
-
+            atg = 0.0
+            any(out.ph .== "atg") ? (atg = out.ph_frac[findfirst(out.ph .== "atg")]; rh .*= "1") : (push!(path_collection, PTpath(Tpath, atg, rh)); continue)
+            # Now iterate on path
+            for i in idx+1:ns
+                # Current P-T
+                p, t = P[i], Tpath(P[i])
+                # Check boundaries and update reaction history
+                (t >= reactions.e(p)) && (rh[i] = "e"; rh[i+1:end] .= ""; break)
+                # PhA → PhE region
+                (t >= reactions.r2(p) && t>= reactions.r4(p)) && (occursin("2", rh[i]) ? continue : (rh[i:end].*="2"; continue))
+                # PhE → ShB region
+                ((t <= reactions.r4(p) && t <= reactions.r5(p)) && occursin("2", rh[i-1])) && (occursin("4", rh[i]) ? continue : (rh[i:end].*="4"; continue))
+                # PhA → ShB region
+                ((t <= reactions.r3(p) && t <= reactions.r5(p)) && !occursin("2", rh[i-1]) && (occursin("3", rh[i]) ? continue : (rh[i:end].*="3"; continue)))
+                # ShB → PhD region
+                (t >= reactions.r5(p) && t <= reactions.r6(p)) && (occursin("5", rh[i]) ? continue : (rh[i:end].*="5"; continue))
+                # PhD → PhH region
+                (t >= reactions.r6(p)) && (occursin("6", rh[i]) ? continue : (rh[i:end].*="6"; continue))
+            end
+            # Store path
+            push!(path_collection, PTpath(Tpath, atg, rh))
         end
+        return P, path_collection
+    end
 
+    function DHMS_solve(out, ppaths, paths)
+        # P and T
+        P = 1e-1out.P_kbar; T = out.T_C+273.15
+        # Assign closest path
+        path_idx = argmin([abs(paths[i].T(P) - T) for i in eachindex(paths)])
+        point_rh = paths[path_idx].rh[argmin(ppaths.-P)]
+        # Output vector
+        # Order: (PhA, PhE, shB, PhD, PhH, atg, en, fo, wad, st, pv, normalization)
+        nmol = zeros(Float64, 12); nmol[end]=1.0
+        (point_rh=="" || point_rh=="e") && (return nmol) # No DHMS present
+        nmol[6] = paths[path_idx].Bᵢ
+        nmol2 = copy(nmol) # stores present phases but doesn't change. Nmol only tracks transitions
+        # Fill with present reaction phases
+        for (i, ph) in enumerate(out.ph)
+            ph=="opx" && (nmol2[7] += out.SS_vec[i].emFrac[1])
+            ph=="ol" && (nmol2[8] += out.SS_vec[i].emFrac[1])
+            ph=="wad" && (nmol2[9] += out.ph_frac[i])
+            (ph=="stv" || ph=="st") && (nmol2[10] += out.ph_frac[i])
+            occursin("pv", ph) && (nmol2[11] += out.ph_frac[i])
+        end
+        # Compute mass balance
+        if occursin("1", point_rh)
+            nmol[1] += 14/5*nmol[6] # 5 atg → 14 PhA
+            nmol[7] += 142/5*nmol[6] # 5 atg → 142 en
+            nmol[6] = 0.0
+        end
+        if occursin("2", point_rh)
+            # Ensure only DHMS crosses boundary
+            nmol[7] = nmol2[7] # en
+            # Assess limiting term
+            lim = (nmol[1]/5790)<(nmol[7]/21831) ? 1 : 2
+            # Form products
+            nmol[9] += 18757/(lim==1 ? 5790 : 21831)*nmol[lim==1 ? 1 : 7] # wad
+            nmol[2] += 11630/(lim==1 ? 5790 : 21831)*nmol[lim==1 ? 1 : 7] # PhE
+            # Remove reactants
+            nmol[7] -= lim==1 ? 21831/5790*nmol[1] : 0.0; nmol[1] = 0.0 # en + PhA
+        end
+        if occursin("3", point_rh)
+            # Ensure only DHMS crosses boundary
+            nmol[7] = nmol2[7] # en
+            # Assess limiting term
+            lim = (nmol[1]/2)<(nmol[8]/11) ? 1 : 2
+            # Form products
+            nmol[3] += 3/(lim==1 ? 2 : 11)*nmol[lim==1 ? 1 : 8] # shB
+            nmol[7] += 6/(lim==1 ? 2 : 11)*nmol[lim==1 ? 1 : 8] # en
+            # Remove reactants
+            nmol[8] -= lim==1 ? 11/2*nmol[1] : 0.0; nmol[1] = 0.0 # ol + PhA
+        end
+        if occursin("4", point_rh)
+            # Ensure only DHMS crosses boundary
+            nmol[9] = nmol2[9] # wad
+            # Assess limiting term
+            lim = (nmol[2]/19265)<(nmol[9]/62762) ? 1 : 2
+            # Form products
+            nmol[3]  += 16288/(lim==1 ? 19265 : 62762)*nmol[lim==1 ? 2 : 9] # shB
+            nmol[10] += 38172/(lim==1 ? 19265 : 62762)*nmol[lim==1 ? 2 : 9] # st
+            # Remove reactants
+            nmol[9] -= lim==1 ? 62762/19265*nmol[2] : 0.0; nmol[2] = 0.0 # wad + PhE
+        end
+        if occursin("5", point_rh)
+            # Ensure only DHMS crosses boundary
+            nmol[7] = nmol2[7]
+            nmol[10] = nmol2[10]
+            # Assess limiting term
+            lim = (nmol[3]/1017)<(nmol[10]/7839) ? 1 : 2
+            # Form products
+            nmol[4] += 1800/(lim==1 ? 1017 : 7839)*nmol[lim==1 ? 3 : 10] # PhD
+            nmol[11] += 8046/(lim==1 ? 1017 : 7839)*nmol[lim==1 ? 3 : 10] # pv
+            # Remove reactants
+            nmol[10] -= lim==1 ? 7839/1017*nmol[3] : 0.0; nmol[3] = 0.0 # st + shB
+        end
+        if occursin("6", point_rh)
+            # Ensure only DHMS crosses boundary
+            nmol[11] = nmol2[11]
+            # Form products
+            nmol[5]  += nmol[4] # PhH
+            nmol[10] += nmol[4] # st
+            # Remove reactants
+            nmol[4] = 0.0
+        end
+        nmol[end] = sum(nmol)
+        return nmol
     end
 
 # =======================
@@ -234,8 +417,15 @@
         D_rw_aki = 21.
         cor = 0.0
 
+        # DHMS (temporary)
+        PhA = 2.7
+        PhE = 1.5
+        shB = 2.0
+        PhD = 3.0
+        PhH = 5.0
+
         return min_sᴴ²ᴼ(ol, wad, rw, grt, opx, opx_al, cpx_lp_di, cpx_lp_jd, cpx_hp, st, CaCl₂_st, α_PbO₂_st, coe, Dppv_al, 
-                            Dppv_noal, pv, cpv, cf, crst, fp, D_rw_aki, cor)
+                            Dppv_noal, pv, cpv, cf, crst, fp, D_rw_aki, cor, PhA, PhE, shB, PhD, PhH)
     end
 
     function fit_Keppler(PT, W, fug, n; unit="GPa", p=ones(3))
@@ -562,7 +752,7 @@
 # ======= Plots ========
 # ======================
 
-    function plot_sᴴ²ᴼ(s::sᴴ²ᴼ; cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, savein="")
+    function plot_sᴴ²ᴼ(s; cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, savein="")
 
         # Inputs
         xlabsz, ylabsz, titlesz, xticklabsz, yticklabsz, xticksz, yticksz = 20, 20, 22, 16, 16, 12, 12
@@ -598,7 +788,7 @@
 # ======= Others =======
 # ======================
 
-    function sᴴ²ᴼ_assembler!(map::Array{Float64, 2}, outH, outB, n::Int64)
+    function sᴴ²ᴼ_assembler!(map, outH, outB, n, DHMS, ppaths, paths)
         Threads.@threads for i in 1:n
             H₂O = 0.0
             # Depleted (Harzburgite)
@@ -613,16 +803,6 @@
                 ("H2O" in outB[i].SS_vec[j].emNames) && continue
                 H₂O += sum(outB[i].SS_vec[j].Comp[end-1])
             end; map[i, 2] = sum(H₂O)
-        end
-    end
-
-    function sᴴ²ᴼ_assembler!(map::Array{Float64, 2}, out, n::Int64)
-        Threads.@threads for i in 1:n
-            H₂O = 0.0
-            for j in eachindex(outH[i].SS_vec)
-                ("H2O" in outH[i].SS_vec[j].emNames) && continue
-                H₂O += sum(outH[i].SS_vec[j].Comp[end-1])
-            end; map[i, 1] = sum(H₂O)
         end
     end
 

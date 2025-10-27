@@ -378,12 +378,12 @@ end
 # =================================================================================
 
 function solve_sH2O_fO2(nP::Int64, nT::Int64;
-                        s=true, fO2=true, DBswitchP=7.0, plt=false, disp_prog=true,
+                        s=true, fO2=true, DBswitchP=7.0, plt=false, disp_prog=true, DHMS=true,
                         Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
                         XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0],
                         XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
                         Prange=(0.1, 130.0), Trange=(500.0, 4000.0), verbose=true,
-                        cmap=:vik100, interp=false, cmap_reverse=false, logscale=true,
+                        cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"]
                         )
 
     # Checks
@@ -395,12 +395,13 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         # Memory allocations
         # --- Axis Vectors
             Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 2000., nT)
-            Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(1200., Trange[2], nT)
-            Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(1200., Trange[2], nT)
+            Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(Trange[1], Trange[2], nT)
+            Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(Trange[1], Trange[2], nT)
         # --- Others
             Pv, Tv = zeros(Float64, nP*nT), zeros(Float64, nP*nT)
             XvH = map(Vector, eachrow(repeat(XH', outer=length(Pv))))
             XvB = map(Vector, eachrow(repeat(XB', outer=length(Pv))))
+            tnP = Int64(ceil(1.1max(nP, nT)))
         # --- Maps
             um, tz, lm = zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2) # later reshaped as 'T, P, reshape(um, nP, :)'
 
@@ -409,16 +410,18 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         # Minimizer call + assembly
             verbose && println("Calculating upper mantle sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
-            rm_list = remove_phases(["chl"], "um")
-            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
-            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog) # kbar and K
-            sᴴ²ᴼ_assembler!(um, outH, outB, nP*nT)
+            rm_list = remove_phases(phase_out, "um")
+            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog, rm_list=rm_list) # kbar and K
+            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog, rm_list=rm_list) # kbar and K
+            DHMS    &&  println("Exploring DHMS paths...")
+            ppaths, paths  =  DHMS ? path_solve(data, XH, Clist, phase_out; ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0)
+            sᴴ²ᴼ_assembler!(um, outH, outB, nP*nT, DHMS, ppaths, paths)
             um = cat(reshape(um[:,1], nP, nT), reshape(um[:,2], nP, nT), dims=3)
             Finalize_MAGEMin(data);
 
         # Mineral-bound sᴴ²ᴼ assembly
             verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
-            min_s = min_sᴴ²ᴼ_assembler(Int64(ceil(1.1max(nP, nT))));
+            min_s = min_sᴴ²ᴼ_assembler(tnP);
 
         # Transition zone mesh vectorization
             mesh_vectorization!(Ptz, Ttz, nP, nT, Pv, Tv)
@@ -427,7 +430,7 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
             data    = Initialize_MAGEMin("mtl", verbose=false);
             outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
             outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
-            ∫sᴴ²ᴼ!(tz, Pv, Tv, min_s, outH, outB)
+            ∫sᴴ²ᴼ!(tz, Pv, Tv, min_s, outH, outB, DHMS, ppaths, paths)
             tz = cat(reshape(tz[:,1], nP, nT), reshape(tz[:,2], nP, nT), dims=3)
             Finalize_MAGEMin(data);
     
@@ -438,10 +441,9 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
             data    = Initialize_MAGEMin("sb21", verbose=false);
             outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
             outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
-            ∫sᴴ²ᴼ!(lm, Pv, Tv, min_s, outH, outB)
+            ∫sᴴ²ᴼ!(lm, Pv, Tv, min_s, outH, outB, DHMS, ppaths, paths)
             lm = cat(reshape(lm[:,1], nP, nT), reshape(lm[:,2], nP, nT), dims=3)
             Finalize_MAGEMin(data);
-
         # Return structure
         smap = sᴴ²ᴼ( um, tz, lm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
 
@@ -463,7 +465,7 @@ function minmap(sector, em::String; nP=50, nT=50,
                 XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0],
                 XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
                 ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0, interp=false, cmap=:BuPu,
-                Prange=(0.1, 130.0), Trange=(500.0, 4000.0), ncols=4, savein=""
+                Prange=(0.1, 130.0), Trange=(500.0, 4000.0), ncols=4, savein="", phase_out=["chl"]
                 )
 
     # Check
@@ -480,7 +482,7 @@ function minmap(sector, em::String; nP=50, nT=50,
     # Minimizer
     if sector == "um"
         data = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
-        rm_list = remove_phases(["chl"], "um")
+        rm_list = remove_phases(phase_out, "um")
         out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, B=ones(length(Pv)), sys_in="wt", name_solvus=true, rm_list=rm_list)
     else
         data = Initialize_MAGEMin(sector=="tz" ? "mtl" : "sb21", verbose=false);
@@ -518,7 +520,8 @@ function solve_point(P, T, em;
                     Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
                     XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0],
                     XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
-                    ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0)
+                    ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0,phase_out=["chl"]
+                    )
 
     # Checks
     @assert length(XB) == length(Clist) "Length of Clist and XB must match."
@@ -530,7 +533,7 @@ function solve_point(P, T, em;
     X = em=="XB" ? XB : em=="XH" ? XH : ccomp
     if P <= DBswitchP
     data = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
-    rm_list = remove_phases(["chl"], "um")
+    rm_list = remove_phases(phase_out, "um")
     out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, B=1.0, sys_in="wt", name_solvus=true, rm_list=rm_list)
     else
         data = Initialize_MAGEMin(P<=25. ? "mtl" : "sb21", verbose=false);
