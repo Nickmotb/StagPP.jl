@@ -330,11 +330,14 @@
         # P and T
         P = 1e-1out.P_kbar; T = out.T_C+273.15
         # Assign closest path (requires grid search)
-        Δmap = zeros(Float64, length(paths), length(ppaths)) # Empty distance map
-        [Δmap[i,:] .= (paths[i].T(ppaths) .- T).^2 for i in eachindex(paths)] # Fill with Temperature Δ
-        [Δmap[i,:] .+= (ppaths .- P).^2 for i in eachindex(paths)] # Fill with Pressure Δ
-        path_idx = argmin(Δmap)[1]
-        point_rh = paths[path_idx].rh[argmin(abs.(ppaths.-P))] # Path history
+        # Δmap = zeros(Float64, length(paths), length(ppaths)) # Empty distance map
+        # [Δmap[i,:] .= (paths[i].T(ppaths) .- T).^2 for i in eachindex(paths)] # Fill with Temperature Δ
+        # [Δmap[i,:] .+= (ppaths .- P).^2 for i in eachindex(paths)] # Fill with Pressure Δ
+        # closest_point = argmin(Δmap)
+        # path_idx = closest_point[1]
+        # point_rh = paths[path_idx].rh[closest_point[2]] # Path history
+        path_idx = argmin([abs(paths[i].T(P) - T) for i in eachindex(paths)])
+        point_rh = paths[path_idx].rh[argmin(abs.(ppaths.-P))]
         # Reaction/Output vector
         # Order: (PhA, PhE, shB, PhD, PhH, atg, en, fo, wad, st, pv, normalization)
         nmol = @MVector zeros(Float64, 12); nmol[end]=1.0
@@ -779,7 +782,7 @@
 # ======= Plots ========
 # ======================
 
-    function plot_sᴴ²ᴼ(s; cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, savein="")
+    function plot_sᴴ²ᴼ(s; cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, savein="", bigpicture=false)
 
         # Inputs
         xlabsz, ylabsz, titlesz, xticklabsz, yticklabsz, xticksz, yticksz = 20, 20, 22, 16, 16, 12, 12
@@ -807,6 +810,16 @@
             ax = Axis(fig[3, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched, wt%)", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
             hm = heatmap!(ax, s.Tlm, s.Plm, logscale ? log10.(s.lm[:,:,2]') : s.lm[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 4], hm)
+        
+        # Big Picture
+        if bigpicture
+            bigP = vcat(s.Pum, s.Ptz, s.Plm)
+            itp = extrapolate(interpolate((s.Pum, s.Tum), s.um[:,:,1], Gridded(Linear())), 0.0)
+            bigH = cat(itp(s.Pum, s.Ttz), s.tz[:,:,1], s.lm[:,:,1], dims=1)
+            ax = Axis(fig[1:3, 5], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Big\;Picture\;(Depleted, wt%)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
+            hm = heatmap!(ax, s.Ttz, bigP, logscale ? log10.(bigH') : bigH'; colormap=cmap, interpolate=interp,colorrange= logscale ? (-2., log10(maximum(bigH))) : (minimum(bigH), maximum(bigH))); Colorbar(fig[1:3, 6], hm)
+        end
         display(fig)
         savein!="" && CairoMakie.save(savein*".png", fig)
     end
