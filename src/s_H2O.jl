@@ -90,8 +90,8 @@
                 (phase=="crst")    && (fmap[i, slot] += phwt/nmol[end] * min_s.crst)
                 (phase=="fp")      && (fmap[i, slot] += phwt/nmol[end] * min_s.fp)
                 ((phase=="hpx"))   && (fmap[i, slot] += phwt/nmol[end] * min_s.cpx_hp(p, t))
-                (phase=="cpx")     && (fmap[i, slot] += out[i].SS_vec[ph].emFrac_wt[1] * min_s.cpx_lp_di(p, t))
-                (phase=="cpx")     && (fmap[i, slot] += out[i].SS_vec[ph].emFrac_wt[4] * min_s.cpx_lp_jd(p, t))
+                (phase=="cpx")     && (fmap[i, slot] += phwt/nmol[end] * out[i].SS_vec[ph].emFrac[1] * min_s.cpx_lp_di(p, t))
+                (phase=="cpx")     && (fmap[i, slot] += phwt/nmol[end] * out[i].SS_vec[ph].emFrac[4] * min_s.cpx_lp_jd(p, t))
                 # Lower mantle database (Stx)
                 (phase=="ak")  && (fmap[i, slot] += phwt/nmol[end] * min_s.rw(p,t)/min_s.D_rw_aki)
                 (phase=="ppv") && (fmap[i, slot] += phwt/nmol[end] * min_s.pv * (out[i].SS_vec[ph].Comp[3]*min_s.Dppv_al(p,t) + (phwt-out[i].SS_vec[ph].Comp[3])*min_s.Dppv_noal(p,t)))
@@ -134,7 +134,6 @@
             end
             # Dense hydrous magnesium silicates
             DHMS && (fmap[i, 1] += (nmol[1:5]./nmol[end] ⋅ [min_s.PhA, min_s.PhE, min_s.shB, min_s.PhD, min_s.PhH]))
-            (Pv[i]>=55.0 && Pv[i]<=65.0 && Tv[i]<=1000.0) && println("DHMS correction at P=$(Pv[i]) GPa and T=$(Tv[i]) K is $(nmol[1:5]./nmol[end] ⋅ [min_s.PhA, min_s.PhE, min_s.shB, min_s.PhD, min_s.PhH]) wt% H₂O")
         end
 
     end
@@ -233,6 +232,7 @@
         path .= cumsum(path)
         return path
     end
+
     function test_paths()
         P = LinRange(5.0, 70.0, 100)
         Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"]
@@ -259,15 +259,17 @@
     # Assumes DHMS are entirely isolated within region of stability. And only DHMS
     # phase carries over across boundaries.
 
-    function path_solve(data, XH, Clist, phase_out; npaths=50, ns=100, Pend=130.0)
-
-        # MAGEmin should be initialised for "um" before this call.
+    function path_solve(XH, Clist, phase_out, Pvtz, Tvtz, DBswitchP, outH; npaths=50, ns=100, Pend=130.0)
 
         # Initialize variables
         P = LinRange(5.0, Pend, ns)
         blends = LinRange(0.0, 1.0, npaths)
         path_collection = PTpath[]
         reactions = build_reactions()
+        sidx, eidx = findfirst(P.>=DBswitchP), findlast(P.<=25.0) # P range in which to look for seeds
+
+        # Initialise MAGEMin_C
+        data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
 
         # Generate paths
         for s in blends
@@ -282,9 +284,22 @@
             out = single_point_minimization(10*P[idx], Tpath(P[idx])-273.15, data, X=XH, Xoxides=Clist, B=1.0, sys_in="wt", name_solvus=true, rm_list=rm_list)
             # Extract atg mol%, if none get out.
             atg = 0.0
-            any(out.ph .== "atg") ? (atg = out.ph_frac[findfirst(out.ph .== "atg")]; rh .*= "1") : (push!(path_collection, PTpath(Tpath, atg, rh)); continue)
+            any(out.ph .== "atg") ? (atg = out.ph_frac[findfirst(out.ph .== "atg")]; rh .*= "1") : (push!(path_collection, PTpath(Tpath, atg, rh, 0.0, 0.0, 0.0, 0.0)); continue)
+            # Initialise seeds
+            en_seed, fo_seed, wad_seed, st_seed = 0.0, 0.0, 0.0, 0.0
+
             # Now iterate on path
             for i in idx+1:ns
+                # Assess closest minimized point and track seed
+                if i >= sidx && i <= eidx
+                    min_idx = argmin((Pvtz .- P[i]).^2 .+ (Tvtz .- Tpath(P[i])).^2)
+                    ph2em_map = Dict(ph => n for (n, ph) in enumerate(outH[min_idx].ph))
+                    ("ol" in outH[min_idx].ph) && (fo_seed = max(fo_seed, outH[min_idx].SS_vec[ph2em_map["ol"]].emFrac[1]))
+                    ("opx" in outH[min_idx].ph) && (en_seed = max(en_seed, outH[min_idx].SS_vec[ph2em_map["opx"]].emFrac[1]))
+                    ("wad" in outH[min_idx].ph) && (wad_seed = max(wad_seed, outH[min_idx].ph_frac[ph2em_map["wad"]]))
+                    ("stv" in outH[min_idx].ph) && (st_seed = max(st_seed, outH[min_idx].ph_frac[ph2em_map["stv"]]))
+                end
+
                 # Current P-T
                 p, t = P[i], Tpath(P[i])
                 # Check boundaries and update reaction history
@@ -300,24 +315,18 @@
                 # PhD → PhH region
                 (t >= reactions.r6(p)) && (occursin("6", rh[i]) ? continue : (rh[i:end].*="6"; continue))
             end
-            # Store path
-            push!(path_collection, PTpath(Tpath, atg, rh))
-        end
-        return P, path_collection
-    end
 
-    function retrieve_path_seeds(pathP, pathT, out, Pv, Tv, DBswitchP)
-        en_seed, fo_seed, wad_seed = 0.0, 0.0, 0.0
-        # Iterate on path
-        sidx, eidx = findfirst(pathP.>=DBswitchP), findlast(pathP.<=25.0)
-        for i in sidx:eidx
-            # Assess closest minimized point
-            idx = argmin((Pv .- pathP[i]).^2 .+ (Tv .- pathT[i]).^2)
-            ph2em_map = Dict(ph => idx for (idx, ph) in enumerate(outH[idx].ph))
-            ("ol" in out[idx].ph) && (fo_seed = max(fo_seed, out[idx].SS_vec[ph2em_map["ol"]].emFrac[1]))
-            ("opx" in out[idx].ph) && (en_seed = max(en_seed, out[idx].SS_vec[ph2em_map["opx"]].emFrac[1]))
-            ("wad" in out[idx].ph) && (wad_seed = max(wad_seed, out[idx].ph_frac[ph2em_map["wad"]]))
+            # Ensure non-zero seeds
+            en_seed==0.0 && (en_seed = 0.1)
+            fo_seed==0.0 && (fo_seed = 0.1)
+            wad_seed==0.0 && (wad_seed = 0.1)
+            st_seed==0.0 && (st_seed = 0.1)
+            
+            # Store path
+            push!(path_collection, PTpath(Tpath, atg, rh, en_seed, fo_seed, wad_seed, st_seed))
         end
+        Finalize_MAGEMin(data);
+        return P, path_collection
     end
 
     function DHMS_solve(out, ppaths, paths)
@@ -331,15 +340,16 @@
         nmol = @MVector zeros(Float64, 12); nmol[end]=1.0
         (point_rh=="" || point_rh=="e") && (return nmol) # No DHMS present
         nmol[6] = paths[path_idx].Bᵢ
-        nmol2 = copy(nmol) # stores present phases but doesn't change. Nmol only tracks transitions
-        # Fill with present reaction phases
+        # Assign seeds to static vector
         for (i, ph) in enumerate(out.ph)
-            ph=="opx" && (nmol2[7] += out.SS_vec[i].emFrac[1])
-            ph=="ol" && (nmol2[8] += out.SS_vec[i].emFrac[1])
-            ph=="wad" && (nmol2[9] += out.ph_frac[i])
-            (ph=="stv" || ph=="st") && (nmol2[10] += out.ph_frac[i])
-            occursin("pv", ph) && (nmol2[11] += out.ph_frac[i])
+            nmol[7] += ph=="opx" ? out.SS_vec[i].emFrac[1] : paths[path_idx].en_seed
+            nmol[8] += ph=="ol"  ? out.SS_vec[i].emFrac[1] : paths[path_idx].fo_seed
+            nmol[9] += ph=="wad" ? out.ph_frac[i] : paths[path_idx].wad_seed
+            nmol[10] += (ph=="stv" || ph=="st") ? out.ph_frac[i] : paths[path_idx].st_seed
+            occursin("pv", ph) && (nmol[11] += out.ph_frac[i])
         end
+        nmol2 = copy(nmol) # stores present phases but doesn't change. Nmol only tracks transitions
+
         # Compute mass balance
         if occursin("1", point_rh)
             nmol[1] += 14/5*nmol[6] # 5 atg → 14 PhA
@@ -400,7 +410,10 @@
             # Remove reactants
             nmol[4] = 0.0
         end
-        nmol[end] = sum(nmol)
+        # Remove already present phases base (because sumed during contribution)
+        nmol[6:end-1] .= max.(nmol[6:end-1] .- nmol2[6:end-1], 0.0)
+        # Total amount of moles to normalize on during contribution
+        nmol[end] = 1.0+sum(nmol[1:end-1])
         return nmol
     end
 
@@ -802,7 +815,7 @@
 # ======= Others =======
 # ======================
 
-    function sᴴ²ᴼ_assembler!(map, outH, outB, n, DHMS, ppaths, paths)
+    function sᴴ²ᴼ_assembler!(map, outH, outB, n)
         Threads.@threads for i in 1:n
             H₂O = 0.0
             # Depleted (Harzburgite)
