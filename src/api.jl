@@ -458,7 +458,7 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
 end
 
 # ======================
-# ==== Auxilliaries ====
+# ===== Minimizer ======
 # ======================
 
 function minmap(sector, em::String; nP=50, nT=50,
@@ -544,6 +544,10 @@ function solve_point(P, T, em;
 
     return out
 end
+
+# ======================
+# ==== Auxilliaries ====
+# ======================
 
 function second_axis!(fig, fpos, x, y, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, timeplot, trange, locals)
 

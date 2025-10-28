@@ -782,7 +782,7 @@
 # ======= Plots ========
 # ======================
 
-    function plot_sᴴ²ᴼ(s; cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, savein="", bigpicture=false)
+    function plot_sᴴ²ᴼ(s; cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, savein="", bigpicture=(false, 1) )
 
         # Inputs
         xlabsz, ylabsz, titlesz, xticklabsz, yticklabsz, xticksz, yticksz = 20, 20, 22, 16, 16, 12, 12
@@ -812,10 +812,10 @@
             hm = heatmap!(ax, s.Tlm, s.Plm, logscale ? log10.(s.lm[:,:,2]') : s.lm[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 4], hm)
         
         # Big Picture
-        if bigpicture
+        if bigpicture[1]
             bigP = vcat(s.Pum, s.Ptz, s.Plm)
-            itp = extrapolate(interpolate((s.Pum, s.Tum), s.um[:,:,1], Gridded(Linear())), 0.0)
-            bigH = cat(itp(s.Pum, s.Ttz), s.tz[:,:,1], s.lm[:,:,1], dims=1)
+            itp = extrapolate(interpolate((s.Pum, s.Tum), s.um[:,:,bigpicture[2]], Gridded(Linear())), 0.0)
+            bigH = cat(itp(s.Pum, s.Ttz), s.tz[:,:,bigpicture[2]], s.lm[:,:,bigpicture[2]], dims=1)
             ax = Axis(fig[1:3, 5], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Big\;Picture\;(Depleted, wt%)", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
             hm = heatmap!(ax, s.Ttz, bigP, logscale ? log10.(bigH') : bigH'; colormap=cmap, interpolate=interp,colorrange= logscale ? (-2., log10(maximum(bigH))) : (minimum(bigH), maximum(bigH))); Colorbar(fig[1:3, 6], hm)
