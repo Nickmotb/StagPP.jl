@@ -70,7 +70,7 @@
 # ==== Integration =======
 # ========================
 
-    function ∫sᴴ²ᴼ!(fmap, Pv, Tv, min_s, outH, outB, DHMS, ppaths, paths)
+    function ∫sᴴ²ᴼ!(fmap, Pv, Tv, min_s, outHB, DHMS, ppaths, paths, n)
 
         # Post-stishovite boundary
         CaCl₂_st, α_PbO₂_st = CaCl₂_α_PbO₂_boundary()
@@ -79,22 +79,22 @@
         @inline dry_phase(ph::String) = ph ∈ ["q", "nal", "crn", "plg"]
 
         # Phase iterator call
-        function s_phase_sum!(fmap, i, min_s, phase, ph, out, phwt, p, t, slot, nmol)
+        function s_phase_sum!(fmap, i, ib, min_s, phase, ph, out, phwt, p, t, slot, nmol)
 
                 # Transition zone database (mtl)
                 (phase=="ol")      && (fmap[i, slot] += (phwt+nmol[8])/nmol[end] * min_s.ol(p, t))
                 (phase=="wad")     && (fmap[i, slot] += (phwt+nmol[9])/nmol[end] * min_s.wad(p, t))
                 (phase=="ring")    && (fmap[i, slot] += phwt/nmol[end] * min_s.rw(p, t))
-                (phase=="opx")     && (fmap[i, slot] += (phwt+nmol[7])/nmol[end] * min_s.opx(p, t)+ min(out[i].SS_vec[ph].Comp[2]/0.1005, 1.0)*min_s.opx_al(p, t))
+                (phase=="opx")     && (fmap[i, slot] += (phwt+nmol[7])/nmol[end] * min_s.opx(p, t)+ min(out[ib].SS_vec[ph].Comp[2]/0.1005, 1.0)*min_s.opx_al(p, t))
                 (phase=="coe")     && (fmap[i, slot] += phwt/nmol[end] * min_s.coe(p, t))
                 (phase=="crst")    && (fmap[i, slot] += phwt/nmol[end] * min_s.crst)
                 (phase=="fp")      && (fmap[i, slot] += phwt/nmol[end] * min_s.fp)
                 ((phase=="hpx"))   && (fmap[i, slot] += phwt/nmol[end] * min_s.cpx_hp(p, t))
-                (phase=="cpx")     && (fmap[i, slot] += phwt/nmol[end] * out[i].SS_vec[ph].emFrac[1] * min_s.cpx_lp_di(p, t))
-                (phase=="cpx")     && (fmap[i, slot] += phwt/nmol[end] * out[i].SS_vec[ph].emFrac[4] * min_s.cpx_lp_jd(p, t))
+                (phase=="cpx")     && (fmap[i, slot] += phwt/nmol[end] * out[ib].SS_vec[ph].emFrac[1] * min_s.cpx_lp_di(p, t))
+                (phase=="cpx")     && (fmap[i, slot] += phwt/nmol[end] * out[ib].SS_vec[ph].emFrac[4] * min_s.cpx_lp_jd(p, t))
                 # Lower mantle database (Stx)
                 (phase=="ak")  && (fmap[i, slot] += phwt/nmol[end] * min_s.rw(p,t)/min_s.D_rw_aki)
-                (phase=="ppv") && (fmap[i, slot] += phwt/nmol[end] * min_s.pv * (out[i].SS_vec[ph].Comp[3]*min_s.Dppv_al(p,t) + (phwt-out[i].SS_vec[ph].Comp[3])*min_s.Dppv_noal(p,t)))
+                (phase=="ppv") && (fmap[i, slot] += phwt/nmol[end] * min_s.pv * (out[ib].SS_vec[ph].Comp[3]*min_s.Dppv_al(p,t) + (phwt-out[ib].SS_vec[ph].Comp[3])*min_s.Dppv_noal(p,t)))
                 # Found in both
                 (phase=="cf")  && (fmap[i, slot] += phwt/nmol[end] * min_s.cf)
                 (phase=="cpv"   || phase=="capv")  && (fmap[i, slot] += phwt/nmol[end] * min_s.cpv)
@@ -105,32 +105,33 @@
         end
 
         # Vectorized mesh iterator
-        Threads.@threads for i in eachindex(Pv)
+        Threads.@threads for i in 1:n
 
             # DHMS correction
             nmol = @MVector zeros(Float64, 12); nmol[end]=1.0
 
             # Basalt
-            for ph in eachindex(outB[i].ph)
+            for ph in eachindex(outHB[i+n].ph)
+                ib = i+n
                 # Skip if dry phase
-                phase = outB[i].ph[ph]
+                phase = outHB[ib].ph[ph]
                 dry_phase(phase) && continue
                 # Fraction of current phase
-                phwt = outB[i].ph_frac[ph]
+                phwt = outHB[ib].ph_frac[ph]
                 # Contribute to sum
-                s_phase_sum!(fmap, i, min_s, phase, ph, outB, phwt, Pv[i], Tv[i], 2, nmol)
+                s_phase_sum!(fmap, i, ib, min_s, phase, ph, outHB, phwt, Pv[i], Tv[i], 2, nmol)
             end
 
             # Harzburgite
-            DHMS && (nmol .= DHMS_solve(outH[i], ppaths, paths))
-            for ph in eachindex(outH[i].ph)
+            DHMS && (nmol .= DHMS_solve(outHB[i], ppaths, paths))
+            for ph in eachindex(outHB[i].ph)
                 # Skip if dry phases
-                phase = outH[i].ph[ph]
+                phase = outHB[i].ph[ph]
                 dry_phase(phase) && continue
                 # Fraction of current phase
-                phwt = outH[i].ph_frac[ph]
+                phwt = outHB[i].ph_frac[ph]
                 # Contribute to sum
-                s_phase_sum!(fmap, i, min_s, phase, ph, outH, phwt, Pv[i], Tv[i], 1, nmol)
+                s_phase_sum!(fmap, i, i, min_s, phase, ph, outHB, phwt, Pv[i], Tv[i], 1, nmol)
             end
             # Dense hydrous magnesium silicates
             DHMS && (fmap[i, 1] += (nmol[1:5]./nmol[end] ⋅ [min_s.PhA, min_s.PhE, min_s.shB, min_s.PhD, min_s.PhH]))
@@ -169,8 +170,8 @@
 
     function build_reactions()
         # r1
-        P = [4.000, 4.150, 4.300, 4.450, 4.600, 4.750, 4.900, 5.050, 5.200, 5.350, 5.500]
-        T = [870.9, 864.4, 858.7, 854.1, 849.3, 841.4, 831.6, 823.5, 815.7, 805.4, 790.5]
+        P = [0.1923, 0.4103, 0.7821, 1.167, 1.590, 1.974, 2.410, 2.872, 3.218, 3.551, 3.936, 4.218, 4.513, 4.795, 5.038, 5.282, 5.385, 5.436, 5.462]
+        T = [886.8, 937.6, 980.3, 1001.0, 1019.0, 1025.0, 1025.0, 1013.0, 1001.0, 974.2, 931.5, 899.0, 854.2, 801.4, 746.4, 699.7, 659.0, 600.0, 543.1]
         r1 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
         # r2
         P = [12.70, 12.80, 12.90, 13.00, 13.10, 13.20, 13.30, 13.40, 13.50, 13.70, 13.705]
@@ -193,7 +194,7 @@
         T = [1369., 1376., 1379., 1387., 1394., 1396., 1391., 1383., 1364., 1320., 1190., 1038.]
         r6 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
         # exit
-        P = [5.200, 5.600, 6.000, 6.400, 6.800, 7.200, 7.600, 8.000, 8.400, 8.800, 9.200, 9.600, 10.00, 
+        P = [0.1923, 0.4103, 0.7821, 1.167, 1.590, 1.974, 2.410, 2.872, 3.218, 3.551, 3.936, 4.218, 4.513, 4.795, 5.038, 5.200, 5.600, 6.000, 6.400, 6.800, 7.200, 7.600, 8.000, 8.400, 8.800, 9.200, 9.600, 10.00, 
                 10.40, 10.80, 11.20, 11.60, 12.00, 12.40, 12.80, 13.20, 13.60, 14.00, 14.40, 14.80, 15.20, 
                     15.60, 16.00, 16.40, 16.80, 17.20, 17.60, 18.00, 18.40, 18.80, 19.20, 19.60, 20.00, 20.40, 
                         20.80, 21.20, 21.60, 22.00, 22.40, 22.80, 23.20, 23.60, 24.00, 24.40, 24.80, 25.20, 25.60, 
@@ -202,7 +203,7 @@
                                     46.20, 46.90, 47.60, 48.30, 49.00, 49.70, 50.40, 51.10, 51.80, 52.50, 53.20, 53.90, 54.60, 
                                         55.30, 56.00, 56.70, 57.40, 58.10, 58.80, 59.50, 59.90, 60.00, 60.21, 60.42, 60.52, 60.84, 
                                             60.94, 61.26, 61.57, 61.78, 62.10, 62.31, 62.62, 62.83]
-        T = [816.9, 850.2, 881.6, 913.4, 944.6, 971.2, 1009.0, 1039.0, 1073.0, 1107.0, 1144.0, 1157.0, 1183.0, 
+        T = [886.8, 937.6, 980.3, 1001.0, 1019.0, 1025.0, 1025.0, 1013.0, 1001.0, 974.2, 931.5, 899.0, 854.2, 801.4, 746.4, 816.9, 850.2, 881.6, 913.4, 944.6, 971.2, 1009.0, 1039.0, 1073.0, 1107.0, 1144.0, 1157.0, 1183.0, 
             1205.0, 1222.0, 1239.0, 1254.0, 1267.0, 1273.0, 1297.0, 1397.0, 1480.0, 1474.0, 1467.0, 1459.0, 1452.0, 
                 1444.0, 1434.0, 1425.0, 1416.0, 1407.0, 1407.0, 1417.0, 1427.0, 1437.0, 1448.0, 1458.0, 1468.0, 1477.0, 
                     1484.0, 1490.0, 1500.0, 1502.0, 1510.0, 1518.0, 1525.0, 1524.0, 1516.0, 1507.0, 1494.0, 1478.0, 1462.0, 
@@ -233,14 +234,8 @@
         return path
     end
 
-    function test_paths()
-        P = LinRange(5.0, 70.0, 100)
-        Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"]
-        XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0]
-        reactions = build_reactions()
-        data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
-        ppaths, paths = path_solve(data, XH, Clist, ["chl", "br"])
-        Finalize_MAGEMin(data);
+    function test_paths(paths, reactions)
+        P = LinRange(5.0, 65.0, 500)
         fig = Figure(size=(800,600))
         ax = Axis(fig[1,1])
         for i in eachindex(paths)
@@ -253,13 +248,14 @@
         lines!(ax, P, reactions.r5(P), color=:brown, linewidth=2)
         lines!(ax, P, reactions.e(P), color=:blue, linewidth=2)
         ylims!(ax, 0.0, 2500.)
-        display(fig)
+        # display(fig)
+        CairoMakie.save("path_test.png", fig)
     end
 
     # Assumes DHMS are entirely isolated within region of stability. And only DHMS
     # phase carries over across boundaries.
 
-    function path_solve(XH, Clist, phase_out, Pvtz, Tvtz, DBswitchP, outH; npaths=50, ns=100, Pend=130.0)
+    function path_solve(XH, Clist, phase_out, Pvtz, Tvtz, DBswitchP, outH, test_path; npaths=50, ns=100, Pend=130.0)
 
         # Initialize variables
         P = LinRange(5.0, Pend, ns)
@@ -326,16 +322,20 @@
             push!(path_collection, PTpath(Tpath, atg, rh, en_seed, fo_seed, wad_seed, st_seed))
         end
         Finalize_MAGEMin(data);
+        test_path && test_paths(path_collection, reactions)
         return P, path_collection
     end
 
     function DHMS_solve(out, ppaths, paths)
         # P and T
         P = 1e-1out.P_kbar; T = out.T_C+273.15
-        # Assign closest path
-        path_idx = argmin([abs(paths[i].T(P) - T) for i in eachindex(paths)])
-        point_rh = paths[path_idx].rh[argmin(abs.(ppaths.-P))]
-        # Output vector
+        # Assign closest path (requires grid search)
+        Δmap = zeros(Float64, length(paths), length(ppaths)) # Empty distance map
+        [Δmap[i,:] .= (paths[i].T(ppaths) .- T).^2 for i in eachindex(paths)] # Fill with Temperature Δ
+        [Δmap[i,:] .+= (ppaths .- P).^2 for i in eachindex(paths)] # Fill with Pressure Δ
+        path_idx = argmin(Δmap)[1]
+        point_rh = paths[path_idx].rh[argmin(abs.(ppaths.-P))] # Path history
+        # Reaction/Output vector
         # Order: (PhA, PhE, shB, PhD, PhH, atg, en, fo, wad, st, pv, normalization)
         nmol = @MVector zeros(Float64, 12); nmol[end]=1.0
         (point_rh=="" || point_rh=="e") && (return nmol) # No DHMS present
@@ -815,26 +815,27 @@
 # ======= Others =======
 # ======================
 
-    function sᴴ²ᴼ_assembler!(map, outH, outB, n)
+    function sᴴ²ᴼ_assembler!(map, outHB, n)
         Threads.@threads for i in 1:n
             H₂O = 0.0
             # Depleted (Harzburgite)
-            for j in eachindex(outH[i].SS_vec)
-                ("H2O" in outH[i].SS_vec[j].emNames) && continue
-                H₂O += sum(outH[i].SS_vec[j].Comp[end-1])
+            for j in eachindex(outHB[i].SS_vec)
+                ("H2O" in outHB[i].SS_vec[j].emNames) && continue
+                H₂O += sum(outHB[i].SS_vec[j].Comp[end-1])
             end; map[i, 1] = sum(H₂O)
 
             # Enriched (Lherzolite)
             H₂O = 0.0
-            for j in eachindex(outB[i].SS_vec)
-                ("H2O" in outB[i].SS_vec[j].emNames) && continue
-                H₂O += sum(outB[i].SS_vec[j].Comp[end-1])
+            for j in eachindex(outHB[i+n].SS_vec)
+                ("H2O" in outHB[i+n].SS_vec[j].emNames) && continue
+                H₂O += sum(outHB[i+n].SS_vec[j].Comp[end-1])
             end; map[i, 2] = sum(H₂O)
         end
     end
 
     function mesh_vectorization!(P, T, nP, nT, Pv, Tv)
-        Pv .= repeat(P, outer=nT); Tv .= repeat(T, inner=nP)
+        vP, vT = repeat(P, outer=nT), repeat(T, inner=nP)
+        Pv .= vcat(vP, vP); Tv .= vcat(vT, vT)
     end
 
     function local_fug(P, T, ns)

@@ -383,13 +383,17 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
                         XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0],
                         XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
                         Prange=(0.1, 130.0), Trange=(500.0, 4000.0), verbose=true,
-                        cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"]
+                        cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"],
+                        test_path=false
                         )
 
     # Checks
     (!s && !fO2) && return
     @assert length(Clist) == length(XB) "Length of Clist and XB must match."
     @assert length(Clist) == length(XH) "Length of Clist and XH must match."
+
+    # Vetorization size
+    nPnT = nP*nT
 
     if s
         # Memory allocations
@@ -398,10 +402,9 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
             Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(1000., Trange[2], nT)
             Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(1000., Trange[2], nT)
         # --- Others
-            Pv, Tv = zeros(Float64, nP*nT), zeros(Float64, nP*nT)
-            XvH = map(Vector, eachrow(repeat(XH', outer=length(Pv))))
-            XvB = map(Vector, eachrow(repeat(XB', outer=length(Pv))))
-            tnP = Int64(ceil(1.1max(nP, nT)))
+            Pv, Tv = zeros(Float64, 2nPnT), zeros(Float64, 2nPnT)
+            Xv = vcat(map(Vector, eachrow(repeat(XH', outer=nPnT))), map(Vector, eachrow(repeat(XB', outer=nPnT))))
+            tnP, tnP05 = Int64(ceil(1.1max(nP, nT))), Int64(ceil(0.5max(nP, nT)))
         # --- Maps
             um, tz, lm = zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2) # later reshaped as 'T, P, reshape(um, nP, :)'
 
@@ -411,10 +414,9 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
             verbose && println("Calculating upper mantle sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
             rm_list = remove_phases(phase_out, "um")
-            outH    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog, rm_list=rm_list) # kbar and K
-            outB    = multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog, rm_list=rm_list) # kbar and K
+            outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog, rm_list=rm_list) # kbar and K
             Finalize_MAGEMin(data);
-            sᴴ²ᴼ_assembler!(um, outH, outB, nP*nT)
+            sᴴ²ᴼ_assembler!(um, outHB, nPnT)
             um = cat(reshape(um[:,1], nP, nT), reshape(um[:,2], nP, nT), dims=3)
 
         # Mineral-bound sᴴ²ᴼ assembly
@@ -426,13 +428,12 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         # Minimizer call + assembly
             verbose && println("Calculating transition zone sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("mtl", verbose=false);
-            outH    .= multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
-            outB    .= multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
+            outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
             Finalize_MAGEMin(data);
 
-            DHMS    &&  println("Exploring DHMS paths...")
-            ppaths, paths  =  DHMS ? path_solve(XH, Clist, phase_out, Pv, Tv, DBswitchP, outH; npaths=50, ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0)
-            ∫sᴴ²ᴼ!(tz, Pv, Tv, min_s, outH, outB, DHMS, ppaths, paths)
+            DHMS && verbose && println("Exploring DHMS paths...")
+            ppaths, paths  =  DHMS ? path_solve(XH, Clist, phase_out, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), DBswitchP, (@view outHB[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0)
+            ∫sᴴ²ᴼ!(tz, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), min_s, outHB, DHMS, ppaths, paths, nPnT)
             tz = cat(reshape(tz[:,1], nP, nT), reshape(tz[:,2], nP, nT), dims=3)
     
         # Lower mantle mesh vectorization
@@ -440,9 +441,8 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         # Minimizer call + assembly
             verbose && println("Calculating lower mantle sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("sb21", verbose=false);
-            outH    .= multi_point_minimization(10Pv, Tv.-273.15, data, X=XvH, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
-            outB    .= multi_point_minimization(10Pv, Tv.-273.15, data, X=XvB, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
-            ∫sᴴ²ᴼ!(lm, Pv, Tv, min_s, outH, outB, DHMS, ppaths, paths)
+            outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
+            ∫sᴴ²ᴼ!(lm, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), min_s, outHB, DHMS, ppaths, paths, nPnT)
             lm = cat(reshape(lm[:,1], nP, nT), reshape(lm[:,2], nP, nT), dims=3)
             Finalize_MAGEMin(data);
         # Return structure
@@ -479,7 +479,7 @@ function minmap(sector, em::String; nP=50, nT=50,
     Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(1200., Trange[2], nT)
     Pv, Tv = zeros(Float64, nP*nT), zeros(Float64, nP*nT)
     Xv = map(Vector, eachrow(repeat(X', outer=length(Pv))))
-    mesh_vectorization!(sector=="um" ? Pum : sector=="tz" ? Ptz : Plm, sector=="um" ? Tum : sector=="tz" ? Ttz : Tlm, nP, nT, Pv, Tv)
+    Pv .= repeat(sector=="um" ? Pum : sector=="tz" ? Ptz : Plm, outer=nT); Tv .= repeat(sector=="um" ? Tum : sector=="tz" ? Ttz : Tlm, inner=nP)
     # Minimizer
     if sector == "um"
         data = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
