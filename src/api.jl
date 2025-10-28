@@ -395,8 +395,8 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         # Memory allocations
         # --- Axis Vectors
             Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 2000., nT)
-            Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(Trange[1], Trange[2], nT)
-            Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(Trange[1], Trange[2], nT)
+            Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(1000., Trange[2], nT)
+            Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(1000., Trange[2], nT)
         # --- Others
             Pv, Tv = zeros(Float64, nP*nT), zeros(Float64, nP*nT)
             XvH = map(Vector, eachrow(repeat(XH', outer=length(Pv))))
@@ -431,7 +431,7 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
             Finalize_MAGEMin(data);
 
             DHMS    &&  println("Exploring DHMS paths...")
-            ppaths, paths  =  DHMS ? path_solve(XH, Clist, phase_out, Pv, Tv, DBswitchP, outH; npaths=70, ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0)
+            ppaths, paths  =  DHMS ? path_solve(XH, Clist, phase_out, Pv, Tv, DBswitchP, outH; npaths=50, ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0)
             ∫sᴴ²ᴼ!(tz, Pv, Tv, min_s, outH, outB, DHMS, ppaths, paths)
             tz = cat(reshape(tz[:,1], nP, nT), reshape(tz[:,2], nP, nT), dims=3)
     
@@ -513,8 +513,8 @@ function minmap(sector, em::String; nP=50, nT=50,
         Colorbar(fig[i, j+1], hm; labelsize=20, ticklabelsize=15, vertical=true, labelpadding=13)
         j+=2; (j==2ncols+1) && (i+=1; j=1)
     end
+    !isempty(savein) && CairoMakie.save("./" * savein * ".png", fig)
     display(fig)
-    savein!="" && CairoMakie.save(savein*".png", fig)
 end
 
 function solve_point(P, T, em;
