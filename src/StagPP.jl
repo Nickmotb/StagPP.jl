@@ -1,7 +1,7 @@
 module StagPP
 
     # Dependencies
-    using Mmap, Parsers, Interpolations, ForwardDiff, LinearAlgebra
+    using Mmap, Parsers, Interpolations, ForwardDiff, LinearAlgebra, StaticArrays
     using Statistics, EasyFit, LsqFit, MAGEMin_C
     using CairoMakie, DelimitedFiles, Printf
 

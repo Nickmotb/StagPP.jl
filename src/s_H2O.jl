@@ -108,7 +108,7 @@
         Threads.@threads for i in eachindex(Pv)
 
             # DHMS correction
-            nmol = zeros(Float64, 12); nmol[end]=1.0
+            nmol = @MVector zeros(Float64, 12); nmol[end]=1.0
 
             # Basalt
             for ph in eachindex(outB[i].ph)
@@ -134,6 +134,7 @@
             end
             # Dense hydrous magnesium silicates
             DHMS && (fmap[i, 1] += (nmol[1:5]./nmol[end] ⋅ [min_s.PhA, min_s.PhE, min_s.shB, min_s.PhD, min_s.PhH]))
+            (Pv[i]>=55.0 && Pv[i]<=65.0 && Tv[i]<=1000.0) && println("DHMS correction at P=$(Pv[i]) GPa and T=$(Tv[i]) K is $(nmol[1:5]./nmol[end] ⋅ [min_s.PhA, min_s.PhE, min_s.shB, min_s.PhD, min_s.PhH]) wt% H₂O")
         end
 
     end
@@ -216,8 +217,8 @@
     end
 
     function compute_path(P, s; 
-                            T1=773.0, P1=5.0,
-                            cold=(g1=10.0, g∞=1.0,  L=1.0, m=1.1),
+                            T1=700.0, P1=5.0,
+                            cold=(g1=10.0, g∞=5.0,  L=1.0, m=1.1),
                             warm=(g1=100.0, g∞=40.0, L=4.0, m=1.1),
                             bump=(A=20.0, Pb=5.0, w=4.0))
 
@@ -231,33 +232,32 @@
         path = ∂T∂P(P) * step(P); path[1] += T1
         path .= cumsum(path)
         return path
-
-        # # Run this outside if you want to check paths as plots
-        # P = LinRange(5.0, 70.0, 100)
-        # reactions = build_reactions()
-        # pr = LinRange(0.0, 1.0, 15)
-        # fig = Figure(size=(800,600))
-        # ax = Axis(fig[1,1])
-        # for i in eachindex(pr)
-        #     path = compute_path(P, pr[i])
-        #     plot!(ax, P, path)
-        # end
-        # lines!(ax, P[1:20], reactions.r1(P[1:20]), color=:red, linewidth=2)
-        # lines!(ax, P[1:20], reactions.r2(P[1:20]), color=:green, linewidth=2)
-        # lines!(ax, P[1:20], reactions.r3(P[1:20]), color=:orange, linewidth=2)
-        # lines!(ax, P, reactions.r4(P), color=:purple, linewidth=2)
-        # lines!(ax, P, reactions.r5(P), color=:brown, linewidth=2)
-        # lines!(ax, P, reactions.e(P), color=:blue, linewidth=2)
-        # ylims!(ax, 0.0, 2500.)
-        # display(fig)
-
+    end
+    function test_paths()
+        P = LinRange(5.0, 70.0, 100)
+        Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"]
+        XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0]
+        reactions = build_reactions()
+        data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
+        ppaths, paths = path_solve(data, XH, Clist, ["chl", "br"])
+        Finalize_MAGEMin(data);
+        fig = Figure(size=(800,600))
+        ax = Axis(fig[1,1])
+        for i in eachindex(paths)
+            plot!(ax, P, paths[i].T(P), color = paths[i].Bᵢ==0.0 ? :gray : :red)
+        end
+        lines!(ax, P[1:20], reactions.r1(P[1:20]), color=:red, linewidth=2)
+        lines!(ax, P[1:20], reactions.r2(P[1:20]), color=:green, linewidth=2)
+        lines!(ax, P[1:20], reactions.r3(P[1:20]), color=:orange, linewidth=2)
+        lines!(ax, P, reactions.r4(P), color=:purple, linewidth=2)
+        lines!(ax, P, reactions.r5(P), color=:brown, linewidth=2)
+        lines!(ax, P, reactions.e(P), color=:blue, linewidth=2)
+        ylims!(ax, 0.0, 2500.)
+        display(fig)
     end
 
-    # Assumes DHMS are entirely isolated within region  of stability. And only DHMS
-    # phase carries over across boundaries
-
-    # - when solving the system, use closes curve by assessing T difference at given pressure.
-    # - During sᴴ²ᴼ assembly, apply DHMS contribution based on limiting terms.
+    # Assumes DHMS are entirely isolated within region of stability. And only DHMS
+    # phase carries over across boundaries.
 
     function path_solve(data, XH, Clist, phase_out; npaths=50, ns=100, Pend=130.0)
 
@@ -306,15 +306,29 @@
         return P, path_collection
     end
 
+    function retrieve_path_seeds(pathP, pathT, out, Pv, Tv, DBswitchP)
+        en_seed, fo_seed, wad_seed = 0.0, 0.0, 0.0
+        # Iterate on path
+        sidx, eidx = findfirst(pathP.>=DBswitchP), findlast(pathP.<=25.0)
+        for i in sidx:eidx
+            # Assess closest minimized point
+            idx = argmin((Pv .- pathP[i]).^2 .+ (Tv .- pathT[i]).^2)
+            ph2em_map = Dict(ph => idx for (idx, ph) in enumerate(outH[idx].ph))
+            ("ol" in out[idx].ph) && (fo_seed = max(fo_seed, out[idx].SS_vec[ph2em_map["ol"]].emFrac[1]))
+            ("opx" in out[idx].ph) && (en_seed = max(en_seed, out[idx].SS_vec[ph2em_map["opx"]].emFrac[1]))
+            ("wad" in out[idx].ph) && (wad_seed = max(wad_seed, out[idx].ph_frac[ph2em_map["wad"]]))
+        end
+    end
+
     function DHMS_solve(out, ppaths, paths)
         # P and T
         P = 1e-1out.P_kbar; T = out.T_C+273.15
         # Assign closest path
         path_idx = argmin([abs(paths[i].T(P) - T) for i in eachindex(paths)])
-        point_rh = paths[path_idx].rh[argmin(ppaths.-P)]
+        point_rh = paths[path_idx].rh[argmin(abs.(ppaths.-P))]
         # Output vector
         # Order: (PhA, PhE, shB, PhD, PhH, atg, en, fo, wad, st, pv, normalization)
-        nmol = zeros(Float64, 12); nmol[end]=1.0
+        nmol = @MVector zeros(Float64, 12); nmol[end]=1.0
         (point_rh=="" || point_rh=="e") && (return nmol) # No DHMS present
         nmol[6] = paths[path_idx].Bᵢ
         nmol2 = copy(nmol) # stores present phases but doesn't change. Nmol only tracks transitions
@@ -418,11 +432,11 @@
         cor = 0.0
 
         # DHMS (temporary)
-        PhA = 2.7
-        PhE = 1.5
-        shB = 2.0
-        PhD = 3.0
-        PhH = 5.0
+        PhA = 11.3 # Maurice et al. 2018
+        PhE = 11.9 # Maurice et al. 2018
+        shB = 0.5(11.1 + 11.1/1.9) # Kakizawa et al. 2018
+        PhD = 0.5(6.7 + 11.2) # Bolfan Casanova et al. 2018
+        PhH = 15.2 # Nishiet et al. 2014
 
         return min_sᴴ²ᴼ(ol, wad, rw, grt, opx, opx_al, cpx_lp_di, cpx_lp_jd, cpx_hp, st, CaCl₂_st, α_PbO₂_st, coe, Dppv_al, 
                             Dppv_noal, pv, cpv, cf, crst, fp, D_rw_aki, cor, PhA, PhE, shB, PhD, PhH)

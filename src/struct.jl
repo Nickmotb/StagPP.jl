@@ -103,7 +103,11 @@ struct DHMS_boundaries{T}
 end
 
 struct PTpath{T}
-    T       :: T                   # Temperature (K) at requrest P (GPa). Interpolator object
-    Bᵢ      :: Float64             # Initial antigorite budget of path
-    rh      :: Array{String, 1}    # Reaction history of path, entries as string numbers
+    T           :: T                   # Temperature (K) at requrest P (GPa). Interpolator object
+    Bᵢ          :: Float64             # Initial antigorite budget of path
+    rh          :: Array{String, 1}    # Reaction history of path, entries as string numbers
+    en_seed     :: Float64             # Max seen enstatite to seed for chaining outside stable range
+    wad_seed    :: Float64             # Max seen wadsleyite to seed for chaining outside stable range
+    fo_seed     :: Float64             # Max seen forsterite to seed for chaining outside stable range
+    st_seed     :: Float64             # Max seen stishovite to seed for chaining outside stable range
 end
