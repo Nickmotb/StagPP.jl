@@ -325,40 +325,106 @@ data_encoding(D::DataBlock) = data_encoding(D.timeheader, D.rprofheader, D.plate
        ∂M(r, rcmb, ρ) = 4π/3 * diff(cat(1e3rcmb, r.+1e3rcmb, dims=1).^3, dims=1) .* ρ
 
     # Get phase transitions radial coordinates
-    function idx_ph_transitions(Dblock::DataBlock; timeidx::Int=1)
-        idxR = data_encoding(Dblock)[2]
-        r = Dblock.rprofdata[:, timeidx, idxR["r"]]
-        midpoint_r = 0.5(r[1:end-1] .+ r[2:end])
-        ρ = Dblock.rprofdata[:, timeidx, idxR["rhomean"]]
-        ∂ρ_∂r = diff(ρ)./diff(r)
-        ∂²ρ_∂r² = diff(∂ρ_∂r)./diff(midpoint_r)
-        # Find radial phase boundaries
-        baseline = maximum(∂²ρ_∂r²[1:findfirst(r.>=250000.0)]) # Corresponds to the decaying ppv -> pv transition from bottom to top
-        shifted_∂²ρ_∂r² = ∂²ρ_∂r² .- baseline
-        ph_bounds, prev, current_ph = zeros(Int, 3), -1.0, 1
-        for i in eachindex(shifted_∂²ρ_∂r²)
-            # Entering peak
-            ((shifted_∂²ρ_∂r²[i] <= 0.0) && (prev < 0.0)) && continue
-            # Forward step if next value is higher
-            if (shifted_∂²ρ_∂r²[i] > prev); (prev = shifted_∂²ρ_∂r²[i]); continue; end
-            # Descend until closes to zero
-            prev = ∂²ρ_∂r²[i]
-            if (abs(∂²ρ_∂r²[i]) < prev); (prev = abs(∂²ρ_∂r²[i])); continue; end
-            # Record boundary index
-            ph_bounds[current_ph] = i-1
-            current_ph += 1
-            prev = -1.0
+        function idx_ph_transitions(Dblock::DataBlock; timeidx::Int=1)
+            idxR = data_encoding(Dblock)[2]
+            r = Dblock.rprofdata[:, timeidx, idxR["r"]]
+            midpoint_r = 0.5(r[1:end-1] .+ r[2:end])
+            ρ = Dblock.rprofdata[:, timeidx, idxR["rhomean"]]
+            ∂ρ_∂r = diff(ρ)./diff(r)
+            ∂²ρ_∂r² = diff(∂ρ_∂r)./diff(midpoint_r)
+            # Find radial phase boundaries
+            baseline = maximum(∂²ρ_∂r²[1:findfirst(r.>=250000.0)]) # Corresponds to the decaying ppv -> pv transition from bottom to top
+            shifted_∂²ρ_∂r² = ∂²ρ_∂r² .- baseline
+            ph_bounds, prev, current_ph = zeros(Int, 3), -1.0, 1
+            for i in eachindex(shifted_∂²ρ_∂r²)
+                # Entering peak
+                ((shifted_∂²ρ_∂r²[i] <= 0.0) && (prev < 0.0)) && continue
+                # Forward step if next value is higher
+                if (shifted_∂²ρ_∂r²[i] > prev); (prev = shifted_∂²ρ_∂r²[i]); continue; end
+                # Descend until closes to zero
+                prev = ∂²ρ_∂r²[i]
+                if (abs(∂²ρ_∂r²[i]) < prev); (prev = abs(∂²ρ_∂r²[i])); continue; end
+                # Record boundary index
+                ph_bounds[current_ph] = i-1
+                current_ph += 1
+                prev = -1.0
+            end
+            return ph_bounds
         end
-        return ph_bounds
-    end
 
     # Vectorized to reshaped indexing
-    @inline function get_ip_it_nrows(nP, i)
-        iT = Int(ceil(i/nP)); iP = i - (iT-1)*nP;
-        return iP, iT
-    end
+        @inline function get_ip_it_nrows(nP, i)
+            iT = Int(ceil(i/nP)); iP = i - (iT-1)*nP;
+            return iP, iT
+        end
 
-    @inline function get_ip_it_ncols(nT, i)
-        iP = Int(ceil(i/nT)); iT = i - (iP-1)*nT;
-        return iP, iT
-    end
+        @inline function get_ip_it_ncols(nT, i)
+            iP = Int(ceil(i/nT)); iT = i - (iP-1)*nT;
+            return iP, iT
+        end
+
+    # Right axis for plots
+        function second_axis!(fig, fpos, x, y, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, timeplot, trange, locals)
+
+            function transform_data(y, field)
+                yp = [first(y), last(y)]
+                (field=="SurfOceanMass3D") && (return [locals[1], locals[2]]./om, L"Ocean\;masses") # 10^21 kg
+                (field=="Pressure") && (return km2GPa.(yp), L"Pressure\;[GPa]") # GPa
+                return nothing, nothing
+            end
+            yp, ylab = transform_data(y, field); (isnothing(yp)) && return
+            ax2 = Axis(fig[timeplot ? fpos[1] : fpos[1]+1, fpos[2]], yticklabelcolor = :black, yaxisposition = :right, ylabel = ylab, ylabelsize=ylabelsize, yticklabelsize=yticklabelsize, ylabelpadding=ylabelpadding,
+                        xgridvisible=false, ygridvisible=false, yreversed=yreversed)
+            scatter!(ax2, first(x)*ones(2), yp, alpha=0.0)
+            # yreversed && ylims!(ax2, maximum(yp), minimum(yp))
+            timeplot && (yreversed ? ylims!(ax2, reverse(yp)) : (ylims!(ax2, yp)))
+            xlims!(ax2, trange)
+            hidespines!(ax2); hidexdecorations!(ax2)
+        end
+
+    # Convert depth in km to pressure in GPa using PREM
+        function km2GPa(depth)
+
+            r = 6371 - max(depth,0.0)
+            r < 0.0 ? error("Depth beyond Earth's radius") : nothing
+            #  Inner core
+            if (r >= 0.0 && r <= 1221.5)
+            pressure = -575.170316 + 0.29421732*depth -2.30448727e-05*depth*depth
+            
+            #  Outer core
+            elseif (r >= 1221.5 && r < 3480.0)
+            pressure = -293.862745 +0.183037581*depth  -1.202957e-05*depth*depth
+            
+            #  Lower mantle
+            elseif (r >= 3480.0 && r <= 3630.0)
+            pressure = -33.49617 + 0.05853999*depth
+            elseif (r >= 3630.0 && r <= 5600.0)
+            pressure = -3.56294332+0.0390269653*depth+3.11829162e-06*depth*depth
+            elseif (r >= 5600.0 && r <= 5701.0)
+            pressure =  -5.758207 + 0.04415793*depth
+            
+            # Transition zone
+            elseif (r >= 5701.0 && r <= 5771.0)
+            pressure =  -2.875294 + 0.03985716*depth
+            elseif (r >= 5771.0 && r <= 5971.0)
+            pressure =  -2.056346 + 0.03845555*depth
+            elseif (r >= 5971.0 && r <= 6151.0)
+            pressure = -0.5319232 + 0.03467901*depth
+            
+            # LVZ & LID
+            elseif (r >= 6151.0 && r <= 6346.6)
+            pressure =   -0.213082 + 0.0332782*depth
+            elseif (r >= 6346.6 && r <= 6371.0)
+            pressure = 2.6e3 * 9.8 * (6371.0 - r ) *1000/1.0e9 # rho=2.6g/cm3, in GPa
+            end
+            
+            return pressure
+        end
+
+    # Convert pressure in GPa to depth in km using PREM
+        function GPa2km(pressure)
+            depth = LinRange(0., 6371., 800)
+            P = sort(km2GPa.(depth))
+            itp = interpolate((P,), depth, Gridded(Linear()))
+            return itp(pressure)
+        end

@@ -377,6 +377,36 @@ end
 # =======  Water Storage Capacity (sᴴ²ᴼ) and Oxygen fugacity profile (fO₂)  =======
 # =================================================================================
 
+"""
+    Solve for mantle water storage capacity (sᴴ²ᴼ) and oxygen fugacity (fO₂) over P-T-X space.
+
+    \t Basic usage: \t solve_sH2O_fO2(nP::Int64, nT::Int64; kwargs...)
+
+    Optional arguments (kwargs):
+
+      • -- General arguments --
+
+        - s::Bool \t\t\t-->\t Solve for sᴴ²ᴼ [default: true]
+        - fO2::Bool \t\t\t-->\t Solve for fO₂ [default: true]
+        - DBswitchP::Float64 \t\t-->\t Pressure (GPa) to switch between upper mantle and transition zone databases [default: 7.0]
+        - plt::Bool \t\t\t-->\t Plot results [default: false]
+        - disp_prog::Bool \t\t-->\t Display progress bars [default: true]
+        - DHMS::Bool \t\t\t-->\t Explore DHMS paths for transition zone calculations [default: true]
+        - Clist::Vector{String} \t-->\t List of oxides in the system [default: ["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"]]
+        - XB::Vector{Float64} \t\t-->\t Bulk composition in wt% for sᴴ²ᴼ calculations [default: Upper mantle composition]
+        - XH::Vector{Float64} \t\t-->\t Bulk composition in wt% for fO₂ calculations [default: Mid-ocean ridge basalt composition]
+        - Prange::Tuple{Float64, Float64} \t-->\t Pressure range in GPa [default: (0.1, 130.0)]
+        - Trange::Tuple{Float64, Float64} \t-->\t Temperature range in K [default: (500.0, 4000.0)]
+        - verbose::Bool \t\t-->\t Enable verbose output [default: true]
+
+      • -- Plot arguments -- (plot_sᴴ²ᴼ(...) call)
+
+        - cmap::Symbol \t\t\t-->\t Colormap for plots [default: :vik100]
+        - interp::Bool \t\t\t-->\t Interpolate results for smoother plots [default: false]
+        - cmap_reverse::Bool \t\t-->\t Reverse colormap [default: false]
+        - logscale::Bool \t\t\t-->\t Plot log₁₀ of sᴴ²ᴼ or fO₂ [default: true]
+        - phase_out::Vector{String} \t-->\t List of phases to exclude from calculations [default: ["chl"]]
+"""
 function solve_sH2O_fO2(nP::Int64, nT::Int64;
                         s=true, fO2=true, DBswitchP=7.0, plt=false, disp_prog=true, DHMS=true,
                         Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
@@ -461,18 +491,48 @@ end
 # ===== Minimizer ======
 # ======================
 
+"""
+    Plot phase diagram minimization maps for a given mantle sector and composition.
+    
+    \t Basic usage: \t minmap(sector::String, em::String; kwargs...)
+
+    Required arguments:
+
+      • sector::String \t-->\t Mantle sector to model ('um', 'tz', 'lm')
+
+      • em::String \t\t-->\t Earth mantle composition ('XH', 'XB', 'Custom')
+
+    Optional arguments (kwargs):
+
+        - nP::Int64 \t\t-->\t Number of pressure points [default: 50]
+        - nT::Int64 \t\t-->\t Number of temperature points [default: 50]
+        - Clist::Array{String,1} \t-->\t List of oxides in composition [default: ["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"]]
+        - XB::Array{Float64,1} \t-->\t StagYY's enriched endmember [default: [49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0]]
+        - XH::Array{Float64,1} \t-->\t Bulk composition for HARZBURGITE (wt%) [default: [45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0]]
+        - ccomp::Array{Float64,1} \t-->\t Custom bulk composition (wt%) [default: zeros(Float64, length(Clist))]
+        - DBswitchP::Float64 \t-->\t Pressure (GPa) of upper mantle to transition zone switch [default: 7.0]
+        - interp::Bool \t\t-->\t Interpolates heatmap [default: false]
+        - cmap::Symbol \t\t-->\t Colormap [default: :BuPu]
+        - Prange ::Tuple{Float64,Float64} \t-->\t Pressure range (GPa) [default: (0.1, 130.0)]
+        - Trange ::Tuple{Float64,Float64} \t-->\t Temperature range (K) [default: (500.0, 4000.0)]
+        - ncols::Int64 \t\t-->\t Number of columns in figure [default: 4]
+        - savein::String \t-->\t Save figure in file [default: "" (no saving)]
+        - phase_out::Array{String,1} \t-->\t List of phases to exclude from minimization [default: ["chl"]]
+        - H2Osat::Bool \t-->\t Considers H2O saturation in upper mantle calculations [default: true]
+"""
 function minmap(sector, em::String; nP=50, nT=50,
                 Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
-                XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0],
-                XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
+                XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 0.0],
+                XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0, interp=false, cmap=:BuPu,
-                Prange=(0.1, 130.0), Trange=(500.0, 4000.0), ncols=4, savein="", phase_out=["chl"]
+                Prange=(0.1, 130.0), Trange=(500.0, 4000.0), ncols=4, savein="", phase_out=["chl"], H2Osat=true
                 )
 
     # Check
     @assert em in ["XH", "XB", "Custom"] "Invalid Earth mantle: $em. Choose from 'XH', 'XB', 'Custom'."
     # Composition
     X = em=="XB" ? XB : em=="XH" ? XH : ccomp
+    H2Osat && (X[end] = 100.0) # Set H2O to 100 for saturation calculations
     # Vectors
     Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 2000., nT)
     Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(1200., Trange[2], nT)
@@ -482,7 +542,7 @@ function minmap(sector, em::String; nP=50, nT=50,
     Pv .= repeat(sector=="um" ? Pum : sector=="tz" ? Ptz : Plm, outer=nT); Tv .= repeat(sector=="um" ? Tum : sector=="tz" ? Ttz : Tlm, inner=nP)
     # Minimizer
     if sector == "um"
-        data = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
+        data = H2Osat ? Initialize_MAGEMin("um", verbose=false, buffer="aH2O") : Initialize_MAGEMin("um", verbose=false);
         rm_list = remove_phases(phase_out, "um")
         out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, B=ones(length(Pv)), sys_in="wt", name_solvus=true, rm_list=rm_list)
     else
@@ -517,11 +577,27 @@ function minmap(sector, em::String; nP=50, nT=50,
     display(fig)
 end
 
+
+"""
+    Solve a single P-T point for given composition and return the minimization output.
+    
+    \t Basic usage: \t solve_point(P::Float64, T::Float64, em::String; kwargs...)
+
+    Optional arguments (kwargs):
+
+        - Clist::Array{String,1} \t-->\t List of oxides in the composition [default: ["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"]]
+        - XB::Array{Float64,1} \t\t-->\t StagYY's default enriched endmember [default: [49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0]]
+        - XH::Array{Float64,1} \t\t-->\t StagYY's default depleted endmember [default: [45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0]]
+        - ccomp::Array{Float64,1} \t-->\t Custom composition in wt% [default: zeros(Float64, length(Clist))]
+        - DBswitchP::Float64 \t\t-->\t Pressure (GPa) at which to switch from upper mantle to transition zone database [default: 7.0 GPa]
+        - phase_out::Array{String,1} \t-->\t List of phases to remove from the minimization [default: ["chl"]]
+        - H2Osat::Bool \t\t-->\t Considers H2O saturation in upper mantle calculations [default: true]
+"""
 function solve_point(P, T, em;
                     Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
                     XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0],
                     XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
-                    ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0,phase_out=["chl"]
+                    ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0,phase_out=["chl"],H2Osat=true
                     )
 
     # Checks
@@ -532,8 +608,9 @@ function solve_point(P, T, em;
 
     # Minimize
     X = em=="XB" ? XB : em=="XH" ? XH : ccomp
+    H2Osat && (X[end] = 100.0) # Set H2O to 100 for saturation calculations
     if P <= DBswitchP
-    data = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
+    data = H2Osat ? Initialize_MAGEMin("um", verbose=false, buffer="aH2O") : Initialize_MAGEMin("um", verbose=false);
     rm_list = remove_phases(phase_out, "um")
     out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, B=1.0, sys_in="wt", name_solvus=true, rm_list=rm_list)
     else
@@ -543,73 +620,4 @@ function solve_point(P, T, em;
     Finalize_MAGEMin(data);
 
     return out
-end
-
-# ======================
-# ==== Auxilliaries ====
-# ======================
-
-function second_axis!(fig, fpos, x, y, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, timeplot, trange, locals)
-
-    function transform_data(y, field)
-        yp = [first(y), last(y)]
-        (field=="SurfOceanMass3D") && (return [locals[1], locals[2]]./om, L"Ocean\;masses") # 10^21 kg
-        (field=="Pressure") && (return km2GPa.(yp), L"Pressure\;[GPa]") # GPa
-        return nothing, nothing
-    end
-    yp, ylab = transform_data(y, field); (isnothing(yp)) && return
-    ax2 = Axis(fig[timeplot ? fpos[1] : fpos[1]+1, fpos[2]], yticklabelcolor = :black, yaxisposition = :right, ylabel = ylab, ylabelsize=ylabelsize, yticklabelsize=yticklabelsize, ylabelpadding=ylabelpadding,
-                xgridvisible=false, ygridvisible=false, yreversed=yreversed)
-    scatter!(ax2, first(x)*ones(2), yp, alpha=0.0)
-    # yreversed && ylims!(ax2, maximum(yp), minimum(yp))
-    timeplot && (yreversed ? ylims!(ax2, reverse(yp)) : (ylims!(ax2, yp)))
-    xlims!(ax2, trange)
-    hidespines!(ax2); hidexdecorations!(ax2)
-end
-
-# Convert depth in km to pressure in GPa using PREM
-function km2GPa(depth)
-
-    r = 6371 - max(depth,0.0)
-    r < 0.0 ? error("Depth beyond Earth's radius") : nothing
-    #  Inner core
-    if (r >= 0.0 && r <= 1221.5)
-    pressure = -575.170316 + 0.29421732*depth -2.30448727e-05*depth*depth
-    
-    #  Outer core
-    elseif (r >= 1221.5 && r < 3480.0)
-    pressure = -293.862745 +0.183037581*depth  -1.202957e-05*depth*depth
-    
-    #  Lower mantle
-    elseif (r >= 3480.0 && r <= 3630.0)
-    pressure = -33.49617 + 0.05853999*depth
-    elseif (r >= 3630.0 && r <= 5600.0)
-    pressure = -3.56294332+0.0390269653*depth+3.11829162e-06*depth*depth
-    elseif (r >= 5600.0 && r <= 5701.0)
-    pressure =  -5.758207 + 0.04415793*depth
-    
-    # Transition zone
-    elseif (r >= 5701.0 && r <= 5771.0)
-    pressure =  -2.875294 + 0.03985716*depth
-    elseif (r >= 5771.0 && r <= 5971.0)
-    pressure =  -2.056346 + 0.03845555*depth
-    elseif (r >= 5971.0 && r <= 6151.0)
-    pressure = -0.5319232 + 0.03467901*depth
-    
-    # LVZ & LID
-    elseif (r >= 6151.0 && r <= 6346.6)
-    pressure =   -0.213082 + 0.0332782*depth
-    elseif (r >= 6346.6 && r <= 6371.0)
-    pressure = 2.6e3 * 9.8 * (6371.0 - r ) *1000/1.0e9 # rho=2.6g/cm3, in GPa
-    end
-    
-    return pressure
-end
-
-# Convert pressure in GPa to depth in km using PREM
-function GPa2km(pressure)
-    depth = LinRange(0., 6371., 800)
-    P = sort(km2GPa.(depth))
-    itp = interpolate((P,), depth, Gridded(Linear()))
-    return itp(pressure)
 end

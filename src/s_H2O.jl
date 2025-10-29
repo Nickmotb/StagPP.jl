@@ -782,6 +782,19 @@
 # ======= Plots ========
 # ======================
 
+    """
+        Plot sᴴ²ᴼ results.
+
+        \t Basic usage: \t `plot_sᴴ²ᴼ(s; kwargs...)`
+
+        Optional arguments (kwargs):
+            - `cmap::Symbol`: Colormap to use. Default is `:vik100`.
+            - `interp::Bool`: Whether to interpolate the heatmap. Default is `false`.
+            - `cmap_reverse::Bool`: Whether to reverse the colormap. Default is `false`.
+            - `logscale::Bool`: Whether to use log scale for color mapping. Default is `true`.
+            - `savein::String`: Path to save the figure. Default is `""` (does not save).
+            - `bigpicture::Tuple{Bool, Int}`: Whether to create a big picture figure. Default is `(false, 1)`.
+    """
     function plot_sᴴ²ᴼ(s; cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, savein="", bigpicture=(false, 1) )
 
         # Inputs
