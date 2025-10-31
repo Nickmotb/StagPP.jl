@@ -236,7 +236,8 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
         # Outgassing
         if Stag.H₂O_tracked
             time_header = vcat(time_header, "OutgassedH2O")
-            time_data = hcat(time_data, (time_data[:,idxT["OutputtedNotEruptedH2O"]].+time_data[:,idxT["EruptedH2O"]].+time_data[:,idxT["SaturationOutgassH2O"]]))
+            time_data = hcat(time_data, (time_data[:,idxT["OutputtedNotEruptedH2O"]].+time_data[:,idxT["EruptedH2O"]].+
+                                (("SaturationOutgasH2O" in time_header) ? time_data[:,idxT["SaturationOutgasH2O"]] : time_data[:,idxT["SaturationOutgassH2O"]])))
         end
     end
     if rprof
@@ -369,7 +370,7 @@ data_encoding(D::DataBlock) = data_encoding(D.timeheader, D.rprofheader, D.plate
             function transform_data(y, field)
                 yp = [first(y), last(y)]
                 (field=="SurfOceanMass3D") && (return [locals[1], locals[2]]./om, L"Ocean\;masses") # 10^21 kg
-                (field=="Pressure") && (return km2GPa.(yp), L"Pressure\;[GPa]") # GPa
+                (field=="Pressure") && (return reverse(km2GPa.(yp)), L"Pressure\;[GPa]") # GPa
                 return nothing, nothing
             end
             yp, ylab = transform_data(y, field); (isnothing(yp)) && return
@@ -377,7 +378,7 @@ data_encoding(D::DataBlock) = data_encoding(D.timeheader, D.rprofheader, D.plate
                         xgridvisible=false, ygridvisible=false, yreversed=yreversed)
             scatter!(ax2, first(x)*ones(2), yp, alpha=0.0)
             # yreversed && ylims!(ax2, maximum(yp), minimum(yp))
-            timeplot && (yreversed ? ylims!(ax2, reverse(yp)) : (ylims!(ax2, yp)))
+            (timeplot || field=="Pressure") && (yreversed ? ylims!(ax2, reverse(yp)) : (ylims!(ax2, yp)))
             xlims!(ax2, trange)
             hidespines!(ax2); hidexdecorations!(ax2)
         end

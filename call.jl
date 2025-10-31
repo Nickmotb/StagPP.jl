@@ -1,11 +1,8 @@
 using Revise, StagPP, BenchmarkTools, CairoMakie
 
-# Dblock = load_sim(joinpath(@__DIR__, "test_data/EW"))
-# idxT, idxR, idxP = data_encoding(y20e20)
+# Dblock = load_sim(joinpath("/home/nickmb/Desktop/StagYY/+op/EW"), "test")
+# idxT, idxR, idxP = data_encoding(Dblock)
+a = solve_sH2O_fO2(200, 200)
+plot_sᴴ²ᴼ(a, cmap=:davos, cmap_reverse=true)
 
-a = solve_sH2O_fO2(80, 80, DHMS=true);
-plot_sᴴ²ᴼ(a, cmap=:davos, interp=false, cmap_reverse=true, logscale=true)
-# minmap("um", "XH", ncols=3, nP=100, nT=100, savein="100x100mm_um")
-# a = solve_point(17., 1500., "XH")
-
-# min_s = min_sᴴ²ᴼ_assembler(50);
+# rprof_vs_field(Dblock, "Tmean", cmap=:Blues, logscale=false)

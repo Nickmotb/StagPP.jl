@@ -890,3 +890,48 @@
             end
         end
     end
+
+# ======================
+# ======= Export =======
+# ======================
+
+    function write_output(smap, fmap; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", s=true, fO2=true)
+        # Array dimensions
+        if s
+            nP, nT = length(smap.Pum), length(smap.Tum)
+            pmap = zeros(Float64, nP, nT)
+            open(fname_s, "w") do io
+                # Header
+                println(io, nP, " ", nT, "\n");
+                println(io, smap.Pum[1], " ", smap.Pum[end], " ", smap.Tum[1], " ", smap.Tum[end])
+                println(io, smap.Ptz[1], " ", smap.Ptz[end], " ", smap.Ttz[1], " ", smap.Ttz[end])
+                println(io, smap.Plm[1], " ", smap.Plm[end], " ", smap.Tlm[1], " ", smap.Tlm[end], "\n")
+                # Data
+                for (n, slot) in enumerate([1, 2, 1, 2, 1, 2])
+                    pmap .= n>4 ? smap.lm[:,:,slot] : n>2 ? smap.tz[:,:,slot] : smap.um[:,:,slot]
+                    for i in 1:nP
+                        for j in 1:nT
+                            print(io, pmap[i,j], " ")
+                        end; println(io, "")
+                    end; println(io, "")
+                end
+            end
+        end
+
+        if fO2
+            nP, nT = size(fmap, 1), size(fmap, 2)
+            open(fname_fO2, "w") do io
+                # Header
+                println(io, nP, " ", nT, "\n");
+                println(io, smap.Pum[1], " ", smap.Pum[end], " ", smap.Tum[1], " ", smap.Tum[end], "\n")
+                # Data
+                for (n, slot) in enumerate([1, 2])
+                    for i in 1:nP
+                        for j in 1:nT
+                            print(io, fmap[i,j], " ")
+                        end; println(io, "")
+                    end; println(io, "")
+                end
+            end
+        end
+    end

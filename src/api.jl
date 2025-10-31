@@ -478,6 +478,10 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         # Return structure
         smap = sᴴ²ᴼ( um, tz, lm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
 
+        # Export
+        fmap = zeros(Float64, nP, nT) # Dummy
+        write_output(smap, fmap, s=s, fO2=fO2)
+
         # Plot
         plt && plot_sᴴ²ᴼ(smap; cmap = cmap, interp = interp, cmap_reverse = cmap_reverse, logscale = logscale)
 
