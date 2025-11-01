@@ -293,12 +293,90 @@ function data_encoding(time_header, rprof_header, plates_header)
     end
     return time_encoding, rprof_encoding, plates_encoding
 end
+
 """
   Assess DataBlock header indexing for time, rprof and plates data.
     
     idxT, idxR, idxP = data_encoding(D::DataBlock)
 """
 data_encoding(D::DataBlock) = data_encoding(D.timeheader, D.rprofheader, D.platesheader)
+
+# ===========================
+# ========== VTK ============
+# ===========================
+
+function readVTK(fname::String)
+
+    # LightXML is not able to read the XML file coming out of StagYY utilities. Thus the workaround is:
+    #   StructuredGrid format append all binary data at the bottom, and just specify the byte offsets in the XML tags.
+    #   Therefore we read the offsets using LightXML, then read the binary part manually.
+
+    # Helper function. Finds the beginning of each tag, errors if not found.
+    function first_tag(node, tag)
+        els = LightXML.get_elements_by_tagname(node, tag)
+        length(els) == 0 && error("tag $tag not found")
+        return els[1]
+    end
+
+    # 1. read the file
+    raw = Mmap.mmap(fname)
+
+    # 2. Find the data start
+    head = String(raw[1:10_000]) # Restrict exploration to first 10k bytes, as XML part is always at the top.
+    rng = findfirst("<AppendedData", head) # Find <AppendedData ...> tag
+    rng === nothing && error("no <AppendedData> found") # Check
+    app_tag_start = first(rng) # findfirst gives unitrange, we need the very first byte
+
+    # 3. LightXML crashes if the binary part is integrated. Thus we truncate the XML string before the binary part and read the fake file.
+    xml_str = String(raw[1:app_tag_start-1]) * "</VTKFile>"
+    doc  = parse_string(xml_str)
+    rootnode = LightXML.root(doc)
+
+    # === 4. Find CellData and Points tags ===
+    sgrid    = first_tag(rootnode, "StructuredGrid")
+    piece    = first_tag(sgrid, "Piece")
+    celldata = first_tag(piece, "CellData")  # your file clearly has CellData
+    points_tag = first_tag(piece, "Points")  # Point information
+
+    # === 5. find where the REAL binary starts (the '_' after <AppendedData ...>) ===
+    sub = raw[app_tag_start:end]
+    u = findfirst(x -> x == UInt8('_'), sub)
+    u === nothing && error("no '_' after <AppendedData>")
+    bin_start = app_tag_start + u             # first byte of actual appended data
+
+    # === 5.2 Extract Point data ===
+    da_pts = LightXML.get_elements_by_tagname(points_tag, "DataArray")[1]
+    off  = parse(Int, LightXML.attribute(da_pts, "offset"))
+    pos  = bin_start + off
+    nbytes = reinterpret(UInt32, raw[pos:pos+3])[1]
+    pos += 4
+    buf = raw[pos:pos+nbytes-1]
+    points_flat = reinterpret(Float32, buf)
+    points = Float32.(reshape(points_flat, 3, :))
+
+    # === 6. read each CellData array (UInt32 len + Float32 data) ===
+    cells = Dict{String,Array{Float32}}()
+    for da in LightXML.get_elements_by_tagname(celldata, "DataArray")
+        name = LightXML.attribute(da, "Name")
+        off  = parse(Int, LightXML.attribute(da, "offset"))
+
+        pos = bin_start + off
+
+        # 4-byte little-endian length prefix (your file uses this)
+        nbytes = reinterpret(UInt32, raw[pos:pos+3])[1]
+        pos += 4
+
+        buf  = raw[pos:pos+nbytes-1]
+        vals = reinterpret(Float32, buf)
+
+        cells[name] = vals
+    end
+    # Add points to the dictionary
+    cells["Points"] = points
+
+    return cells
+end
+
 
 # ======================
 # ==== Auxilliaries ====
@@ -342,14 +420,15 @@ data_encoding(D::DataBlock) = data_encoding(D.timeheader, D.rprofheader, D.plate
                 ((shifted_∂²ρ_∂r²[i] <= 0.0) && (prev < 0.0)) && continue
                 # Forward step if next value is higher
                 if (shifted_∂²ρ_∂r²[i] > prev); (prev = shifted_∂²ρ_∂r²[i]); continue; end
-                # Descend until closes to zero
-                prev = ∂²ρ_∂r²[i]
+                # Descend until closes to zero, take first if end of array
+                prev = ∂²ρ_∂r²[i];
                 if (abs(∂²ρ_∂r²[i]) < prev); (prev = abs(∂²ρ_∂r²[i])); continue; end
                 # Record boundary index
                 ph_bounds[current_ph] = i-1
                 current_ph += 1
                 prev = -1.0
             end
+            (ph_bounds[3]==0) && (ph_bounds[3] = length(shifted_∂²ρ_∂r²)) # If 3rd boundary not found, set to last index
             return ph_bounds
         end
 

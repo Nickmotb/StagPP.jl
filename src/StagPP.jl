@@ -1,7 +1,7 @@
 module StagPP
 
     # Dependencies
-    using Mmap, Parsers, Interpolations, ForwardDiff, LinearAlgebra, StaticArrays, DelimitedFiles
+    using Mmap, Parsers, Interpolations, ForwardDiff, LinearAlgebra, StaticArrays, LightXML
     using Statistics, EasyFit, LsqFit, MAGEMin_C
     using CairoMakie, DelimitedFiles, Printf
 
@@ -11,6 +11,7 @@ module StagPP
     const sec2Gyr = 3.1536e-17 # Gyr s⁻¹
     const om = 1.31e21 # Ocean mass in kg
     const m_s2cm_yr = 3.1536e9 # (cm yr⁻¹) / (m s⁻¹)
+    const rootdir = @__DIR__
 
     # === Structures
         include("struct.jl")
@@ -30,7 +31,7 @@ module StagPP
     # Constant export
     export sec2Gyr, om, m_s2cm_yr
     # Function export
-    export load_sim, data_encoding, solve_sH2O_fO2, min_sᴴ²ᴼ_assembler, solve_point
+    export load_sim, data_encoding, solve_sH2O_fO2, min_sᴴ²ᴼ_assembler, solve_point, readVTK
     # Plot exports
     export time_vs_field, rprof_vs_field, field_vs_field, mantle_water, plot_sᴴ²ᴼ, minmap
 end

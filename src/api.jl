@@ -241,7 +241,7 @@ end
 function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap=:vik100, logscale=false, cmap_reverse=false, colorrange=(nothing, nothing), Paxis=true, tstart=nothing, tend=nothing,
                             fig=nothing, fpos=(1,1), disp=true, savein="", interpolate=false, np=500)
 
-    (fpos!=(1,1)) && (Paxis = false)
+    !isnothing(fig) && (Paxis = false)
 
     # Get encoding
     idxT, idxR, idxP = data_encoding(Dblock.timeheader, Dblock.rprofheader, Dblock.platesheader)
@@ -256,7 +256,7 @@ function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap
     if interpolate
         itp = Interpolations.interpolate((Dblock.rprofdata[:,1,idxR["r"]], Dblock.rproftime), yp, Gridded(Linear()))
         rgrid = LinRange(first(Dblock.rprofdata[:,1,idxR["r"]]), last(Dblock.rprofdata[:,1,idxR["r"]]), np)
-        tgrid = LinRange(tstart, tend, np)
+        tgrid = LinRange(Dblock.rproftime[1], Dblock.rproftime[end], np)
         yp = [itp(r, t) for t in tgrid, r in rgrid]'
     end
 
@@ -300,10 +300,13 @@ end
 """
 function mantle_water(Dblock::DataBlock, time::Float64; fig=nothing, fpos=(1,1), fsize=(900,600), disp=true, savein="",
                         xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
+
+    # Checks and indexing setup
     @assert Dblock.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(Dblock.metadata.Sname)"
     idxT, idxR, idxP = data_encoding(Dblock)
-    timeidx = findfirst(Dblock.rproftime .>= time)
-    timeidxT = findfirst(Dblock.timedata[:,idxT["time"]] .>= time)
+    mintime = min(time, Dblock.rproftime[end], Dblock.timedata[end,idxT["time"]])
+    timeidx = findfirst(Dblock.rproftime .>= mintime)
+    timeidxT = findfirst(Dblock.timedata[:,idxT["time"]] .>= mintime)
 
     # Initialize figure 
     isnothing(fig) && (fig = Figure(size = fsize))
