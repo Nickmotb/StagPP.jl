@@ -377,7 +377,6 @@ function readVTK(fname::String)
     return cells
 end
 
-
 # ======================
 # ==== Auxilliaries ====
 # ======================
