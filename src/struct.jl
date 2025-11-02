@@ -10,6 +10,8 @@ struct StagData
     shape       :: String                   # Annulus, sperical, Yin-Yang or Cartesian
     rkm         :: Float64                  # Radial length of the domain in km
     rcmb        :: Float64                  # Core-mantle boundary radius in km
+    nx          :: Int64                    # Number of grid points in x-direction
+    ny          :: Int64                    # Number of grid points in y-direction
     nz          :: Int64                    # Number of vertical levels
     tend        :: Union{Float64, Nothing}  # End time of the simulation
     ndts        :: Union{Int64, Nothing}    # Number of time steps
@@ -18,6 +20,9 @@ struct StagData
     T_tracked   :: Bool                     # Whether temperature is tracked
     H₂O_tracked :: Bool                     # Whether water is tracked
     Crb_tracked :: Bool                     # Whether carbon is tracked
+    # output directory
+    outdir      :: String
+    sroot       :: String                   # Simulation root name
 end
 
 # Simulation data block

@@ -25,7 +25,7 @@ function aggregate_StagData(Sname::String, filename::String, timevec::Union{Arra
         # Take value after "="
         val = newlines[findall(f.==@view newlines[:,1]), 2][1]
         # Try parse to Bool
-        (length(val)==1) && (val=="T" ? (return true) : (return false))
+        (length(val)==1) && (val=="T" ? (return true) : (val=="F" && (return false)))
         # Try parse to float
         field = tryparse(Int64, val); !isnothing(field) && (return field)
         field = tryparse(Float64, val); !isnothing(field) && (return field)
@@ -37,6 +37,8 @@ function aggregate_StagData(Sname::String, filename::String, timevec::Union{Arra
     shape   = pass_field("SHAPE")
     rkm     = 1e-3pass_field("D_DIMENSIONAL")
     rcmb    = 1e-3pass_field("R_CMB")
+    nx      = pass_field("NXTOT")
+    ny      = pass_field("NYTOT")
     nz      = pass_field("NZTOT")
     tend    = isnothing(timevec) ? nothing : sec2Gyr*timevec[end]
     ndts    = isnothing(timevec) ? nothing : length(timevec)
@@ -45,9 +47,12 @@ function aggregate_StagData(Sname::String, filename::String, timevec::Union{Arra
     T_tracked   = pass_field("TRACERS_TEMPERATURE")
     H₂O_tracked = pass_field("TRACEELEMENT_WATER")
     Crb_tracked = pass_field("TRACEELEMENT_CARBON")
+    # Output directory
+    outdir = dirname(filename)
+    sroot = split(basename(filename), "_")[1]
 
-    return StagData(name, shape, rkm, rcmb, nz, tend, ndts, totH₂O,
-                        T_tracked, H₂O_tracked, Crb_tracked)
+    return StagData(name, shape, rkm, rcmb, nx, ny, nz, tend, ndts, totH₂O,
+                        T_tracked, H₂O_tracked, Crb_tracked, outdir, sroot)
 end
 
 # Backend for reading StagYY "time.dat"s
@@ -375,6 +380,63 @@ function readVTK(fname::String)
     cells["Points"] = points
 
     return cells
+end
+
+# Backend for reading StagYY "time.dat"s
+function pick_VTK_file_at_time(stime::Float64, fname::String)
+    # Memory map setup
+        map = Mmap.mmap(fname)
+    # --- Compute header + fixed line bytes
+        dse = findall(b"Collection>", map) # start and end of datablock
+        @assert !isempty(dse) "$fname does not appear to be a valid PVD file"
+        ds, de = last(dse[1]) + 1, first(dse[2]) - 3
+        String(@view map[ds:de])
+        lf = findnext(==(0x0A), map, ds+1) # strinf end + \n (1 bytes)
+        @assert !isnothing(lf) "$fname appears to be empty"
+        line_bytes = lf - ds
+    
+    # --- Extract Header content
+        header = split(String(@view map[1:(map[ds]==0x0D ? ds-2 : ds-1)]))
+    # --- Compute number of rows and Character range for columns
+        nrows = (de - ds) ÷ line_bytes
+
+    # Preallocate data array
+        data = Array{Union{Float64, String}}(undef, nrows, 2)
+
+    # Chunk configuration
+        runners = Threads.nthreads()
+        div, rem = divrem(nrows, runners)
+
+    # Parallel-read
+        Threads.@threads :static for r in 1:runners
+            # Thread range
+            sr, er = startrow(r, div, rem), endrow(r, div, rem)
+            # Destination block
+            dest = @view data[sr:er, :]
+            # Chunk stream
+            for i in sr:er # @inbounds
+                # Define row in bytes
+                srow = ds + (i-1)*line_bytes + 1
+                erow = srow + line_bytes - 1
+                # Remove endline characters (\n = 0x0A) for both Unix and Windows + extra windows return if present (\r = 0x0D).
+                e = erow
+                (map[e]==0x0A) && (e -= 1)
+                (e>=srow && map[e]==0x0D) && (e -= 1)
+                # Extract row string
+                rowstr = String(@view map[srow:e])
+                colranges = collect(findall(r"\S+", rowstr))
+                trange = findall(==('\"'), rowstr[colranges[2]])
+                frange = findall(==('\"'), rowstr[colranges[4]])
+                dest[i-sr+1,1] = Parsers.parse(Float64, rowstr[colranges[2]][first(trange)+1:last(trange)-1])
+                dest[i-sr+1,2] = rowstr[colranges[4]][first(frange)+1:last(frange)-1]
+            end
+        end
+
+    # Find closest time
+    closest_idx = argmin(abs.(1e-3(@view data[:,1]).-stime))
+
+    # Return adress to VTK file
+    return joinpath(dirname(fname), data[closest_idx,2])
 end
 
 # ======================

@@ -38,6 +38,21 @@ LRN = Dict(
     "etalog" => L"Viscosity\;[\mathrm{Pa\cdot s}]", "logetalog" => L"Viscosity\;[log_{10}(\mathrm{Pa\cdot s})]",
 )
 
+# Colormap to field dictionary
+CTF = Dict(
+    "Temperature" => :vik100,
+    "T_residual"  => :vik100,
+    "Viscosity"   => :davos,
+    "Water"       => :Blues,
+    "Water_solubility" => Reverse(:grays),
+    "fO2"         => :plasma,
+    "Density"     => :turbo,
+    "Basalt"      => Reverse(:RdGy),
+    "Velocity"    => :viridis,
+    "Melt_fraction" => :default,
+    "dmelt/dt"      => :default,
+)
+
 # =============================
 # ==== Post-Processing API ====
 # =============================
@@ -374,6 +389,40 @@ function mantle_water(Dblock::DataBlock, time::Float64; fig=nothing, fpos=(1,1),
     # Display and save
     disp && display(fig)
     (savein != "") && save(savein*".png", fig)
+end
+
+function snapshot(Dblock, stime, field; fig=nothing, fpos=(1,1), fsize=(800,800), cmaparray=nothing, disp=true, logscale=false)
+
+    # Read selected VTk file
+    pvd_fname = joinpath(Dblock.metadata.outdir, Dblock.metadata.sroot*".pvd")
+    vtk = readVTK(pick_VTK_file_at_time(min(stime, Dblock.metadata.tend), pvd_fname))
+
+    # Get colormap for fields
+    typeof(field) == String && (field = [field])
+    isnothing(cmaparray) ? (cmap = [CTF[f] for f in field]) : (cmap = cmaparray)
+
+    # Expand cell colors into point colors
+    c = reshape(vtk[field[1]], Dblock.metadata.nx, Dblock.metadata.ny, Dblock.metadata.nz)  # Cell value array
+    p = zeros(Float32, Dblock.metadata.nx+1, Dblock.metadata.ny+1, Dblock.metadata.nz+1)    # Empty point value array
+    Threads.@threads for k in 1:Dblock.metadata.nz+1
+        for j in 1:Dblock.metadata.ny+1
+            @inbounds for i in 1:Dblock.metadata.nx+1
+                ii = min(i, Dblock.metadata.nx)
+                jj = min(j, Dblock.metadata.ny)
+                kk = min(k, Dblock.metadata.nz)
+                p[i,j,k] = c[ii,jj,kk]
+            end
+        end
+    end
+
+    # Initialize figure 
+    isnothing(fig) && (fig = Figure(size = fsize))
+    ax = Axis(fig[fpos[1], fpos[2]], xgridvisible=false, ygridvisible=false)
+    hidespines!(ax); hidexdecorations!(ax); hideydecorations!(ax);
+    plot!(ax, vtk["Points"][1,:], vtk["Points"][2,:], color= logscale ? log10.(vec(p)) : vec(p), colormap=cmap[1], markersize=8)
+
+    # display
+    disp && display(fig)
 end
 
 # =================================================================================
