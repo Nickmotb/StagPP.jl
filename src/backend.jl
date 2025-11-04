@@ -436,7 +436,7 @@ function pick_VTK_file_at_time(stime::Float64, fname::String)
     closest_idx = argmin(abs.(1e-3(@view data[:,1]).-stime))
 
     # Return adress to VTK file
-    return joinpath(dirname(fname), data[closest_idx,2])
+    return joinpath(dirname(fname), data[closest_idx,2]), data[closest_idx,1]
 end
 
 # ======================

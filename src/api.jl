@@ -395,7 +395,11 @@ function snapshot(Dblock, stime, field; fig=nothing, fpos=(1,1), fsize=(800,800)
 
     # Read selected VTk file
     pvd_fname = joinpath(Dblock.metadata.outdir, Dblock.metadata.sroot*".pvd")
-    vtk = readVTK(pick_VTK_file_at_time(min(stime, Dblock.metadata.tend), pvd_fname))
+    # Check file existance
+    @assert isfile(pvd_fname) "VTK PVD file $pvd_fname not found. Make sure to convert binary output into readable VTK using StagYY utilities."
+    # Read
+    vtkname, vtktime = pick_VTK_file_at_time(min(stime, Dblock.metadata.tend), pvd_fname)
+    vtk = readVTK(vtkname)
 
     # Get colormap for fields
     typeof(field) == String && (field = [field])
@@ -420,6 +424,9 @@ function snapshot(Dblock, stime, field; fig=nothing, fpos=(1,1), fsize=(800,800)
     ax = Axis(fig[fpos[1], fpos[2]], xgridvisible=false, ygridvisible=false)
     hidespines!(ax); hidexdecorations!(ax); hideydecorations!(ax);
     plot!(ax, vtk["Points"][1,:], vtk["Points"][2,:], color= logscale ? log10.(vec(p)) : vec(p), colormap=cmap[1], markersize=8)
+    
+    # Time print
+    text!(ax, 0.0, 0.0, text="Time = $(round(1e-3vtktime, digits=2)) Gyr", color=:black, align = (:center, :center), fontsize=20)
 
     # display
     disp && display(fig)
