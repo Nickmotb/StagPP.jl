@@ -391,6 +391,20 @@ function mantle_water(Dblock::DataBlock, time::Float64; fig=nothing, fpos=(1,1),
     (savein != "") && save(savein*".png", fig)
 end
 
+"""
+    Plot a snapshot of a 2D StagYY at a given time.
+    
+    \t Basic usage: \t snapshot(Dblock::DataBlock, stime::Float64, field::Union{String, Vector{String}}; kwargs...)
+
+    Optional arguments (kwargs):
+
+      • -- Canvas arguments --
+
+        - fsize::Tuple{Int64,Int64} \t-->\t Figure size in pixels [default: (800, 800)]
+        - fpos::Tuple{Int64,Int64} \t-->\t Figure position in a grid layout [default: (1, 1)]
+        - cmaparray::Union{Nothing, Vector{ColorScheme}} \t-->\t Colormap array for multiple fields [default: nothing]
+        - logscale::Bool \t\t\t-->\t Plots log₁₀ of the field [default: false]
+"""
 function snapshot(Dblock, stime, field; fig=nothing, fpos=(1,1), fsize=(800,800), cmaparray=nothing, disp=true, logscale=false)
 
     # Read selected VTk file
@@ -430,6 +444,28 @@ function snapshot(Dblock, stime, field; fig=nothing, fpos=(1,1), fsize=(800,800)
 
     # display
     disp && display(fig)
+end
+
+function IOplot(Dblock; fig=nothing, fpos=(1,1), fsize=(800,800), disp=true)
+
+    # Checks
+    @assert Dblock.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(Dblock.metadata.Sname)"
+
+    # Get encoding
+    idxT, idxR, idxP = data_encoding(Dblock.timeheader, Dblock.rprofheader, Dblock.platesheader)
+
+    # Vectors
+    time = Dblock.timedata[:,idxT["time"]]
+    rawingas, rawoutgas = Dblock.timedata[:,idxT["IngassedH2O"]], Dblock.timedata[:,idxT["OutgassedH2O"]]
+    mavg_ingas, mavg_outgas = EasyFit.movavg(rawingas, 10).x, EasyFit.movavg(rawoutgas, 10).x
+
+    # Initialise figure
+    isnothing(fig) && (fig = Figure(size = fsize))
+    ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Time\;[\mathrm{Gyr}]", ylabel = L"H_2O\;mass\;[\mathrm{OM}]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
+    lines!(ax, time, rawingas, color=:blue, linewidth=2.5, linestyle=:solid, label="Ingassed H₂O")
+    display(fig)
+
+
 end
 
 # =================================================================================
