@@ -36,18 +36,19 @@ LRN = Dict(
     "rhomean" => L"Mean\;density\;[\mathrm{kg/m^3}]", "logrhomean" => L"Mean\;density\;[log_{10}(\mathrm{kg/m^3})]",
     "bsmean" => L"Mean\;basalt\;fraction", "logbsmean" => L"Mean\;basalt\;fraction\;[\mathrm{log_{10}}]",
     "etalog" => L"Viscosity\;[\mathrm{Pa\cdot s}]", "logetalog" => L"Viscosity\;[log_{10}(\mathrm{Pa\cdot s})]",
+    "H2Odarcy" => L"H_2O\;darcy\;velocity\;[\mathrm{cm/yr}]", "logH2Odarcy" => L"H_2O\;darcy\;velocity\;[log_{10}(\mathrm{cm/yr})]",
 )
 
 # Colormap to field dictionary
 CTF = Dict(
     "Temperature" => :vik100,
-    "T_residual"  => :vik100,
+    "T: Residual"  => :vik100,
     "Viscosity"   => :davos,
-    "Water"       => :Blues,
+    "C:Water"       => :Blues,
     "Water_solubility" => Reverse(:grays),
     "fO2"         => :plasma,
     "Density"     => :turbo,
-    "Basalt"      => Reverse(:RdGy),
+    "C:Basalt"      => Reverse(:RdGy),
     "Velocity"    => :viridis,
     "Melt_fraction" => :default,
     "dmelt/dt"      => :default,
@@ -675,7 +676,6 @@ function minmap(sector, em::String; nP=50, nT=50,
     !isempty(savein) && CairoMakie.save("./" * savein * ".png", fig)
     display(fig)
 end
-
 
 """
     Solve a single P-T point for given composition and return the minimization output.

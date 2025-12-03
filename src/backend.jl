@@ -248,6 +248,7 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
     if rprof
         rprof_data[:,:,idxR["vrms"]] .= m_s2cm_yr*rprof_data[:,:,idxR["vrms"]]
         rprof_header[idxR["vrms"]] = "Vrms"
+        haskey(idxR, "H2Odarcy") && (rprof_data[:,:,idxR["H2Odarcy"]] .= m_s2cm_yr*rprof_data[:,:,idxR["H2Odarcy"]])
         if haskey(idxR, "rhomean")
             rprof_header = vcat(rprof_header, "dM")
             rprof_data = cat(rprof_data, ∂M(rprof_data[:, :, idxR["r"]], Stag.rcmb, rprof_data[:, :, idxR["rhomean"]]), dims=3)
