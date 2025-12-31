@@ -264,7 +264,7 @@ function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap
     @assert haskey(idxR, field) "Field $field not found in rprof header"
 
     # Vectors
-    yp = logscale ? log10.(Dblock.rprofdata[:,:,idxR[field]]) : Dblock.rprofdata[:,:,idxR[field]]
+    yp = logscale ? log10.(replace(Dblock.rprofdata[:,:,idxR[field]], 0.0 => 1e-5)) : Dblock.rprofdata[:,:,idxR[field]]
     isnothing(tstart) && (tstart = first(Dblock.rproftime))
     isnothing(tend) && (tend = last(Dblock.rproftime))
 
@@ -447,7 +447,7 @@ function snapshot(Dblock, stime, field; fig=nothing, fpos=(1,1), fsize=(800,800)
     disp && display(fig)
 end
 
-function IOplot(Dblock; fig=nothing, fpos=(1,1), fsize=(800,800), disp=true)
+function IOplot(Dblock; fig=nothing, fpos=(1,1), fsize=(800,500), disp=true, tstart=nothing, tend=nothing)
 
     # Checks
     @assert Dblock.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(Dblock.metadata.Sname)"
@@ -457,14 +457,33 @@ function IOplot(Dblock; fig=nothing, fpos=(1,1), fsize=(800,800), disp=true)
 
     # Vectors
     time = Dblock.timedata[:,idxT["time"]]
-    rawingas, rawoutgas = Dblock.timedata[:,idxT["IngassedH2O"]], Dblock.timedata[:,idxT["OutgassedH2O"]]
+    startidx = findfirst(time .> 0.1) # Start after initial ingassing. Sets Δ to zero at chosen startint t.
+    rawingas, rawoutgas = ocD2toD3*Dblock.timedata[startidx:end,idxT["IngassedH2O"]], ocD2toD3*Dblock.timedata[startidx:end,idxT["OutgassedH2O"]]
+    Δi = rawingas[1] - rawoutgas[1]; 
+    Δi > 0.0 ? (rawingas .-= Δi) : (rawoutgas .-= -Δi) # Align initial ingassed and outgassed H₂O
+    time = time[startidx:end]
     mavg_ingas, mavg_outgas = EasyFit.movavg(rawingas, 10).x, EasyFit.movavg(rawoutgas, 10).x
+    Δ = (rawingas .- rawoutgas)./om
+
+    # Time window
+    isnothing(tstart) && (tstart = first(time))
+    isnothing(tend) && (tend = last(time))
 
     # Initialise figure
     isnothing(fig) && (fig = Figure(size = fsize))
     ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Time\;[\mathrm{Gyr}]", ylabel = L"H_2O\;mass\;[\mathrm{OM}]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
-    lines!(ax, time, rawingas, color=:blue, linewidth=2.5, linestyle=:solid, label="Ingassed H₂O")
-    display(fig)
+    axr = Axis(fig[fpos[1], fpos[2]], yticklabelcolor = :green, ylabelcolor=:green, yaxisposition = :right, ylabel = L"\Delta_{in-out}", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
+                        xgridvisible=false, ygridvisible=false)
+    scatter!(axr, tstart*ones(2), [minimum(Δ), maximum(Δ)], alpha=0.0)
+    xlims!(ax, (tstart, tend))
+    xlims!(axr, (tstart, tend))
+    hidespines!(axr); hidexdecorations!(axr)
+
+    lines!(ax, time, rawingas./om, color=:black, linewidth=3.0, linestyle=:solid, label="Ingassed H₂O")
+    lines!(ax, time, rawoutgas./om, color=:red, linewidth=3.0, linestyle=:solid, label="Outgassed H₂O")
+    lines!(axr, time, Δ, color=:green, linewidth=2.5, linestyle=:dash, label="Δ (Ingassed - Outgassed) / OM")
+    axislegend(ax, position=:rc, framevisible=false, fontsize=15, padding=10, rowgap=10)
+    disp && display(fig)
 
 
 end

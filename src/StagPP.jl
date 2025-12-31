@@ -11,6 +11,7 @@ module StagPP
     const sec2Gyr = 3.1536e-17 # Gyr s⁻¹
     const om = 1.31e21 # Ocean mass in kg
     const m_s2cm_yr = 3.1536e9 # (cm yr⁻¹) / (m s⁻¹)
+    const ocD2toD3 = 244.45 # Conversion factor of surface budgets from 2D to 3D
     const rootdir = @__DIR__
 
     # === Structures
