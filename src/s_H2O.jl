@@ -907,7 +907,7 @@
                 println(io, smap.Ptz[1], " ", smap.Ptz[end], " ", smap.Ttz[1], " ", smap.Ttz[end])
                 println(io, smap.Plm[1], " ", smap.Plm[end], " ", smap.Tlm[1], " ", smap.Tlm[end], "\n")
                 # Data
-                for (n, slot) in enumerate([1, 2, 1, 2, 1, 2])
+                for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
                     pmap .= n>4 ? smap.lm[:,:,slot] : n>2 ? smap.tz[:,:,slot] : smap.um[:,:,slot]
                     for i in 1:nP
                         for j in 1:nT

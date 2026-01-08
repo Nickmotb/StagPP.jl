@@ -27,7 +27,6 @@ end
 
 # Simulation data block
 struct DataBlock
-    name        :: String               # Name of the data block
     # Headers
     timeheader  :: Union{Array{String,1}, Nothing}      # Time header
     rprofheader :: Union{Array{String,1}, Nothing}      # Azimuthal-averaged profile header

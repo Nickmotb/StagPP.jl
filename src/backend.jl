@@ -240,9 +240,13 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
         time_data[:,idxT["Vrms"]] .= m_s2cm_yr*time_data[:,idxT["Vrms"]]; # Convert time to Gyr
         # Outgassing
         if Stag.H₂O_tracked
+            # Add outgassed H2O
             time_header = vcat(time_header, "OutgassedH2O")
             time_data = hcat(time_data, (time_data[:,idxT["OutputtedNotEruptedH2O"]].+time_data[:,idxT["EruptedH2O"]].+
                                 (("SaturationOutgasH2O" in time_header) ? time_data[:,idxT["SaturationOutgasH2O"]] : time_data[:,idxT["SaturationOutgassH2O"]])))
+            # Add erupta / EruptedH2O
+            time_header = vcat(time_header, "e/eH2O")
+            time_data = hcat(time_data, time_data[:,idxT["EruptedH2O"]]./time_data[:,idxT["erupta"]])
         end
     end
     if rprof
@@ -266,8 +270,8 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
         Δ = ((time_data[1,idxT["SurfOceanMass3D"]] + sum(rprof_data[:, 1, idxR["Water"]].*rprof_data[:, 1, end].*1e-2)) - Stag.totH₂O)
         time_data[:,idxT["SurfOceanMass3D"]] .-= Δ
     end
-    return DataBlock(Sname, 
-                    time ? time_header : nothing, rprof ? rprof_header : nothing, plates ? plates_header : nothing,
+    println("Simulation '$Sname' loaded successfully.")
+    return DataBlock(time ? time_header : nothing, rprof ? rprof_header : nothing, plates ? plates_header : nothing,
                     time ? time_data : nothing, rprof ? rprof_data : nothing, plates ? plates_data : nothing, 
                     plates ? plates_data[:,2] : rprof ? sec2Gyr*rprof_time : nothing,
                     haskey(idxR, "r") ? ∂V(rprof_data[:, 1, idxR["r"]], Stag.rcmb) : nothing,
@@ -493,6 +497,15 @@ end
             (ph_bounds[3]==0) && (ph_bounds[3] = length(shifted_∂²ρ_∂r²)) # If 3rd boundary not found, set to last index
             return ph_bounds
         end
+    
+    # Time-average
+    function t_avg(vec, timevec; absolute=false)
+        dt = diff(timevec)
+        used_vec = copy(vec)
+        absolute && (used_vec = abs.(vec))
+        avg = sum(0.5*(used_vec[1:end-1] .+ used_vec[2:end]).*dt) / (timevec[end]-timevec[1])
+        return avg
+    end
 
     # Vectorized to reshaped indexing
         @inline function get_ip_it_nrows(nP, i)
