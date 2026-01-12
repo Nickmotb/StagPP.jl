@@ -244,8 +244,11 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
             time_header = vcat(time_header, "OutgassedH2O")
             time_data = hcat(time_data, (time_data[:,idxT["OutputtedNotEruptedH2O"]].+time_data[:,idxT["EruptedH2O"]].+
                                 (("SaturationOutgasH2O" in time_header) ? time_data[:,idxT["SaturationOutgasH2O"]] : time_data[:,idxT["SaturationOutgassH2O"]])))
-            # Add erupta / EruptedH2O
-            time_header = vcat(time_header, "e/eH2O")
+            # Add IngassedH2O / OutgassedH2O
+            time_header = vcat(time_header, "I/O_H2O")
+            time_data = hcat(time_data, max.(time_data[:,idxT["IngassedH2O"]], 1)./max.(time_data[:,end], 1))
+                                # Add EruptedH2O / erupta
+            time_header = vcat(time_header, "eH2O/e")
             time_data = hcat(time_data, time_data[:,idxT["EruptedH2O"]]./time_data[:,idxT["erupta"]])
         end
     end
@@ -265,11 +268,6 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
         plates_data[:,idxP["Vsurf_rms"]] .= m_s2cm_yr*plates_data[:,idxP["Vsurf_rms"]]
     end
 
-    if time && rprof && haskey(idxR, "rhomean")
-        # Compensates a current bug for ocean mass not being reduced after interior hydration (remove after fix)
-        Δ = ((time_data[1,idxT["SurfOceanMass3D"]] + sum(rprof_data[:, 1, idxR["Water"]].*rprof_data[:, 1, end].*1e-2)) - Stag.totH₂O)
-        time_data[:,idxT["SurfOceanMass3D"]] .-= Δ
-    end
     println("Simulation '$Sname' loaded successfully.")
     return DataBlock(time ? time_header : nothing, rprof ? rprof_header : nothing, plates ? plates_header : nothing,
                     time ? time_data : nothing, rprof ? rprof_data : nothing, plates ? plates_data : nothing, 
@@ -583,3 +581,10 @@ end
             itp = interpolate((P,), depth, Gridded(Linear()))
             return itp(pressure)
         end
+
+    # Color palette generator
+    function cpalette(scheme_sym::Symbol, n::Integer)
+        cs = getfield(ColorSchemes, scheme_sym)         # e.g. :vik100 → ColorSchemes.vik100
+        ts = range(0.0, 1.0; length=n)                  # n evenly spaced points
+        return get.(Ref(cs), ts)                        # cs(t) for each t
+    end

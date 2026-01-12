@@ -217,10 +217,10 @@
     end
 
     function compute_path(P, s; 
-                            T1=700.0, P1=5.0,
+                            T1=700.0, P1=4.0,
                             cold=(g1=10.0, g∞=5.0,  L=1.0, m=1.1),
                             warm=(g1=100.0, g∞=40.0, L=4.0, m=1.1),
-                            bump=(A=20.0, Pb=5.0, w=4.0))
+                            bump=(A=20.0, Pb=2.5, w=2.0))
 
         g1 = (1-s)*cold.g1 + s*warm.g1
         g∞ = (1-s)*cold.g∞ + s*warm.g∞

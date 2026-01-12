@@ -2,7 +2,7 @@ module StagPP
 
     # Dependencies
     using Mmap, Parsers, Interpolations, ForwardDiff, LinearAlgebra, StaticArrays, LightXML
-    using Statistics, EasyFit, LsqFit, MAGEMin_C, ColorSchemes
+    using Statistics, EasyFit, LsqFit, StatsBase, MAGEMin_C, ColorSchemes
     using CairoMakie, DelimitedFiles, Printf
 
     # Constants
@@ -34,6 +34,7 @@ module StagPP
     # Function export
     export load_sim, data_encoding, solve_sH2O_fO2, min_sᴴ²ᴼ_assembler, solve_point, readVTK
     # Plot exports
-    export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, mantle_water, mantle_water_at_t, plot_sᴴ²ᴼ, minmap, 
-            snapshot, IOplot, omplot
+    export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, 
+            mantle_water, mantle_water_at_t, plot_sᴴ²ᴼ, minmap, 
+            snapshot, IOplot, omplot, t_avg, H2O_memory_time
 end
