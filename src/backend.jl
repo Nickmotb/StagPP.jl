@@ -43,6 +43,7 @@ function aggregate_StagData(Sname::String, filename::String, timevec::Union{Arra
     tend    = isnothing(timevec) ? nothing : sec2Gyr*timevec[end]
     ndts    = isnothing(timevec) ? nothing : length(timevec)
     totH₂O  = pass_field("INITIALOCEANMASS")
+    ystress = 1e-6pass_field("STRESSY_ETA")
     # Simulation Parameters
     T_tracked   = pass_field("TRACERS_TEMPERATURE")
     H₂O_tracked = pass_field("TRACEELEMENT_WATER")
@@ -51,7 +52,7 @@ function aggregate_StagData(Sname::String, filename::String, timevec::Union{Arra
     outdir = dirname(filename)
     sroot = split(basename(filename), "_")[1]
 
-    return StagData(name, shape, rkm, rcmb, nx, ny, nz, tend, ndts, totH₂O,
+    return StagData(name, shape, rkm, rcmb, nx, ny, nz, tend, ndts, totH₂O, ystress,
                         T_tracked, H₂O_tracked, Crb_tracked, outdir, sroot)
 end
 
@@ -247,7 +248,7 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
             # Add IngassedH2O / OutgassedH2O
             time_header = vcat(time_header, "I/O_H2O")
             time_data = hcat(time_data, max.(time_data[:,idxT["IngassedH2O"]], 1)./max.(time_data[:,end], 1))
-                                # Add EruptedH2O / erupta
+            # Add EruptedH2O / erupta
             time_header = vcat(time_header, "eH2O/e")
             time_data = hcat(time_data, time_data[:,idxT["EruptedH2O"]]./time_data[:,idxT["erupta"]])
         end
@@ -258,7 +259,12 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
         haskey(idxR, "H2Odarcy") && (rprof_data[:,:,idxR["H2Odarcy"]] .= m_s2cm_yr*rprof_data[:,:,idxR["H2Odarcy"]])
         if haskey(idxR, "rhomean")
             rprof_header = vcat(rprof_header, "dM")
-            rprof_data = cat(rprof_data, ∂M(rprof_data[:, :, idxR["r"]], Stag.rcmb, rprof_data[:, :, idxR["rhomean"]]), dims=3)
+            rprof_data = cat(rprof_data, ∂m(rprof_data[:, :, idxR["r"]], Stag.rcmb, rprof_data[:, :, idxR["rhomean"]]), dims=3)
+        end
+        if Stag.H₂O_tracked
+            # Add Saturation
+            rprof_header = vcat(rprof_header, "satH2O")
+            rprof_data = cat(rprof_data, min.(1e2(rprof_data[:, :, idxR["Water"]]./rprof_data[:, :, idxR["Wsol"]]), 100), dims=3)
         end
     end
     if plates
@@ -465,7 +471,7 @@ end
 
     # Shell volume/mass differentials
        ∂V(r, rcmb) = 4π/3 * diff(vcat(1e3rcmb, r.+1e3rcmb).^3)
-       ∂M(r, rcmb, ρ) = 4π/3 * diff(cat(1e3rcmb, r.+1e3rcmb, dims=1).^3, dims=1) .* ρ
+       ∂m(r, rcmb, ρ) = 4π/3 * diff(cat(1e3rcmb, r.+1e3rcmb, dims=1).^3, dims=1) .* ρ
 
     # Get phase transitions radial coordinates
         function idx_ph_transitions(Dblock::DataBlock; timeidx::Int=1)
@@ -587,4 +593,14 @@ end
         cs = getfield(ColorSchemes, scheme_sym)         # e.g. :vik100 → ColorSchemes.vik100
         ts = range(0.0, 1.0; length=n)                  # n evenly spaced points
         return get.(Ref(cs), ts)                        # cs(t) for each t
+    end
+
+    # Regression
+    function regression(x, y; order=1)
+        ord1(x,p) = p[1].*x .+ p[2] # Linear
+        ord2(x,p) = p[1].*x.^2 .+ p[2].*x .+ p[3] # Quadratic
+        fit = curve_fit((order==1) ? ord1 : ord2, x, y, ones(order+1))
+        xHD = LinRange(minimum(x), maximum(x), 100)
+        yHD = order==1 ? ord1(xHD, fit.param) : ord2(xHD, fit.param)
+        return xHD, yHD
     end

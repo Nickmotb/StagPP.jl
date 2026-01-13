@@ -15,7 +15,8 @@ struct StagData
     nz          :: Int64                    # Number of vertical levels
     tend        :: Union{Float64, Nothing}  # End time of the simulation
     ndts        :: Union{Int64, Nothing}    # Number of time steps
-    totH₂O        :: Float64                # Total water content in kg
+    totH₂O       :: Float64                # Total water content in kg
+    ystress      :: Float64                  # Yield stress in MPa
     # Simulation Parameters
     T_tracked   :: Bool                     # Whether temperature is tracked
     H₂O_tracked :: Bool                     # Whether water is tracked
