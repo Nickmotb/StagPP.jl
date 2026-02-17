@@ -620,49 +620,55 @@ end
     end
 
     # Composition conversion
-    function Fe2Fe3_to_Fe_O(C, Fe3_∑Fe=nothing)
+    function comp2sb24(X, Xox; wt=false, unoxidize=false, totals=false)
 
-        @assert length(C) == 8 "Input composition must have 8 oxides: SiO2, MgO, FeO, Fe2O3, CaO, Al2O3, Na2O, Cr2O3"
-        println("Please be ware, oxide order is: SiO2, MgO, FeO, Fe2O3, CaO, Al2O3, Na2O, Cr2O3")
+        # Xox = ["SiO2", "MgO", "FeO", "Fe2O3", "CaO", "Al2O3", "Na2O", "Cr2O3"]
+        # X = [43.43, 45.93, 8.34, 0.09, 0.90, 1.00, 0.01, 0.30] # Harzburgite
+        # X = [50.42, 9.77, 7.10, 1.07, 12.54, 16.80, 2.23, 0.07] # MORB
 
-        pymol = Dict(
-            :SiO2  => C[1] / 60.083, # SiO2
-            :MgO   => C[2] / 40.304, # MgO
-            :FeO   => C[3] / 71.844, # FeO
-            :Fe2O3 => C[4] / 159.687, # Fe2O3
-            :CaO   => C[5] / 56.077, # CaO
-            :Al2O3 => C[6] / 101.960077, # Al2O3
-            :Na2O  => C[7] / 61.97853856, # Na2O
-            :Cr2O3 => C[8] / 151.9892 # Cr2O3
+        # Molar masses (g/mol)
+        mm = Dict(
+            "SiO2" => 60.08, "Al2O3" => 101.96, "CaO" => 56.08, "MgO" => 40.30, "FeO" => 71.85, "Fe2O3" => 159.69,
+            "K2O" => 94.2, "Na2O" => 61.98, "TiO2" => 79.88, "O" => 16.0, "Cr2O3" => 151.99, "MnO" => 70.937,
+            "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
         )
 
-        Xpy_nn = Dict(
-            :SiO2  => pymol[:SiO2],
-            :CaO   => pymol[:CaO],
-            :Al2O3 => pymol[:Al2O3],
-            :MgO   => pymol[:MgO],
-            :Na2O  => pymol[:Na2O],
-            :O     => isnothing(Fe3_∑Fe) ? (3pymol[:Fe2O3] + pymol[:FeO]) : (1+0.5Fe3_∑Fe)*(pymol[:FeO] + 2pymol[:Fe2O3]),
-            :Cr2O3 => pymol[:Cr2O3],
-            :Fe => (pymol[:FeO] + 2pymol[:Fe2O3]),
-        )
-        summols = sum(values(Xpy_nn))
+        # Convert from wt to mols if needed
+        Xc, Xoxc = copy(X), copy(Xox)
+        wt && (Xc ./= [mm[ox] for ox in Xox])
+        Xc ./= sum(Xc)
 
-        Xpy = Dict(
-            :SiO2  => Xpy_nn[:SiO2]/ summols * 1e2,
-            :CaO   => Xpy_nn[:CaO]/ summols * 1e2,
-            :Al2O3 => Xpy_nn[:Al2O3]/ summols * 1e2,
-            :MgO   => Xpy_nn[:MgO]/ summols * 1e2,
-            :Na2O  => Xpy_nn[:Na2O]/ summols * 1e2,
-            :O     => Xpy_nn[:O]/ summols * 1e2,
-            :Cr2O3 => Xpy_nn[:Cr2O3]/ summols * 1e2,
-            :Fe => Xpy_nn[:Fe]/ summols * 1e2,
-        )
+        idxF2 = findfirst(Xox .== "FeO")
+        idxF3 = findfirst(Xox .== "Fe2O3")
 
-        println("Pyrolite mole %:")
-        oxs = [:SiO2, :CaO, :Al2O3, :MgO, :Na2O, :O, :Cr2O3, :Fe]
-        for ox in oxs
-            @printf("  %6s : %6.3f \n", ox, Xpy[ox])
+        # Compute total amount of Fe³⁺, Fe²⁺ and O
+        F2, F3 = Xc[idxF2], Xc[idxF3]
+        FT = F2 + F3
+        O3 = 3F3/2
+        OT = O3 + F2
+        Xoxc[idxF3] = "O"
+        if totals
+            Xoxc[idxF2] = "Fe"
+            Xc[idxF2] = FT
+            Xc[idxF3] = unoxidize ? FT : OT
+        else
+            Xoxc[idxF2] = "FeO"
+            Xc[idxF2] = F2
+            Xc[idxF3] = unoxidize ? 0.0 : O3
         end
+
+        # Retrace to wt
+        Xcm = copy(Xc)
+        Xcm .*= [mm[ox] for ox in Xoxc]
+        Xcm ./= sum(Xcm)
+
+        # Printing
+        println("Resulting composition after conversion:")
+        println("Oxides: ", Xoxc)
+        println("Molar %: ", round.(1e2Xc, digits=3))
+        println("Weight %: ", round.(1e2Xcm, digits=3))
+        println("Fe³⁺/Fe²⁺ ratio: ", unoxidize ? 0.0 : F3/FT)
+
+        return Xc, Xoxc
 
     end
