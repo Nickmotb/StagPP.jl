@@ -36,7 +36,7 @@ module StagPP
     # Plot exports
     export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, 
             mantle_water, mantle_water_at_t, plot_sᴴ²ᴼ, minmap, 
-            snapshot, IOplot, omplot, H2O_memory_time, H2O_PCA
+            snapshot, IOplot, omplot, H2O_memory_time, H2O_memory_time_multiple, H2O_PCA
     # Auxilliaries
             idx_ph_transitions, t_avg
 end

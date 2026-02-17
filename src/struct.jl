@@ -15,8 +15,9 @@ struct StagData
     nz          :: Int64                    # Number of vertical levels
     tend        :: Union{Float64, Nothing}  # End time of the simulation
     ndts        :: Union{Int64, Nothing}    # Number of time steps
-    totH₂O       :: Float64                # Total water content in kg
-    ystress      :: Float64                  # Yield stress in MPa
+    totH₂O      :: Float64                  # Total water content in kg
+    ADC_κ       :: Array{Float64,1}         # Constant permeability for ADC model
+    ystress      :: Float64                 # Yield stress in MPa
     # Simulation Parameters
     T_tracked   :: Bool                     # Whether temperature is tracked
     H₂O_tracked :: Bool                     # Whether water is tracked
@@ -105,6 +106,14 @@ struct DHMS_boundaries{T}
         r6 :: T     # 1 PhD                     →   1 PhH + 1 St                (decomposition)
     # --- Exit
         e :: T
+    # --- Pressure axes
+        Pr1 :: Vector{Float64}
+        Pr2 :: Vector{Float64}
+        Pr3 :: Vector{Float64}
+        Pr4 :: Vector{Float64}
+        Pr5 :: Vector{Float64}
+        Pr6 :: Vector{Float64}
+        Pe  :: Vector{Float64}
 end
 
 struct PTpath{T}

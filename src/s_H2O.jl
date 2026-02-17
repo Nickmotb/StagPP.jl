@@ -76,19 +76,19 @@
         CaCl₂_st, α_PbO₂_st = CaCl₂_α_PbO₂_boundary()
 
         # Dry phase checker
-        @inline dry_phase(ph::String) = ph ∈ ["q", "nal", "crn", "plg"]
+        @inline dry_phase(ph::String) = ph ∈ ["q", "nal", "crn", "plg", "feg", "fee", "fea", "O2"]
 
         # Phase iterator call
         function s_phase_sum!(fmap, i, ib, min_s, phase, ph, out, phwt, p, t, slot, nmol)
 
                 # Transition zone database (mtl)
                 (phase=="ol")      && (fmap[i, slot] += (phwt+nmol[8])/nmol[end] * min_s.ol(p, t))
-                (phase=="wad")     && (fmap[i, slot] += (phwt+nmol[9])/nmol[end] * min_s.wad(p, t))
-                (phase=="ring")    && (fmap[i, slot] += phwt/nmol[end] * min_s.rw(p, t))
+                (phase=="wad"  || phase=="wa")     && (fmap[i, slot] += (phwt+nmol[9])/nmol[end] * min_s.wad(p, t))
+                (phase=="ring" || phase=="ri")    && (fmap[i, slot] += phwt/nmol[end] * min_s.rw(p, t))
                 (phase=="opx")     && (fmap[i, slot] += (phwt+nmol[7])/nmol[end] * min_s.opx(p, t)+ min(out[ib].SS_vec[ph].Comp[2]/0.1005, 1.0)*min_s.opx_al(p, t))
                 (phase=="coe")     && (fmap[i, slot] += phwt/nmol[end] * min_s.coe(p, t))
                 (phase=="crst")    && (fmap[i, slot] += phwt/nmol[end] * min_s.crst)
-                (phase=="fp")      && (fmap[i, slot] += phwt/nmol[end] * min_s.fp)
+                (phase=="fp" || phase=="mw")      && (fmap[i, slot] += phwt/nmol[end] * min_s.fp)
                 ((phase=="hpx"))   && (fmap[i, slot] += phwt/nmol[end] * min_s.cpx_hp(p, t))
                 (phase=="cpx")     && (fmap[i, slot] += phwt/nmol[end] * out[ib].SS_vec[ph].emFrac[1] * min_s.cpx_lp_di(p, t))
                 (phase=="cpx")     && (fmap[i, slot] += phwt/nmol[end] * out[ib].SS_vec[ph].emFrac[4] * min_s.cpx_lp_jd(p, t))
@@ -127,7 +127,7 @@
             for ph in eachindex(outHB[i].ph)
                 # Skip if dry phases
                 phase = outHB[i].ph[ph]
-                dry_phase(phase) && continue
+                (dry_phase(phase) || phase=="st") && continue
                 # Fraction of current phase
                 phwt = outHB[i].ph_frac[ph]
                 # Contribute to sum
@@ -170,31 +170,31 @@
 
     function build_reactions()
         # r1
-        P = [0.1923, 0.4103, 0.7821, 1.167, 1.590, 1.974, 2.410, 2.872, 3.218, 3.551, 3.936, 4.218, 4.513, 4.795, 5.038, 5.282, 5.385, 5.436, 5.462]
+        P1 = [0.1923, 0.4103, 0.7821, 1.167, 1.590, 1.974, 2.410, 2.872, 3.218, 3.551, 3.936, 4.218, 4.513, 4.795, 5.038, 5.282, 5.385, 5.436, 5.462]
         T = [886.8, 937.6, 980.3, 1001.0, 1019.0, 1025.0, 1025.0, 1013.0, 1001.0, 974.2, 931.5, 899.0, 854.2, 801.4, 746.4, 699.7, 659.0, 600.0, 543.1]
-        r1 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
+        r1 = extrapolate(Interpolations.interpolate((P1,), T, Gridded(Linear())), Line())
         # r2
-        P = [12.70, 12.80, 12.90, 13.00, 13.10, 13.20, 13.30, 13.40, 13.50, 13.70, 13.705]
-        T = [1276., 1265., 1246., 1231., 1215., 1199., 1183., 1170., 1151., 1119., 1100.]
-        r2 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
+        P2 = [12.70, 12.80, 12.90, 13.00, 13.10, 13.20, 13.30, 13.40, 13.50, 13.70, 13.705]
+        T = [1276., 1265., 1246., 1231., 1215., 1199., 1183., 1170., 1151., 1119., 1050.]
+        r2 = extrapolate(Interpolations.interpolate((P2,), T, Gridded(Linear())), Line())
         # r3
-        P = [12.00, 12.20, 12.40, 12.60, 12.80, 13.00, 13.20, 13.40]
-        T = [805.0, 838.6, 866.7, 894.3, 922.5, 950.1, 977.6, 1005.0]
-        r3 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
+        P3 = [12.00, 12.20, 12.40, 12.60, 12.80, 13.00, 13.20, 13.705]
+        T = [805.0, 838.6, 866.7, 894.3, 922.5, 950.1, 977.6, 1050.0]
+        r3 = extrapolate(Interpolations.interpolate((P3,), T, Gridded(Linear())), Line())
         # r4
-        P = [13.90, 14.20, 14.50, 14.80, 15.10, 15.40, 15.70, 16.00, 16.30, 16.60, 16.90, 17.20]
-        T = [1070., 1110., 1143., 1171., 1197., 1222., 1249., 1281., 1303., 1331., 1357., 1383.]
-        r4 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
+        P4 = [13.705, 14.20, 14.50, 14.80, 15.10, 15.40, 15.70, 16.00, 16.30, 16.60, 16.90, 17.20, 17.60]
+        T = [1050., 1110., 1143., 1171., 1197., 1222., 1249., 1281., 1303., 1331., 1357., 1383., 1406.0]
+        r4 = extrapolate(Interpolations.interpolate((P4,), T, Gridded(Linear())), Line())
         # r5
-        P = [25.60, 25.80, 26.00, 26.20, 26.40, 26.60, 26.80, 27.00]
-        T = [1435., 1396., 1363., 1325., 1296., 1252., 1220., 1183.]
-        r5 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
+        P5 = [25.40, 25.60, 25.80, 26.00, 26.20, 26.40, 26.60, 26.80, 27.00]
+        T = [1468.0, 1435., 1396., 1363., 1325., 1296., 1252., 1220., 1183.]
+        r5 = extrapolate(Interpolations.interpolate((P5,), T, Gridded(Linear())), Line())
         # r6
-        P = [36.90, 37.80, 38.70, 39.60, 40.50, 41.40, 42.30, 43.20, 44.10, 45.00, 45.90, 46.80]
-        T = [1369., 1376., 1379., 1387., 1394., 1396., 1391., 1383., 1364., 1320., 1190., 1038.]
-        r6 = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
+        P6 = [36.60, 36.90, 37.80, 38.70, 39.60, 40.50, 41.40, 42.30, 43.20, 44.10, 45.00, 45.90, 46.80]
+        T = [1373.0, 1369., 1376., 1379., 1387., 1394., 1396., 1391., 1383., 1364., 1320., 1190., 1038.]
+        r6 = extrapolate(Interpolations.interpolate((P6,), T, Gridded(Linear())), Line())
         # exit
-        P = [0.1923, 0.4103, 0.7821, 1.167, 1.590, 1.974, 2.410, 2.872, 3.218, 3.551, 3.936, 4.218, 4.513, 4.795, 5.038, 5.200, 5.600, 6.000, 6.400, 6.800, 7.200, 7.600, 8.000, 8.400, 8.800, 9.200, 9.600, 10.00, 
+        Pe = [0.1923, 0.4103, 0.7821, 1.167, 1.590, 1.974, 2.410, 2.872, 3.218, 3.551, 3.936, 4.218, 4.513, 4.795, 5.038, 5.200, 5.600, 6.000, 6.400, 6.800, 7.200, 7.600, 8.000, 8.400, 8.800, 9.200, 9.600, 10.00, 
                 10.40, 10.80, 11.20, 11.60, 12.00, 12.40, 12.80, 13.20, 13.60, 14.00, 14.40, 14.80, 15.20, 
                     15.60, 16.00, 16.40, 16.80, 17.20, 17.60, 18.00, 18.40, 18.80, 19.20, 19.60, 20.00, 20.40, 
                         20.80, 21.20, 21.60, 22.00, 22.40, 22.80, 23.20, 23.60, 24.00, 24.40, 24.80, 25.20, 25.60, 
@@ -212,22 +212,23 @@
                                 1566.0, 1581.0, 1594.0, 1607.0, 1615.0, 1627.0, 1640.0, 1651.0, 1658.0, 1663.0, 1669.0, 1674.0, 1679.0, 
                                     1676.0, 1673.0, 1669.0, 1659.0, 1650.0, 1628.0, 1587.0, 1553.0, 1518.0, 1481.0, 1433.0, 1390.0, 1333.0, 
                                         1280.0, 1214.0, 1135.0, 1056.0, 984.2, 905.6, 839.7, 783.1]
-        e = extrapolate(Interpolations.interpolate((P,), T, Gridded(Linear())), Line())
-        return DHMS_boundaries(r1, r2, r3, r4, r5, r6, e)
+        e = extrapolate(Interpolations.interpolate((Pe,), T, Gridded(Linear())), Line())
+        return DHMS_boundaries(r1, r2, r3, r4, r5, r6, e, P1, P2, P3, P4, P5, P6, Pe)
     end
 
     function compute_path(P, s; 
-                            T1=700.0, P1=4.0,
-                            cold=(g1=10.0, g∞=5.0,  L=1.0, m=1.1),
-                            warm=(g1=100.0, g∞=40.0, L=4.0, m=1.1),
-                            bump=(A=20.0, Pb=2.5, w=2.0))
+                            T1=300.0,
+                            cold=(g1=15.0, g∞=10.0,  L=2.0, m=1.4),
+                            warm=(g1=190.0, g∞=10.0, L=1.0, m=1.4),
+                            bump=(A=230.0, Pb=2.8, w=0.9))
 
+        P1 = 2.0
         g1 = (1-s)*cold.g1 + s*warm.g1
         g∞ = (1-s)*cold.g∞ + s*warm.g∞
         L  = (1-s)*cold.L  + s*warm.L
         m  = (1-s)*cold.m  + s*warm.m
         A, Pb, w = bump.A, bump.Pb, bump.w
-        @inline ∂T∂P(P) = @. g∞ + (g1 - g∞) / (1 + ((P - P1)/L)^(m)) + A * exp(-0.5 * ((P - Pb)/w)^2)
+        @inline ∂T∂P(P) = @. g∞ + (g1 - g∞) / (1 + (max(P - P1, 0.0)/L)^(m)) + A * exp(-1.5 * ((P - Pb)/w)^2)
 
         path = ∂T∂P(P) * step(P); path[1] += T1
         path .= cumsum(path)
@@ -235,19 +236,93 @@
     end
 
     function test_paths(paths, reactions)
-        P = LinRange(5.0, 65.0, 500)
-        fig = Figure(size=(800,600))
-        ax = Axis(fig[1,1])
+        P = LinRange(0.0, 75.0, 1000)
+        idxp, idxp2 = findfirst(P .>= 0.5), findfirst(P .>= 7.0)
+        fig = Figure(size=(1500,700))
+        ax = Axis(fig[1:4,1:2], xgridvisible=false, ygridvisible=false, xlabel=L"Pressure\;(GPa)", ylabel=L"Temperature\;(K)", xlabelsize=20, ylabelsize=20, xticklabelsize=16, yticklabelsize=16,
+                    xlabelpadding=12, ylabelpadding=17)
+        ax2 = Axis(fig[1:4,4], xgridvisible=false, ygridvisible=false, xlabel=L"Pressure\;(GPa)", ylabel=L"Temperature\;(K)", xlabelsize=20, ylabelsize=20, xticklabelsize=16, yticklabelsize=16,
+                    xlabelpadding=12, ylabelpadding=17)
+        lw = 1
+        Xmol_min, Xmol_max = 10, 0.0
         for i in eachindex(paths)
-            plot!(ax, P, paths[i].T(P), color = paths[i].Bᵢ==0.0 ? :gray : :red)
+            (unique(paths[i].rh) == ["1", "e", ""]) && continue
+            Xmol_min = min(Xmol_min, paths[i].Bᵢ)
+            Xmol_max = max(Xmol_max, paths[i].Bᵢ)
         end
-        lines!(ax, P[1:20], reactions.r1(P[1:20]), color=:red, linewidth=2)
-        lines!(ax, P[1:20], reactions.r2(P[1:20]), color=:green, linewidth=2)
-        lines!(ax, P[1:20], reactions.r3(P[1:20]), color=:orange, linewidth=2)
-        lines!(ax, P, reactions.r4(P), color=:purple, linewidth=2)
-        lines!(ax, P, reactions.r5(P), color=:brown, linewidth=2)
-        lines!(ax, P, reactions.e(P), color=:blue, linewidth=2)
-        ylims!(ax, 0.0, 2500.)
+        clr = cpalette(:linear_blue_5_95_c73_n256, 200);
+        for i in eachindex(paths)
+            lines!(ax, P[idxp:end], paths[i].T(P[idxp:end]), color = (unique(paths[i].rh) == ["1", "e", ""]) ? :gray : clr[round(Int, (paths[i].Bᵢ - Xmol_min) / (Xmol_max - Xmol_min) * 199) + 1], linewidth=1, alpha = (unique(paths[i].rh) == ["1", "e", ""]) ? 0.5 : 1.0)
+        end
+        cbar = Colorbar(fig[1:3,3], colormap=clr, limits=(1e2Xmol_min, 1e2Xmol_max), label=L"X_{Antigorite}\;(mol\;%)", labelsize=20, ticklabelsize=16, labelpadding=15)
+        cbar2 = Colorbar(fig[4,3], colormap=cgrad([:grey], categorical = true), label=L"Antigorite-free", labelsize=15, labelpadding=17, ticklabelsvisible=false)
+        # r2
+        lines!(ax, reactions.Pr2, reactions.r2(reactions.Pr2), color=:black, linewidth=lw)
+        # r3
+        lines!(ax, reactions.Pr3, reactions.r3(reactions.Pr3), color=:black, linewidth=lw)
+        lines!(ax, P[1:findfirst(P.>=reactions.Pr3[1])], reactions.r3(P[1:findfirst(P.>=reactions.Pr3[1])]), color=:black, linewidth=lw)
+        # r4
+        lines!(ax, reactions.Pr4, reactions.r4(reactions.Pr4), color=:black, linewidth=lw)
+        # r5
+        lines!(ax, reactions.Pr5, reactions.r5(reactions.Pr5), color=:black, linewidth=lw)
+        lines!(ax, P[findfirst(P.>=reactions.Pr5[end]):end], reactions.r5(P[findfirst(P.>=reactions.Pr5[end]):end]), color=:black, linewidth=lw)
+        # r6
+        lines!(ax, reactions.Pr6, reactions.r6(reactions.Pr6), color=:black, linewidth=lw)
+        lines!(ax, P[findfirst(P.>=reactions.Pr6[end]):end], reactions.r6(P[findfirst(P.>=reactions.Pr6[end]):end]), color=:black, linewidth=lw)
+        # Exit
+        lines!(ax, reactions.Pr1, reactions.r1(reactions.Pr1), color=:red, linewidth=2)
+        lines!(ax, reactions.Pe, reactions.e(reactions.Pe), color=:blue, linewidth=3, linestyle=:dashdot, label=L"Dehydration\;threshold")
+        lines!(ax, P[findfirst(P.>=reactions.Pe[end]):end], reactions.e(P[findfirst(P.>=reactions.Pe[end]):end]), color=:blue, linewidth=3, linestyle=:dashdot)
+        ylims!(ax, 700.0, 2500.)
+        xlims!(ax, 0., P[end])
+        # Text
+        text!(ax, 2.3, 800, text=L"Atg", color=:red, align = (:center, :center), fontsize=18)
+        text!(ax, 9.2, 900, text=L"Phase\;A", color=:black, align = (:center, :center), fontsize=18)
+        text!(ax, 20.5, 1000, text=L"Superhydrous\;B", color=:black, align = (:center, :center), fontsize=18)
+        text!(ax, 14.8, 1320, text=L"Phase\;E", color=:black, align = (:center, :center), fontsize=14, rotation=π/4)
+        text!(ax, 37, 1020, text=L"Phase\;D", color=:black, align = (:center, :center), fontsize=18)
+        text!(ax, 53, 1150, text=L"Phase\;H", color=:black, align = (:center, :center), fontsize=18)
+        # Legend
+        axislegend(ax, position = :lt, framevisible=false, labelsize=20)
+
+        # Second figure
+        # Van keken slab geotherm
+        Tvk = [
+            70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0,
+            170.0, 180.0, 190.0, 200.0, 210.0, 220.0, 230.0, 240.0, 250.0, 260.0,
+            270.0, 280.0, 290.0, 300.0, 310.0, 320.0, 330.0, 340.0, 350.0, 360.0,
+            370.0, 380.0, 390.0, 400.0, 410.0, 420.0, 430.0, 440.0, 450.0, 460.0,
+            470.0, 480.0, 490.0, 500.0, 510.0, 520.0, 530.0, 540.0, 550.0, 560.0,
+            570.0, 580.0, 590.0, 600.0, 610.0, 620.0, 630.0, 640.0, 650.0, 660.0,
+            670.0, 680.0, 690.0, 700.0, 710.0, 720.0, 730.0, 740.0, 750.0, 760.0,
+            770.0
+        ].+273.15
+        Pvk = [
+                0.5728, 0.6557, 0.7484, 0.8572, 0.9710, 1.088, 1.192, 1.292, 1.384, 1.453,
+                1.516, 1.591, 1.654, 1.716, 1.789, 1.855, 1.938, 2.022, 2.105, 2.188,
+                2.272, 2.356, 2.425, 2.473, 2.515, 2.540, 2.549, 2.560, 2.571, 2.576,
+                2.582, 2.588, 2.593, 2.604, 2.610, 2.615, 2.626, 2.626, 2.631, 2.637,
+                2.642, 2.648, 2.659, 2.670, 2.677, 2.680, 2.682, 2.710, 2.719, 2.726,
+                2.746, 2.756, 2.779, 2.801, 2.821, 2.845, 2.878, 2.911, 2.954, 2.997,
+                3.054, 3.112, 3.195, 3.278, 3.384, 3.495, 3.634, 3.785, 3.962, 4.173,
+                4.412
+        ]
+        scatter!(ax2, Pvk, Tvk, color=:darkgreen, label=L"Van\;Keken\;&\;Wilson\;(2023)", marker=:rect, strokewidth=0.7, strokecolor=:black)
+        clr = cpalette(:berlin, 8);
+        pc = compute_path(P, 0.0)
+        p20 = compute_path(P, 0.20)
+        p40 = compute_path(P, 0.40)
+        p60 = compute_path(P, 0.60)
+        p80 = compute_path(P, 0.80)
+        pw = compute_path(P, 1.0)
+        lines!(ax2, P[idxp:idxp2], pc[idxp:idxp2], color=clr[2], linewidth=1.2, label=L"Coldest\;slab\;geotherm"); text!(ax2, P[idxp2], pc[idxp2], text=L"s=0.00", color=clr[2])
+        lines!(ax2, P[idxp:idxp2], p20[idxp:idxp2], color=clr[3], linewidth=1.2); text!(ax2, P[idxp2], p20[idxp2], text=L"s=0.20", color=clr[3])
+        lines!(ax2, P[idxp:idxp2], p40[idxp:idxp2], color=clr[4], linewidth=1.2); text!(ax2, P[idxp2], p40[idxp2], text=L"s=0.40", color=clr[4])
+        lines!(ax2, P[idxp:idxp2], p60[idxp:idxp2], color=clr[5], linewidth=1.2); text!(ax2, P[idxp2], p60[idxp2], text=L"s=0.60", color=clr[5])
+        lines!(ax2, P[idxp:idxp2], p80[idxp:idxp2], color=clr[6], linewidth=1.2); text!(ax2, P[idxp2], p80[idxp2], text=L"s=0.80", color=clr[6])
+        lines!(ax2, P[idxp:idxp2], pw[idxp:idxp2], color=clr[7], linewidth=1.2, label=L"Warmest\;slab\;geotherm"); text!(ax2, P[idxp2], pw[idxp2], text=L"s=1.00", color=clr[7])
+        xlims!(ax2, 0.5, 8.5)
+        axislegend(ax2, position = :rb, framevisible=false, labelsize=15)
         # display(fig)
         CairoMakie.save("path_test.png", fig)
     end
@@ -255,10 +330,10 @@
     # Assumes DHMS are entirely isolated within region of stability. And only DHMS
     # phase carries over across boundaries.
 
-    function path_solve(XH, Clist, phase_out, Pvtz, Tvtz, DBswitchP, outH, test_path; npaths=50, ns=100, Pend=130.0)
+    function path_solve(XH, Clist, phase_out, Pvtz, Tvtz, DBswitchP, outH, test_path; npaths=50, ns=250, Pend=130.0)
 
         # Initialize variables
-        P = LinRange(5.0, Pend, ns)
+        P = LinRange(0.5, Pend, ns)
         blends = LinRange(0.0, 1.0, npaths)
         path_collection = PTpath[]
         reactions = build_reactions()
@@ -323,7 +398,7 @@
         end
         Finalize_MAGEMin(data);
         test_path && test_paths(path_collection, reactions)
-        return P, path_collection
+        return P, path_collection, reactions
     end
 
     function DHMS_solve(out, ppaths, paths)
@@ -897,9 +972,9 @@
 
     function write_output(smap, fmap; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", s=true, fO2=true)
         # Array dimensions
-        if s
             nP, nT = length(smap.Pum), length(smap.Tum)
             pmap = zeros(Float64, nP, nT)
+        if s
             open(fname_s, "w") do io
                 # Header
                 println(io, nP, " ", nT, "\n");
@@ -919,16 +994,18 @@
         end
 
         if fO2
-            nP, nT = size(fmap, 1), size(fmap, 2)
             open(fname_fO2, "w") do io
                 # Header
                 println(io, nP, " ", nT, "\n");
-                println(io, smap.Pum[1], " ", smap.Pum[end], " ", smap.Tum[1], " ", smap.Tum[end], "\n")
+                println(io, fmap.Pum[1], " ", fmap.Pum[end], " ", fmap.Tum[1], " ", fmap.Tum[end])
+                println(io, fmap.Ptz[1], " ", fmap.Ptz[end], " ", fmap.Ttz[1], " ", fmap.Ttz[end])
+                println(io, fmap.Plm[1], " ", fmap.Plm[end], " ", fmap.Tlm[1], " ", fmap.Tlm[end], "\n")
                 # Data
-                for (n, slot) in enumerate([1, 2])
+                for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
+                    pmap .= n>4 ? fmap.lm[:,:,slot] : n>2 ? fmap.tz[:,:,slot] : fmap.um[:,:,slot]
                     for i in 1:nP
                         for j in 1:nT
-                            print(io, fmap[i,j], " ")
+                            print(io, pmap[i,j], " ")
                         end; println(io, "")
                     end; println(io, "")
                 end

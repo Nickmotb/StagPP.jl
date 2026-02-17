@@ -83,9 +83,9 @@ CTF = Dict(
     "dmelt/dt"      => :default,
 )
 
-# =============================
-# ==== Post-Processing API ====
-# =============================
+# ======================================
+# ====  General Post-Processing API ====
+# ======================================
 
 """
     Plot the evolution of a field over time.
@@ -397,15 +397,27 @@ function field_vs_field(Dblock::DataBlock, fieldx::String, fieldy::String; fsize
     (fieldy == "SurfOceanMass3D") && (yvec ./= om)
 
     # Time window
-    isnothing(tstart) && (tstart = first(tvec1))
-    isnothing(tend) && (tend = last(tvec1))
-    tstartidx = findfirst(tvec1 .>= tstart); (isnothing(tstartidx)) && error("tstart=$tstart beyond data range")
-    tendidx   = findlast(tvec1 .<= tend); (isnothing(tendidx)) && error("tend=$tend beyond data range")
+    tstart1, tstart2, tend1, tend2 = tstart, tstart, tend, tend
+    if isnothing(tstart)
+        tstart1 = first(tvec1)
+        tstart2 = first(tvec2)
+    end
+    if isnothing(tend)
+        tend1 = last(tvec1)
+        tend2 = last(tvec2)
+    end
+    tstartidx1 = findfirst(tvec1 .>= tstart1); (isnothing(tstartidx1)) && error("tstart=$tstart1 beyond data range")
+    tstartidx2 = findfirst(tvec2 .>= tstart2); (isnothing(tstartidx2)) && error("tstart=$tstart2 beyond data range")
+    tendidx1   = findlast(tvec1 .<= tend1); (isnothing(tendidx1)) && error("tend=$tend1 beyond data range")
+    tendidx2   = findlast(tvec2 .<= tend2); (isnothing(tendidx2)) && error("tend=$tend2 beyond data range")
 
     # Vectors
     itpx, itpy = interpolate((sort(tvec1),), xvec, Gridded(Linear())), interpolate((sort(tvec2),), yvec, Gridded(Linear()))
-    subsample = max(1, Int(size(tvec1[tstartidx:tendidx], 1) ÷ subsample_size))
-    tp = tvec1[tstartidx:subsample:tendidx]
+    subsample1 = max(1, Int(size(tvec1[tstartidx1:tendidx1], 1) ÷ min(subsample_size, length(tvec1), length(tvec2))))
+    subsample2 = max(1, Int(size(tvec2[tstartidx2:tendidx2], 1) ÷ min(subsample_size, length(tvec1), length(tvec2))))
+    tp1 = tvec1[tstartidx1:subsample1:tendidx1]
+    tp2 = tvec2[tstartidx2:subsample2:tendidx2]
+    tp = length(tp1) <= length(tp2) ? tp1 : tp2
     xp, yp = itpx(tp), itpy(tp)
 
     # Define mov_avg window automatically if not given
@@ -715,8 +727,8 @@ function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap
 
     # Plot
     isnothing(fig) && (fig = Figure(size = fsize))
-    ax = Axis(fig[Paxis ? 2 : fpos[1], fpos[2]], xlabel = L"Time\;[Gyr]", ylabel = L"Radius\;[km]", xlabelsize=xlabelsize, ylabelsize=ylabelsize, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
-                title=title, titlesize=20, titlegap=14)
+    ax = Axis(fig[Paxis ? 2 : fpos[1], fpos[2]], xlabel = L"Time\;[Gyr]", ylabel = L"Radius\;[km]", xlabelsize=xlabelsize, ylabelsize=ylabelsize, xticklabelsize=12, yticklabelsize=12, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
+                title=title, titlesize=20, titlegap=14, xticklabelrotation=pi/3.5)
     logscale && (field="log"*field)
     cmap_reverse && (cmap = Reverse(cmap))
     hm = heatmap!(ax, interpolate ? tgrid : Dblock.rproftime, interpolate ? 1e-3rgrid : 1e-3Dblock.rprofdata[:,idxR["r"],1], yp', colormap=cmap, interpolate=interpolate, colorrange=colorrange)
@@ -727,6 +739,10 @@ function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap
     (savein != "") && save(savein*".png", fig)
 
 end
+
+# ======================================
+# ====  sH₂O Post-Processing API ====
+# ======================================
 
 """
     Plot the mantle water content profile at a given time.
@@ -819,7 +835,7 @@ function mantle_water_at_t(Dblock::DataBlock, time; fig=nothing, fpos=(1,1), fsi
     scatter!(ax, 0.0, 0.0, color=:black, alpha=0.0, label = "Ocean mass at $(round(mintime, digits=2)) Gyr : $(round(omass, digits=2)) OM")
     # scatter!(ax, 0.0, 0.0, color=:black, alpha=0.0, label = "Parameter | Integrated Total H₂O mass at $(round(time, digits=2)) Gyr : $(round(Dblock.metadata.totH₂O/om, digits=2)) | $(round(sum(H2Okg)+omass, digits=2)) OM")
     scatter!(ax, 0.0, 0.0, color=:black, alpha=0.0, label = "Integrated mantle H₂O mass at $(round(mintime, digits=2)) Gyr : $(round(sum(H2Okg), digits=2)) OM")
-    scatter!(ax, 0.0, 0.0, color=:black, alpha=0.0, label = "Mantle water capacity at $(round(mintime, digits=2)) Gyr : $(round(sum(sH2Okg), digits=2)) OM")
+    # scatter!(ax, 0.0, 0.0, color=:black, alpha=0.0, label = "Mantle water capacity at $(round(mintime, digits=2)) Gyr : $(round(sum(sH2Okg), digits=2)) OM")
     axislegend(ax, position=:rb, framevisible=true, fontsize=15, padding=10, rowgap=10)
 
     # Display and save
@@ -1084,13 +1100,8 @@ function IOplot(Dblock; fig=nothing, fpos=(1,1), fsize=(1000,500), disp=true, ts
 
     # Initialise figure
     isnothing(fig) && (fig = Figure(size = fsize))
-    ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Time\;[\mathrm{Gyr}]", ylabel = L"H_2O\;mass\;[\mathrm{kg}]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15, 
-            yticks = if isnothing(yrange)
-                ([1.05minimum(sectioned_out), 0.0, 1.05maximum(sectioned_in)],[@sprintf("%.2e", -1.05minimum(sectioned_out)), "0", @sprintf("%.2e", 1.05maximum(sectioned_in))])
-            else
-                ([-yrange, 0.0, yrange],[@sprintf("%.2e", -yrange), "0", @sprintf("%.2e", yrange)])
-            end,
-            xgridvisible=false, ygridvisible=false)
+    ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Time\;[\mathrm{Gyr}]", ylabel = L"H_2O\;mass\;[\mathrm{kg}]", xlabelsize=25, ylabelsize=25, 
+                xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15, xgridvisible=false, ygridvisible=false)
     axr = Axis(fig[fpos[1], fpos[2]], yticklabelcolor = :green, ylabelcolor=:green, yaxisposition = :right, ylabel = L"\Delta_{in-out}\;[\mathrm{kg}]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
                         xgridvisible=false, ygridvisible=false)
     scatter!(axr, tstart*ones(2), [minimum(Δ), maximum(Δ)], alpha=0.0)
@@ -1219,6 +1230,33 @@ function omplot_multiple(Dblocks::Vector{DataBlock}; fig=nothing, fpos=(1,1), fs
 
 end
 
+function ADC(Dblock)
+    # Extract CMB depth and mantle thickness
+    rkm = Dblock.metadata.rkm
+    rcmb = Dblock.metadata.rcmb
+    # Resolutions, gravity, time
+    nx, ny, nz = Dblock.metadata.nx, Dblock.metadata.ny, Dblock.metadata.nz
+    g = 9.81 # m/s²
+    gΔρ = g * (Dblock.rprofdata[:,end,findfirst(Dblock.rprofheader .== "rhomean")] .- 1000) # m/s2 * kg/m3 = N/m3
+    dt = 365*24*3600 # seconds in a year
+    # Initialise arrays
+    rprof = LinRange(rcmb, rcmb+rkm, nz+1) # radial profile at cell edges
+    cell_ceil_area = zeros(Float64, nz)
+    κ = zeros(Float64, nz)
+    κ .= Dblock.metadata.ADC_κ[1]
+    κ[1:findlast(rprof.-rcmb .<= rkm-410)] .= Dblock.metadata.ADC_κ[2]
+    κ[1:findlast(rprof.-rcmb .<= rkm-660)] .= Dblock.metadata.ADC_κ[3]
+    # Compute cell face areas
+    for k in 1:nz
+        r_outer = rprof[k+1]
+        θ = 2π / ny
+        cell_ceil_area[k] = (1e3r_outer*θ)^2
+    end
+
+    # ADC                                            this comes from the IAWPS cutoff
+    ADC = @. max((κ * cell_ceil_area * gΔρ * 1000 * dt) / (42.350520582003575), 0.0)
+end
+
 # ================================================================================
 # =======                    Statistical analysis                         ========
 # ================================================================================
@@ -1240,7 +1278,7 @@ end
         - disp::Bool \t\t\t-->\t Display the figure [default: true]
         - savein::String \t\t-->\t Path to save the figure (PNG) [default: ""]
 """
-function H2O_memory_time(Dblock; tstart=0.1, tend=nothing, fig=nothing, fpos=(1,1), fsize=(800,500), disp=true, savein="")
+function H2O_memory_time(Dblock; tstart=0.1, tend=nothing, fig=nothing, fpos=(1,1), fsize=(800,500), disp=true, savein="", legend=true, xlabvis=true, ylabvis=true)
 
     if typeof(Dblock) == Vector{DataBlock}
         H2O_memory_time_multiple(Dblock; tstart=tstart, tend=tend, fig=fig, fpos=fpos, fsize=fsize, disp=disp, savein=savein)
@@ -1302,7 +1340,7 @@ function H2O_memory_time(Dblock; tstart=0.1, tend=nothing, fig=nothing, fpos=(1,
 
     # ACF
     ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Time\;lag\;[\mathrm{Gyr}]", ylabel = L"Sector\;H_2O\;ACF", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
-            xgridvisible=false, ygridvisible=false, titlesize=20)
+            xgridvisible=false, ygridvisible=false, titlesize=20, xlabelvisible=xlabvis, ylabelvisible=ylabvis)
     cmap = :berlin
     clrs = cpalette(cmap, 4)
     for sector in 1:4
@@ -1325,13 +1363,14 @@ function H2O_memory_time(Dblock; tstart=0.1, tend=nothing, fig=nothing, fpos=(1,
             τ += 0.5 * (ac_sectH2O[sector, i] + ac_sectH2O[sector, i+1]) * dt
         end
         τs = @sprintf("%.2f Gyr", τ)
-        lines!(ax, time_lags, ac_sectH2O[sector, :], color=clrs[sector], linewidth=2.0, label=sector==1 ? "Lower Mantle (τᵢₙₜ = "*τs*")" : sector==2 ? "Mantle Transition Zone (τᵢₙₜ = "*τs*")" : sector==3 ? "Upper Mantle (τᵢₙₜ = "*τs*")" : "Crust (τᵢₙₜ = "*τs*")")
+        # lines!(ax, time_lags, ac_sectH2O[sector, :], color=clrs[sector], linewidth=2.0, label=sector==1 ? "Lower Mantle (τᵢₙₜ = "*τs*")" : sector==2 ? "Mantle Transition Zone (τᵢₙₜ = "*τs*")" : sector==3 ? "Upper Mantle (τᵢₙₜ = "*τs*")" : "Crust (τᵢₙₜ = "*τs*")")
+        lines!(ax, time_lags, ac_sectH2O[sector, :], color=clrs[sector], linewidth=2.0, label=sector==1 ? "Lower Mantle" : sector==2 ? "Mantle Transition Zone" : sector==3 ? "Upper Mantle" : "Crust")
         scatter!(ax, time_lags, ac_sectH2O[sector, :], markersize=10, strokewidth=1.0, color=clrs[sector], marker=:rect)
     end
     lines!(ax, [-10, -9], [0.0, 0.1], color=:black, linestyle=:dash, linewidth=1.5, label="e-folding time")
     lines!(ax, [0.0, 10000], [0.0, 0.0], color=:grey, linewidth=1.5, alpha=0.3)
     xlims!(ax, 0.0, maximum(time_lags))
-    axislegend(ax, position=:rt, framevisible=true, fontsize=15, padding=10, rowgap=10)
+    legend && axislegend(ax, position=:rt, framevisible=true, fontsize=10, padding=10, rowgap=10, orientation=:horizontal)
 
 
     disp && display(fig)
@@ -1445,7 +1484,7 @@ function H2O_memory_time_multiple(Dblock; tstart=0.1, tend=nothing, fig=nothing,
 
 end
 
-function H2O_PCA(Dblocks, type, clrby; disp=true, fig=nothing, fpos=(1,1), fsize=(800,600), savein="")
+function H2O_PCA(Dblocks, type, clrby; disp=true, fig=nothing, fpos=(1,1), fsize=(800,600), savein="", loadings_plot=false)
 
     if type == "twindow"
 
@@ -1454,7 +1493,7 @@ function H2O_PCA(Dblocks, type, clrby; disp=true, fig=nothing, fpos=(1,1), fsize
         # PC3 → How water is partitioned between TZ and deep mantle
 
         # Initialise 2-D matrix
-        window_size = 5 * 1e-3 # Myr
+        window_size = 10 * 1e-3 # Myr
         lM = 0; for blck in Dblocks
             lM += Int(ceil(last(blck.rproftime)/window_size))
             @assert blck.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(blck.metadata.name)"
@@ -1513,29 +1552,73 @@ function H2O_PCA(Dblocks, type, clrby; disp=true, fig=nothing, fpos=(1,1), fsize
         pca = fit(PCA, Mnorm'; maxoutdim=3)
         scores = transform(pca, Mnorm')'
         loadings = projection(pca)
-        ev = principalvars(pca) ./ tvar(pca)   # fraction per PC
 
         # Figure
         GLMakie.activate!()
         nclrs = 100
         cmap = :vik100
-        # clrsmap = hcat(LinRange(0.0, tmax, nclrs), cpalette(cmap, nclrs))
-        (clrby=="t") && (cM = tM)
-        (clrby=="ys") && (cM = yM)
-        (clrby=="om") && (cM = oM)
-        (clrby=="mob") && (cM = mM)
-        (clrsmap = hcat(LinRange(minimum(cM), maximum(cM), nclrs), cpalette(cmap, nclrs)))
-        clrs = [clrsmap[findfirst(clrsmap[:,1] .>= cM[i]), 2] for i in 1:length(cM)]
         isnothing(fig) && (fig = Figure(size = fsize))
-        ax = Axis3(fig[fpos[1], fpos[2]], xlabel = L"PC-1\;(Secular\;evolution)", ylabel = L"PC-2\;(UM\;c_{H_2O}\;dominance)", zlabel = L"PC-3\;(LM\;over\;MTZ\;partitioning)", xlabelsize=20, ylabelsize=20, zlabelsize=20, xticklabelsize=15, yticklabelsize=15, zticklabelsize=15, xticksize=8, yticksize=8, zticksize=8)
-        scatter!(ax, scores[:,1], scores[:,2], scores[:,3], markersize=15, color=clrs, marker=:circle)
-        # Max and mix for legend
-        idxmax, idxmin = argmax(cM[:,1]), argmin(cM[:,1])
-        scatter!(ax, [scores[idxmax,1]], [scores[idxmax,2]], [scores[idxmax,3]], markersize=10, color=clrs[idxmax], marker=:circle, label=clrby*" = "*@sprintf("%.2f", maximum(cM[:,1])))
-        scatter!(ax, [scores[idxmin,1]], [scores[idxmin,2]], [scores[idxmin,3]], markersize=10, color=clrs[idxmin], marker=:circle, label=clrby*" = "*@sprintf("%.2f", minimum(cM[:,1])))
-        axislegend(ax, position=:ct, framevisible=true, fontsize=15, padding=10, rowgap=10, orientation=:horizontal)
-        disp && display(fig)
-        (savein != "") && save(savein*".png", fig)
+        if loadings_plot
+            ax = Axis3(fig[fpos[1], fpos[2]], xlabel = L"Lower\;Mantle\;c^{H_2O}", ylabel = L"Mantle\;Transition\;Zone\;c^{H_2O}", zlabel = L"Upper\;Mantle\;c^{H_2O}", xlabelsize=20, ylabelsize=20, zlabelsize=20, xticklabelsize=15, yticklabelsize=15, zticklabelsize=15, xticksize=8, yticksize=8, zticksize=8, 
+                        limits=((-1.0, 1.0), (-1.0, 1.0), (-1.0, 1.0)), xgridvisible=false, ygridvisible=false, zgridvisible=false, viewmode=:free)
+            # PCA vectors
+            lines!(ax, [0.0, loadings[1,1]], [0.0, loadings[2,1]], [0.0, loadings[3,1]], color=:red, linewidth=2.3)
+            lines!(ax, [0.0, loadings[1,2]], [0.0, loadings[2,2]], [0.0, loadings[3,2]], color=:green, linewidth=2.3)
+            lines!(ax, [0.0, loadings[1,3]], [0.0, loadings[2,3]], [0.0, loadings[3,3]], color=:blue, linewidth=2.3)
+            scatter!(ax, [loadings[1,1]], [loadings[2,1]], [loadings[3,1]], markersize=25, color=:red, marker=:circle, label="PC-1", strokewidth=1.5)
+            scatter!(ax, [loadings[1,2]], [loadings[2,2]], [loadings[3,2]], markersize=25, color=:green, marker=:circle, label="PC-2", strokewidth=1.5)
+            scatter!(ax, [loadings[1,3]], [loadings[2,3]], [loadings[3,3]], markersize=25, color=:blue, marker=:circle, label="PC-3", strokewidth=1.5)
+            # Dashed coordinates
+            lines!(ax, [loadings[1,1], loadings[1,1]], [loadings[2,1], loadings[2,1]], [loadings[3,1], -1], color=:red, linewidth=1.7, linestyle=:dash, alpha=0.5)
+            lines!(ax, [loadings[1,1], loadings[1,1]], [loadings[2,1], 1.0], [loadings[3,1], loadings[3,1]], color=:red, linewidth=1.7, linestyle=:dash, alpha=0.5)
+            lines!(ax, [loadings[1,1], 1.0], [loadings[2,1], loadings[2,1]], [loadings[3,1], loadings[3,1]], color=:red, linewidth=1.27, linestyle=:dash, alpha=0.5)
+            lines!(ax, [loadings[1,2], loadings[1,2]], [loadings[2,2], loadings[2,2]], [loadings[3,2], -1], color=:green, linewidth=1.7, linestyle=:dash, alpha=0.5)
+            lines!(ax, [loadings[1,2], loadings[1,2]], [loadings[2,2], 1.0], [loadings[3,2], loadings[3,2]], color=:green, linewidth=1.7, linestyle=:dash, alpha=0.5)
+            lines!(ax, [loadings[1,2], 1.0], [loadings[2,2], loadings[2,2]], [loadings[3,2], loadings[3,2]], color=:green, linewidth=1.7, linestyle=:dash, alpha=0.5)
+            lines!(ax, [loadings[1,3], loadings[1,3]], [loadings[2,3], loadings[2,3]], [loadings[3,3], -1], color=:blue, linewidth=1.7, linestyle=:dash, alpha=0.5)
+            lines!(ax, [loadings[1,3], loadings[1,3]], [loadings[2,3], 1.0], [loadings[3,3], loadings[3,3]], color=:blue, linewidth=1.7, linestyle=:dash, alpha=0.5)
+            lines!(ax, [loadings[1,3], 1.0], [loadings[2,3], loadings[2,3]], [loadings[3,3], loadings[3,3]], color=:blue, linewidth=1.7, linestyle=:dash, alpha=0.5)
+            # border scatters
+            scatter!(ax, loadings[1,1], loadings[2,1], -1, color=:red, alpha=0.5)
+            scatter!(ax, loadings[1,1], 1.0, loadings[3,1], color=:red, alpha=0.5)
+            scatter!(ax, 1.0, loadings[2,1], loadings[3,1], color=:red, alpha=0.5)
+            scatter!(ax, loadings[1,2], loadings[2,2], -1, color=:green, alpha=0.5)
+            scatter!(ax, loadings[1,2], 1.0, loadings[3,2], color=:green, alpha=0.5)
+            scatter!(ax, 1.0, loadings[2,2], loadings[3,2], color=:green, alpha=0.5)
+            scatter!(ax, loadings[1,3], loadings[2,3], -1, color=:blue, alpha=0.5)
+            scatter!(ax, loadings[1,3], 1.0, loadings[3,3], color=:blue, alpha=0.5)
+            scatter!(ax, 1.0, loadings[2,3], loadings[3,3], color=:blue, alpha=0.5)
+            # zero lines
+            lines!(ax, [-1, 1], [1, 1], [0, 0], color=:grey, linewidth=1.3, alpha=0.5)
+            lines!(ax, [1, 1], [-1, 1], [0, 0], color=:grey, linewidth=1.3, alpha=0.5)
+            lines!(ax, [0, 0], [1, 1], [-1, 1], color=:grey, linewidth=1.3, alpha=0.5)
+            lines!(ax, [0, 0], [-1, 1], [-1, -1], color=:grey, linewidth=1.3, alpha=0.5)
+            lines!(ax, [-1, 1], [0, 0], [-1, -1], color=:grey, linewidth=1.3, alpha=0.5)
+            lines!(ax, [1, 1], [0, 0], [-1, 1], color=:grey, linewidth=1.3, alpha=0.5)
+
+            axislegend(ax, position=:ct, framevisible=false, fontsize=15, padding=10, rowgap=10, orientation=:horizontal)
+
+
+
+            disp && display(fig)
+            (savein != "") && save(savein*".png", fig)
+        else
+            (clrby=="t") && (cM = tM)
+            (clrby=="ys") && (cM = yM)
+            (clrby=="om") && (cM = oM)
+            (clrby=="mob") && (cM = mM)
+            (clrsmap = hcat(LinRange(minimum(cM), maximum(cM), nclrs), cpalette(cmap, nclrs)))
+            clrs = [clrsmap[findfirst(clrsmap[:,1] .>= cM[i]), 2] for i in 1:length(cM)]
+            ax = Axis3(fig[fpos[1], fpos[2]], xlabel = L"PC-1\;(Inverse\;of\;UM\;c_{H_2O}\;dominance)", ylabel = L"PC-2\;(Secular\;evolution)", zlabel = L"PC-3\;(Inverse\;of\;LM\;c_{H_2O}\;dominance)", xlabelsize=20, ylabelsize=20, zlabelsize=20, xticklabelsize=15, yticklabelsize=15, zticklabelsize=15, xticksize=8, yticksize=8, zticksize=8, viewmode=:free)
+            scatter!(ax, scores[:,1], scores[:,2], scores[:,3], markersize=15, color=clrs, marker=:circle)
+            # Max and mix for legend
+            idxmax, idxmin = argmax(cM[:,1]), argmin(cM[:,1])
+            scatter!(ax, [scores[idxmax,1]], [scores[idxmax,2]], [scores[idxmax,3]], markersize=10, color=clrs[idxmax], marker=:circle, label=clrby*" = "*@sprintf("%.2f", maximum(cM[:,1])))
+            scatter!(ax, [scores[idxmin,1]], [scores[idxmin,2]], [scores[idxmin,3]], markersize=10, color=clrs[idxmin], marker=:circle, label=clrby*" = "*@sprintf("%.2f", minimum(cM[:,1])))
+            axislegend(ax, position=:ct, framevisible=true, fontsize=15, padding=10, rowgap=10, orientation=:horizontal)
+            disp && display(fig)
+            (savein != "") && save(savein*".png", fig)
+        end
 
         # Return
         return loadings
@@ -1581,9 +1664,9 @@ end
 function solve_sH2O_fO2(nP::Int64, nT::Int64;
                         s=true, fO2=true, DBswitchP=7.0, plt=false, disp_prog=true, DHMS=true,
                         Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
-                        XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0],
-                        XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
-                        Prange=(0.1, 130.0), Trange=(500.0, 4000.0), verbose=true,
+                        XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
+                        XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
+                        Prange=(0.1, 135.0), Trange=(500.0, 4000.0), verbose=true,
                         cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"],
                         test_path=false
                         )
@@ -1596,69 +1679,71 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
     # Vetorization size
     nPnT = nP*nT
 
-    if s
-        # Memory allocations
-        # --- Axis Vectors
-            Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 2000., nT)
-            Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(1000., Trange[2], nT)
-            Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(1000., Trange[2], nT)
-        # --- Others
-            Pv, Tv = zeros(Float64, 2nPnT), zeros(Float64, 2nPnT)
-            Xv = vcat(map(Vector, eachrow(repeat(XH', outer=nPnT))), map(Vector, eachrow(repeat(XB', outer=nPnT))))
-            tnP, tnP05 = Int64(ceil(1.1max(nP, nT))), Int64(ceil(0.5max(nP, nT)))
-        # --- Maps
-            um, tz, lm = zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2) # later reshaped as 'T, P, reshape(um, nP, :)'
+    # Memory allocations
+    # --- Axis Vectors
+        Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 2000., nT)
+        Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(1000., Trange[2], nT)
+        Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(1000., Trange[2], nT)
+    # --- Others
+        Pv, Tv = zeros(Float64, 2nPnT), zeros(Float64, 2nPnT)
+        Xv = vcat(map(Vector, eachrow(repeat(XH', outer=nPnT))), map(Vector, eachrow(repeat(XB', outer=nPnT))))
+        tnP, tnP05 = Int64(ceil(1.1max(nP, nT))), Int64(ceil(0.5max(nP, nT)))
+    # --- Maps
+        um, tz, lm = zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2) # later reshaped as 'T, P, reshape(um, nP, :)'
 
-        # Upper mantle mesh vectorization (MAGEMin parallelization)
-            mesh_vectorization!(Pum, Tum, nP, nT, Pv, Tv)
-        # Minimizer call + assembly
-            verbose && println("Calculating upper mantle sᴴ²ᴼ...")
-            data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
-            rm_list = remove_phases(phase_out, "um")
-            outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, sys_in="wt", name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog, rm_list=rm_list) # kbar and K
-            Finalize_MAGEMin(data);
-            sᴴ²ᴼ_assembler!(um, outHB, nPnT)
-            um = cat(reshape(um[:,1], nP, nT), reshape(um[:,2], nP, nT), dims=3)
-
-        # Mineral-bound sᴴ²ᴼ assembly
-            verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
-            min_s = min_sᴴ²ᴼ_assembler(tnP);
-
-        # Transition zone mesh vectorization
-            mesh_vectorization!(Ptz, Ttz, nP, nT, Pv, Tv)
-        # Minimizer call + assembly
-            verbose && println("Calculating transition zone sᴴ²ᴼ...")
-            data    = Initialize_MAGEMin("mtl", verbose=false);
-            outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
-            Finalize_MAGEMin(data);
-
-            DHMS && verbose && println("Exploring DHMS paths...")
-            ppaths, paths  =  DHMS ? path_solve(XH, Clist, phase_out, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), DBswitchP, (@view outHB[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0)
-            ∫sᴴ²ᴼ!(tz, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), min_s, outHB, DHMS, ppaths, paths, nPnT)
-            tz = cat(reshape(tz[:,1], nP, nT), reshape(tz[:,2], nP, nT), dims=3)
+    # Upper mantle mesh vectorization (MAGEMin parallelization)
+        mesh_vectorization!(Pum, Tum, nP, nT, Pv, Tv)
+    # Minimizer call + assembly
+        verbose && println("Calculating upper mantle sᴴ²ᴼ...")
+        data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
+        rm_list = remove_phases(phase_out, "um")
+        outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog, rm_list=rm_list) # kbar and K
+        Finalize_MAGEMin(data);
+        sᴴ²ᴼ_assembler!(um, outHB, nPnT)
+        um = cat(reshape(um[:,1], nP, nT), reshape(um[:,2], nP, nT), dims=3)
     
-        # Lower mantle mesh vectorization
-            mesh_vectorization!(Plm, Tlm, nP, nT, Pv, Tv)
-        # Minimizer call + assembly
-            verbose && println("Calculating lower mantle sᴴ²ᴼ...")
-            data    = Initialize_MAGEMin("sb21", verbose=false);
-            outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, sys_in="wt", name_solvus=true, progressbar=disp_prog) # kbar and K
-            ∫sᴴ²ᴼ!(lm, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), min_s, outHB, DHMS, ppaths, paths, nPnT)
-            lm = cat(reshape(lm[:,1], nP, nT), reshape(lm[:,2], nP, nT), dims=3)
-            Finalize_MAGEMin(data);
-        # Return structure
-        smap = sᴴ²ᴼ( um, tz, lm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
+        
 
-        # Export
-        fmap = zeros(Float64, nP, nT) # Dummy
-        write_output(smap, fmap, s=s, fO2=fO2)
+    # Mineral-bound sᴴ²ᴼ assembly
+        verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
+        min_s = min_sᴴ²ᴼ_assembler(tnP);
 
-        # Plot
-        plt && plot_sᴴ²ᴼ(smap; cmap = cmap, interp = interp, cmap_reverse = cmap_reverse, logscale = logscale)
+    # Transition zone mesh vectorization
+        mesh_vectorization!(Ptz, Ttz, nP, nT, Pv, Tv)
+    # Minimizer call + assembly
+        verbose && println("Calculating transition zone sᴴ²ᴼ...")
+        data    = Initialize_MAGEMin("sb24", verbose=false);
+        outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, progressbar=disp_prog) # kbar and K
+        Finalize_MAGEMin(data);
 
-        return smap
+        DHMS && verbose && println("Exploring DHMS paths...")
+        ppaths, paths, _  =  DHMS ? path_solve(XH, Clist, phase_out, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), DBswitchP, (@view outHB[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0)
+        ∫sᴴ²ᴼ!(tz, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), min_s, outHB, DHMS, ppaths, paths, nPnT)
+        tz = cat(reshape(tz[:,1], nP, nT), reshape(tz[:,2], nP, nT), dims=3)
 
-        end
+    # Lower mantle mesh vectorization
+        mesh_vectorization!(Plm, Tlm, nP, nT, Pv, Tv)
+    # Minimizer call + assembly
+        verbose && println("Calculating lower mantle sᴴ²ᴼ...")
+        data    = Initialize_MAGEMin("sb24", verbose=false);
+        outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, progressbar=disp_prog) # kbar and K
+        ∫sᴴ²ᴼ!(lm, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), min_s, outHB, DHMS, ppaths, paths, nPnT)
+        lm = cat(reshape(lm[:,1], nP, nT), reshape(lm[:,2], nP, nT), dims=3)
+        Finalize_MAGEMin(data);
+    # Return structure
+    smap = sᴴ²ᴼ( um, tz, lm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
+    tempfO2 = zeros(Float64, nP, nT)
+    # Temporary fill starting at -1 at the lowest PT point, decreasing with both P and T. More with P.
+    tempfO2 .= -1 .- 0.5 .* (Pum' ./ maximum(Pum)) .- 0.3 .* (Tum ./ maximum(Tum))
+    fmap = sᴴ²ᴼ( cat(tempfO2, tempfO2, dims=3), cat(tempfO2, tempfO2, dims=3), cat(tempfO2, tempfO2, dims=3), Pum, Tum, Ptz, Ttz, Plm, Tlm )
+
+    # Export
+    write_output(smap, fmap, s=s, fO2=fO2)
+
+    # Plot
+    plt && plot_sᴴ²ᴼ(smap; cmap = cmap, interp = interp, cmap_reverse = cmap_reverse, logscale = logscale)
+
+    return smap
 
 end
 
@@ -1697,8 +1782,8 @@ end
 """
 function minmap(sector, em::String; nP=70, nT=70,
                 Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
-                XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 0.0],
-                XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
+                XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
                 ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0, interp=false, cmap=:BuPu,
                 Prange=(0.1, 130.0), Trange=(500.0, 4000.0), ncols=4, savein="", phase_out=["chl"], H2Osat=true
                 )
@@ -1721,8 +1806,13 @@ function minmap(sector, em::String; nP=70, nT=70,
         rm_list = remove_phases(phase_out, "um")
         out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, B=ones(length(Pv)), sys_in="wt", name_solvus=true, rm_list=rm_list)
     else
-        data = Initialize_MAGEMin(sector=="tz" ? "mtl" : "sb21", verbose=false);
-        out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, sys_in="wt", name_solvus=true)
+        data = Initialize_MAGEMin(sector=="tz" ? "sb24" : "sb24", verbose=false);
+        if em=="XH"
+            rm_list = remove_phases(["st"], "sb24")
+            out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, rm_list=rm_list)
+        else
+            out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true)
+        end
     end
     Finalize_MAGEMin(data);
     # Phase iterator
@@ -1753,7 +1843,7 @@ function minmap(sector, em::String; nP=70, nT=70,
 end
 
 """
-    Solve a single P-T point for given composition and return the minimization output.
+    Solve a single P(GPa)-T(K) point for given composition and return the minimization output.
     
     \t Basic usage: \t solve_point(P::Float64, T::Float64, em::String; kwargs...)
 
@@ -1769,8 +1859,8 @@ end
 """
 function solve_point(P, T, em;
                     Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
-                    XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0],
-                    XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
+                    XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
+                    XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
                     ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0,phase_out=["chl"],H2Osat=true
                     )
 
@@ -1786,12 +1876,79 @@ function solve_point(P, T, em;
     if P <= DBswitchP
     data = H2Osat ? Initialize_MAGEMin("um", verbose=false, buffer="aH2O") : Initialize_MAGEMin("um", verbose=false);
     rm_list = remove_phases(phase_out, "um")
-    out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, B=1.0, sys_in="wt", name_solvus=true, rm_list=rm_list)
+    out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, B=1.0, name_solvus=true, rm_list=rm_list)
     else
-        data = Initialize_MAGEMin(P<=25. ? "mtl" : "sb21", verbose=false);
-        out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, sys_in="wt", name_solvus=true)
+        data = Initialize_MAGEMin(P<=25. ? "sb24" : "sb24", verbose=false);
+        if em=="XH"
+            rm_list = remove_phases(["st"], "sb24")
+            out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, name_solvus=true, rm_list=rm_list)
+        else
+            out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, name_solvus=true)
+        end
     end
     Finalize_MAGEMin(data);
 
     return out
+end
+
+"""
+        Adjust bulk composition for a given oxidation state (R = Fe³⁺/∑Fe) by adding O accordingly. (used for SB24 database)
+    
+        \t Basic usage: \t oxidize_bulk(X::Vector{Float64}, Xox::Vector{String}, R::Float64; wt=false)
+    
+        Required arguments:
+    
+        • X::Vector{Float64} \t-->\t Bulk composition vector (either in wt% or mol%)
+    
+        • Xox::Vector{String} \t-->\t Corresponding oxide names for the bulk composition vector
+    
+        • R::Float64 \t\t-->\t Desired oxidation state defined as R = Fe³⁺/∑Fe
+    
+        Optional arguments:
+    
+        - wt::Bool \t\t-->\t Indicates if the input composition is in weight percent (wt%) [default: false (molar fraction)]
+"""
+function oxidize_bulk(X, Xox, R; wt=false)
+
+    # R = Fe³/∑Fe
+
+    # Molar masses (g/mol)
+    mm = Dict(
+        "SiO2" => 60.08, "Al2O3" => 101.96, "CaO" => 56.08, "MgO" => 40.30, "FeO" => 71.85, "Fe2O3" => 159.69,
+        "K2O" => 94.2, "Na2O" => 61.98, "TiO2" => 79.88, "O" => 16.0, "Cr2O3" => 151.99, "MnO" => 70.937,
+        "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
+    )
+
+    # if given in wt%, convert to mol%
+    Xmol = wt ? X ./ [mm[ox] for ox in Xox] : X
+    wt && (Xmol .= Xmol ./ sum(Xmol)) #Normalize
+
+    # Calculate extra oxygen given R = Fe³⁺/Fe
+    nFe² = Xmol[Xox .== "FeO"][1]
+    nFe³ = (R*nFe²)/(1 - R)
+    nO³ = 1.5nFe³
+
+    # Recompute FeO + O -> Fe + O (negative O for reduced systems, positive for oxidized systems)
+    X_out, Xox_out = copy(X), copy(Xox)
+    idxFeO, idxO = findfirst(Xox .== "FeO"), findfirst(Xox .== "O")
+    nFeᵀ, nOᵀ = (2nO³/3 + nFe²), (nFe² + nO³)
+    if ("O" in Xox)
+        Xox_out[idxFeO] = "Fe"
+        X_out[idxO] = nOᵀ
+        X_out[idxFeO] = nFeᵀ
+    else
+        Xox_out[idxFeO] = "Fe"
+        X_out[idxFeO] = nFeᵀ
+        push!(Xox_out, "O")
+        push!(X_out, nOᵀ)
+    end
+
+    # Retrace to wt% if required
+    if wt
+        X_out .= X_out .* [mm[ox] for ox in Xox_out]
+        X_out .= X_out ./ sum(X_out)
+    end
+
+    return X_out, Xox_out
+
 end

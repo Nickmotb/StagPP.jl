@@ -26,6 +26,19 @@ function aggregate_StagData(Sname::String, filename::String, timevec::Union{Arra
         val = newlines[findall(f.==@view newlines[:,1]), 2][1]
         # Try parse to Bool
         (length(val)==1) && (val=="T" ? (return true) : (val=="F" && (return false)))
+        # Check whether it is an array
+        if occursin(r"E.*E", val)
+            Eidx = findall(==('E'), val).+4; Eidx = vcat(0, Eidx)
+            arr = zeros(Float64, length(Eidx)-1)
+            for i in 1:length(Eidx)-1
+                arr[i] = Parsers.parse(Float64, val[Eidx[i]+1:Eidx[i+1]])
+            end
+            return arr
+        elseif occursin("*", val)
+            parts = split(val, "*")
+            arr = Parsers.parse(Float64, parts[2])*ones(Float64, Parsers.parse(Int64, parts[1]))
+            return arr
+        end
         # Try parse to float
         field = tryparse(Int64, val); !isnothing(field) && (return field)
         field = tryparse(Float64, val); !isnothing(field) && (return field)
@@ -43,6 +56,7 @@ function aggregate_StagData(Sname::String, filename::String, timevec::Union{Arra
     tend    = isnothing(timevec) ? nothing : sec2Gyr*timevec[end]
     ndts    = isnothing(timevec) ? nothing : length(timevec)
     totH₂O  = pass_field("INITIALOCEANMASS")
+    ADC_κ   = pass_field("LIMITFLOW_CONSTANT_PERMEABILITY")
     ystress = 1e-6pass_field("STRESSY_ETA")
     # Simulation Parameters
     T_tracked   = pass_field("TRACERS_TEMPERATURE")
@@ -52,7 +66,7 @@ function aggregate_StagData(Sname::String, filename::String, timevec::Union{Arra
     outdir = dirname(filename)
     sroot = split(basename(filename), "_")[1]
 
-    return StagData(name, shape, rkm, rcmb, nx, ny, nz, tend, ndts, totH₂O, ystress,
+    return StagData(name, shape, rkm, rcmb, nx, ny, nz, tend, ndts, totH₂O, ADC_κ, ystress,
                         T_tracked, H₂O_tracked, Crb_tracked, outdir, sroot)
 end
 
@@ -603,4 +617,52 @@ end
         xHD = LinRange(minimum(x), maximum(x), 100)
         yHD = order==1 ? ord1(xHD, fit.param) : ord2(xHD, fit.param)
         return xHD, yHD
+    end
+
+    # Composition conversion
+    function Fe2Fe3_to_Fe_O(C, Fe3_∑Fe=nothing)
+
+        @assert length(C) == 8 "Input composition must have 8 oxides: SiO2, MgO, FeO, Fe2O3, CaO, Al2O3, Na2O, Cr2O3"
+        println("Please be ware, oxide order is: SiO2, MgO, FeO, Fe2O3, CaO, Al2O3, Na2O, Cr2O3")
+
+        pymol = Dict(
+            :SiO2  => C[1] / 60.083, # SiO2
+            :MgO   => C[2] / 40.304, # MgO
+            :FeO   => C[3] / 71.844, # FeO
+            :Fe2O3 => C[4] / 159.687, # Fe2O3
+            :CaO   => C[5] / 56.077, # CaO
+            :Al2O3 => C[6] / 101.960077, # Al2O3
+            :Na2O  => C[7] / 61.97853856, # Na2O
+            :Cr2O3 => C[8] / 151.9892 # Cr2O3
+        )
+
+        Xpy_nn = Dict(
+            :SiO2  => pymol[:SiO2],
+            :CaO   => pymol[:CaO],
+            :Al2O3 => pymol[:Al2O3],
+            :MgO   => pymol[:MgO],
+            :Na2O  => pymol[:Na2O],
+            :O     => isnothing(Fe3_∑Fe) ? (3pymol[:Fe2O3] + pymol[:FeO]) : (1+0.5Fe3_∑Fe)*(pymol[:FeO] + 2pymol[:Fe2O3]),
+            :Cr2O3 => pymol[:Cr2O3],
+            :Fe => (pymol[:FeO] + 2pymol[:Fe2O3]),
+        )
+        summols = sum(values(Xpy_nn))
+
+        Xpy = Dict(
+            :SiO2  => Xpy_nn[:SiO2]/ summols * 1e2,
+            :CaO   => Xpy_nn[:CaO]/ summols * 1e2,
+            :Al2O3 => Xpy_nn[:Al2O3]/ summols * 1e2,
+            :MgO   => Xpy_nn[:MgO]/ summols * 1e2,
+            :Na2O  => Xpy_nn[:Na2O]/ summols * 1e2,
+            :O     => Xpy_nn[:O]/ summols * 1e2,
+            :Cr2O3 => Xpy_nn[:Cr2O3]/ summols * 1e2,
+            :Fe => Xpy_nn[:Fe]/ summols * 1e2,
+        )
+
+        println("Pyrolite mole %:")
+        oxs = [:SiO2, :CaO, :Al2O3, :MgO, :Na2O, :O, :Cr2O3, :Fe]
+        for ox in oxs
+            @printf("  %6s : %6.3f \n", ox, Xpy[ox])
+        end
+
     end
