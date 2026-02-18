@@ -13,6 +13,7 @@ module StagPP
     const m_s2cm_yr = 3.1536e9 # (cm yr⁻¹) / (m s⁻¹)
     const ocD2toD3 = 244.45 # Conversion factor of surface budgets from 2D to 3D
     const rootdir = @__DIR__
+    const savedir = joinpath(rootdir, "../", "+op"); !isdir(savedir) && mkdir(savedir)
 
     # === Structures
         include("struct.jl")
@@ -35,7 +36,7 @@ module StagPP
     export load_sim, data_encoding, solve_sH2O_fO2, min_sᴴ²ᴼ_assembler, solve_point, readVTK
     # Plot exports
     export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, 
-            mantle_water, mantle_water_at_t, plot_sᴴ²ᴼ, minmap, 
+            mantle_water, mantle_water_at_t, plot_sf, minmap, 
             snapshot, IOplot, omplot, H2O_memory_time, H2O_memory_time_multiple, H2O_PCA
     # Auxilliaries
             idx_ph_transitions, t_avg

@@ -870,43 +870,72 @@
             - `savein::String`: Path to save the figure. Default is `""` (does not save).
             - `bigpicture::Tuple{Bool, Int}`: Whether to create a big picture figure. Default is `(false, 1)`.
     """
-    function plot_sᴴ²ᴼ(s; cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, savein="", bigpicture=(false, 1) )
+    function plot_sf(sfmap; cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, savein="", bigpicture=(false, 1) )
 
         # Inputs
         xlabsz, ylabsz, titlesz, xticklabsz, yticklabsz, xticksz, yticksz = 20, 20, 22, 16, 16, 12, 12
+        s, f = !isnothing(sfmap.sum), !isnothing(sfmap.fum)
+        both = s && f
 
-        fig = Figure(size = (1000, 1000))
+        fig = Figure(size = both ? (1800, 1000) : (1000, 1000))
         cmap_reverse && (cmap = Reverse(cmap))
+        if s
         # Upper Mantle
-            ax = Axis(fig[1, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted, wt%)", yreversed=true,
+            ax = Axis(fig[1, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted,\;wt%)", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
-            hm = heatmap!(ax, s.Tum, s.Pum, logscale ? log10.(s.um[:,:,1]') : s.um[:,:,1]'; colormap=cmap, interpolate=interp, colorrange= logscale ? (-2., log10(maximum(s.um[:,:,1]))) : (minimum(s.um[:,:,1]), maximum(s.um[:,:,1]))); Colorbar(fig[1, 2], hm)
-            ax = Axis(fig[1, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched, wt%)", yreversed=true,
-                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
-            hm = heatmap!(ax, s.Tum, s.Pum, logscale ? log10.(s.um[:,:,2]') : s.um[:,:,2]'; colormap=cmap, interpolate=interp, colorrange= logscale ? (-2., log10(maximum(s.um[:,:,2]))) : (minimum(s.um[:,:,2]), maximum(s.um[:,:,2]))); Colorbar(fig[1, 4], hm)
+            hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, logscale ? log10.(sfmap.sum[:,:,1]') : sfmap.sum[:,:,1]'; colormap=cmap, interpolate=interp, colorrange= logscale ? (-2., log10(maximum(sfmap.sum[:,:,1]))) : (minimum(sfmap.sum[:,:,1]), maximum(sfmap.sum[:,:,1]))); Colorbar(fig[1, 2], hm)
+            ax = Axis(fig[1, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched,\;wt%)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, logscale ? log10.(sfmap.sum[:,:,2]') : sfmap.sum[:,:,2]'; colormap=cmap, interpolate=interp, colorrange= logscale ? (-2., log10(maximum(sfmap.sum[:,:,2]))) : (minimum(sfmap.sum[:,:,2]), maximum(sfmap.sum[:,:,2]))); Colorbar(fig[1, 4], hm)
         # Transition zone
-            ax = Axis(fig[2, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Depleted, wt%)", yreversed=true,
-                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
-            hm = heatmap!(ax, s.Ttz, s.Ptz, logscale ? log10.(s.tz[:,:,1]') : s.tz[:,:,1]'; colormap=cmap, interpolate=interp); Colorbar(fig[2, 2], hm)
-            ax = Axis(fig[2, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched, wt%)", yreversed=true,
-                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
-            hm = heatmap!(ax, s.Ttz, s.Ptz, logscale ? log10.(s.tz[:,:,2]') : s.tz[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[2, 4], hm)
+            ax = Axis(fig[2, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Depleted,\;wt%)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, logscale ? log10.(sfmap.stz[:,:,1]') : sfmap.stz[:,:,1]'; colormap=cmap, interpolate=interp); Colorbar(fig[2, 2], hm)
+            ax = Axis(fig[2, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched,\;wt%)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, logscale ? log10.(sfmap.stz[:,:,2]') : sfmap.stz[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[2, 4], hm)
         # Lower Mantle
-            ax = Axis(fig[3, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Depleted, wt%)", yreversed=true,
-                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
-            hm = heatmap!(ax, s.Tlm, s.Plm, logscale ? log10.(s.lm[:,:,1]') : s.lm[:,:,1]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 2], hm)
-            ax = Axis(fig[3, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched, wt%)", yreversed=true,
-                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
-            hm = heatmap!(ax, s.Tlm, s.Plm, logscale ? log10.(s.lm[:,:,2]') : s.lm[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 4], hm)
+            ax = Axis(fig[3, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Depleted,\;wt%)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, logscale ? log10.(sfmap.slm[:,:,1]') : sfmap.slm[:,:,1]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 2], hm)
+            ax = Axis(fig[3, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched,\;wt%)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, logscale ? log10.(sfmap.slm[:,:,2]') : sfmap.slm[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 4], hm)
         
         # Big Picture
-        if bigpicture[1]
-            bigP = vcat(s.Pum, s.Ptz, s.Plm)
-            itp = extrapolate(interpolate((s.Pum, s.Tum), s.um[:,:,bigpicture[2]], Gridded(Linear())), 0.0)
-            bigH = cat(itp(s.Pum, s.Ttz), s.tz[:,:,bigpicture[2]], s.lm[:,:,bigpicture[2]], dims=1)
-            ax = Axis(fig[1:3, 5], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Big\;Picture\;(Depleted, wt%)", yreversed=true,
-                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
-            hm = heatmap!(ax, s.Ttz, bigP, logscale ? log10.(bigH') : bigH'; colormap=cmap, interpolate=interp,colorrange= logscale ? (-2., log10(maximum(bigH))) : (minimum(bigH), maximum(bigH))); Colorbar(fig[1:3, 6], hm)
+            if bigpicture[1]
+                bigP = vcat(sfmap.Pum, sfmap.Ptz, sfmap.Plm)
+                itp = extrapolate(interpolate((sfmap.Pum, sfmap.Tum), sfmap.sum[:,:,bigpicture[2]], Gridded(Linear())), 0.0)
+                bigH = cat(itp(sfmap.Pum, sfmap.Ttz), sfmap.stz[:,:,bigpicture[2]], sfmap.slm[:,:,bigpicture[2]], dims=1)
+                ax = Axis(fig[1:3, 5], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Big\;Picture\;(Depleted, wt%)", yreversed=true,
+                xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
+                hm = heatmap!(ax, sfmap.Ttz, bigP, logscale ? log10.(bigH') : bigH'; colormap=cmap, interpolate=interp,colorrange= logscale ? (-2., log10(maximum(bigH))) : (minimum(bigH), maximum(bigH))); Colorbar(fig[1:3, 6], hm)
+            end
+        end
+
+        if f
+            ipp = s ? 4 : 0
+            # Upper Mantle
+            ax = Axis(fig[1, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted,\;log_{10}\;\Delta FQM)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=!s, xlabelvisible=!s)
+            hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, sfmap.fum[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[1, 2+ipp], hm)
+            ax = Axis(fig[1, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched,\;log_{10}\;\Delta FQM)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, sfmap.fum[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[1, 4+ipp], hm)
+        # Transition zone
+            ax = Axis(fig[2, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Depleted,\;log_{10}\;\Delta FQM)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, sfmap.ftz[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[2, 2+ipp], hm)
+            ax = Axis(fig[2, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched,\;log_{10}\;\Delta FQM)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, sfmap.ftz[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[2, 4+ipp], hm)
+        # Lower Mantle
+            ax = Axis(fig[3, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Depleted,\;log_{10}\;\Delta FQM)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, sfmap.flm[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[3, 2+ipp], hm)
+            ax = Axis(fig[3, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched,\;log_{10}\;\Delta FQM)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, sfmap.flm[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[3, 4+ipp], hm)
         end
         display(fig)
         savein!="" && CairoMakie.save(savein*".png", fig)
@@ -916,21 +945,27 @@
 # ======= Others =======
 # ======================
 
-    function sᴴ²ᴼ_assembler!(map, outHB, n)
+    function sᴴ²ᴼ_fO₂_assembler!(smap, fmap, out_s, out_fO2, n; s=true, fO2=true)
+        (!s && !fO2) && return
         Threads.@threads for i in 1:n
-            H₂O = 0.0
-            # Depleted (Harzburgite)
-            for j in eachindex(outHB[i].SS_vec)
-                ("H2O" in outHB[i].SS_vec[j].emNames) && continue
-                H₂O += sum(outHB[i].SS_vec[j].Comp[end-1])
-            end; map[i, 1] = sum(H₂O)
-
-            # Enriched (Lherzolite)
-            H₂O = 0.0
-            for j in eachindex(outHB[i+n].SS_vec)
-                ("H2O" in outHB[i+n].SS_vec[j].emNames) && continue
-                H₂O += sum(outHB[i+n].SS_vec[j].Comp[end-1])
-            end; map[i, 2] = sum(H₂O)
+            if s # sᴴ²ᴼ
+                H₂O = 0.0
+                # Depleted (Harzburgite)
+                for j in eachindex(out_s[i].SS_vec)
+                    ("H2O" in out_s[i].SS_vec[j].emNames) && continue
+                    H₂O += sum(out_s[i].SS_vec[j].Comp[end-1])
+                end; smap[i, 1] = sum(H₂O)
+                # Enriched (Lherzolite)
+                H₂O = 0.0
+                for j in eachindex(out_s[i+n].SS_vec)
+                    ("H2O" in out_s[i+n].SS_vec[j].emNames) && continue
+                    H₂O += sum(out_s[i+n].SS_vec[j].Comp[end-1])
+                end; smap[i, 2] = sum(H₂O)
+            end
+            if fO2# fO₂
+                fmap[i, 1] = out_fO2[i].dQFM # Depleted (Harzburgite)
+                fmap[i, 2] = out_fO2[i+n].dQFM # Enriched (Basalt)
+            end
         end
     end
 
@@ -970,20 +1005,20 @@
 # ======= Export =======
 # ======================
 
-    function write_output(smap, fmap; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", s=true, fO2=true)
+    function write_output(sfmap; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", s=true, fO2=true)
         # Array dimensions
-            nP, nT = length(smap.Pum), length(smap.Tum)
-            pmap = zeros(Float64, nP, nT)
+        nP, nT = length(sfmap.Pum), length(sfmap.Tum)
+        pmap = zeros(Float64, nP, nT)
         if s
-            open(fname_s, "w") do io
+            open(joinpath(savedir, fname_s), "w") do io
                 # Header
                 println(io, nP, " ", nT, "\n");
-                println(io, smap.Pum[1], " ", smap.Pum[end], " ", smap.Tum[1], " ", smap.Tum[end])
-                println(io, smap.Ptz[1], " ", smap.Ptz[end], " ", smap.Ttz[1], " ", smap.Ttz[end])
-                println(io, smap.Plm[1], " ", smap.Plm[end], " ", smap.Tlm[1], " ", smap.Tlm[end], "\n")
+                println(io, sfmap.Pum[1], " ", sfmap.Pum[end], " ", sfmap.Tum[1], " ", sfmap.Tum[end])
+                println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
+                println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end], "\n")
                 # Data
                 for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
-                    pmap .= n>4 ? smap.lm[:,:,slot] : n>2 ? smap.tz[:,:,slot] : smap.um[:,:,slot]
+                    pmap .= n>4 ? sfmap.slm[:,:,slot] : n>2 ? sfmap.stz[:,:,slot] : sfmap.sum[:,:,slot]
                     for i in 1:nP
                         for j in 1:nT
                             print(io, pmap[i,j], " ")
@@ -994,15 +1029,15 @@
         end
 
         if fO2
-            open(fname_fO2, "w") do io
+            open(joinpath(savedir, fname_fO2), "w") do io
                 # Header
                 println(io, nP, " ", nT, "\n");
-                println(io, fmap.Pum[1], " ", fmap.Pum[end], " ", fmap.Tum[1], " ", fmap.Tum[end])
-                println(io, fmap.Ptz[1], " ", fmap.Ptz[end], " ", fmap.Ttz[1], " ", fmap.Ttz[end])
-                println(io, fmap.Plm[1], " ", fmap.Plm[end], " ", fmap.Tlm[1], " ", fmap.Tlm[end], "\n")
+                println(io, sfmap.Pum[1], " ", sfmap.Pum[end], " ", sfmap.Tum[1], " ", sfmap.Tum[end])
+                println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
+                println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end], "\n")
                 # Data
                 for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
-                    pmap .= n>4 ? fmap.lm[:,:,slot] : n>2 ? fmap.tz[:,:,slot] : fmap.um[:,:,slot]
+                    pmap .= n>4 ? sfmap.flm[:,:,slot] : n>2 ? sfmap.ftz[:,:,slot] : sfmap.fum[:,:,slot]
                     for i in 1:nP
                         for j in 1:nT
                             print(io, pmap[i,j], " ")

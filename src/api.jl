@@ -1631,6 +1631,15 @@ end
 # =======  Water Storage Capacity (sᴴ²ᴼ) and Oxygen fugacity profile (fO₂)  =======
 # =================================================================================
 
+function compose_∑Fe³⁺_∑Fe!(R, nP)
+    R[:, 1, 1] .= LinRange(0.005, 0.03, nP) # UM Harz
+    R[:, 1, 2] .= LinRange(0.02, 0.06, nP) # UM MORB
+    R[:, 2, 1] .= LinRange(0.03, 0.10, nP) # TZ Harz
+    R[:, 2, 2] .= LinRange(0.03, 0.10, nP) # TZ MORB
+    R[:, 3, 1] .= 0.03ones(nP) # LM MORB
+    R[:, 3, 2] .= 0.03ones(nP) # LM MORB
+end
+
 """
     Solve for mantle water storage capacity (sᴴ²ᴼ) and oxygen fugacity (fO₂) over P-T-X space.
 
@@ -1644,7 +1653,6 @@ end
         - fO2::Bool \t\t\t-->\t Solve for fO₂ [default: true]
         - DBswitchP::Float64 \t\t-->\t Pressure (GPa) to switch between upper mantle and transition zone databases [default: 7.0]
         - plt::Bool \t\t\t-->\t Plot results [default: false]
-        - disp_prog::Bool \t\t-->\t Display progress bars [default: true]
         - DHMS::Bool \t\t\t-->\t Explore DHMS paths for transition zone calculations [default: true]
         - Clist::Vector{String} \t-->\t List of oxides in the system [default: ["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"]]
         - XB::Vector{Float64} \t\t-->\t Bulk composition in wt% for sᴴ²ᴼ calculations [default: Upper mantle composition]
@@ -1662,14 +1670,14 @@ end
         - phase_out::Vector{String} \t-->\t List of phases to exclude from calculations [default: ["chl"]]
 """
 function solve_sH2O_fO2(nP::Int64, nT::Int64;
-                        s=true, fO2=true, DBswitchP=7.0, plt=false, disp_prog=true, DHMS=true,
+                        s=true, fO2=true, DBswitchP=7.0, plt=false, DHMS=true,
                         # Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
                         Clist=["SiO2", "MgO", "FeO", "O", "CaO", "Al2O3", "Na2O", "Cr2O3", "H2O"],
                         XH=[43.43, 45.93, 8.34, 0.0, 0.9, 1.0, 0.01, 0.3, 100.0], # From stxirtude & Bertelloni 2024
                         XB=[50.42, 9.77, 7.1, 0.0, 12.54, 16.8, 2.23, 0.07, 100.0], # From stxirtude & Bertelloni 2024
                         Prange=(0.1, 135.0), Trange=(500.0, 4000.0), verbose=true,
-                        cmap=:vik100, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"],
-                        test_path=false, sys_in="mol"
+                        cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"],
+                        test_path=false, sys_in="mol", unoxidized=false,
                         )
 
     # Checks
@@ -1690,15 +1698,7 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
 
     # Memory allocations
     # --- Compose R = ∑Fe³⁺/∑Fe for fO₂ calculations
-        if fO2
-            R = zeros(nP, 3, 2)
-            R[:, 1, 1] .= LinRange(0.005, 0.03, nP) # UM Harz
-            R[:, 1, 2] .= LinRange(0.02, 0.06, nP) # UM MORB
-            R[:, 2, 1] .= LinRange(0.03, 0.10, nP) # TZ Harz
-            R[:, 2, 2] .= LinRange(0.03, 0.10, nP) # TZ MORB
-            R[:, 3, 1] .= 0.03ones(nP) # LM MORB
-            R[:, 3, 2] .= 0.03ones(nP) # LM MORB
-        end
+        R = zeros(nP, 3, 2); compose_∑Fe³⁺_∑Fe!(R, nP)
     # --- Axis Vectors
         Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 2000., nT)
         Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(1000., Trange[2], nT)
@@ -1708,7 +1708,16 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         Xv = vcat(map(Vector, eachrow(repeat(XH', outer=nPnT))), map(Vector, eachrow(repeat(XB', outer=nPnT))))
         tnP, tnP05 = Int64(ceil(1.1max(nP, nT))), Int64(ceil(0.5max(nP, nT)))
     # --- Maps
-        um, tz, lm = zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2) # later reshaped as 'T, P, reshape(um, nP, :)'
+        if s
+            um, tz, lm = zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2)  # later reshaped as 'T, P, reshape(um, nP, :)'
+        else
+            um, tz, lm = nothing, nothing, nothing
+        end
+        if fO2
+            fum, ftz, flm = zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2)   # later reshaped as 'T, P, reshape(um, nP, :)'
+        else
+            fum, ftz, flm = nothing, nothing, nothing
+        end
 
     # ========================
     # ===== Upper Mantle =====
@@ -1717,17 +1726,28 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
     # Upper mantle mesh vectorization (MAGEMin parallelization)
         mesh_vectorization!(Pum, Tum, nP, nT, Pv, Tv)
     # Minimizer call + assembly
-        verbose && println("Calculating upper mantle sᴴ²ᴼ...")
-        data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
-        rm_list = remove_phases(phase_out, "um")
-        outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, B=ones(length(Pv)), progressbar=disp_prog, rm_list=rm_list, sys_in=sys_in) # kbar and K
-        Finalize_MAGEMin(data);
-        sᴴ²ᴼ_assembler!(um, outHB, nPnT)
-        um = cat(reshape(um[:,1], nP, nT), reshape(um[:,2], nP, nT), dims=3)
-
-        (fO2 && assignR_to_Xv!(Xv, R[:, 1, :]))  # Oxidize bulk for UM fO₂ calculations
-
-
+        if s
+            verbose && println("Calculating upper mantle sᴴ²ᴼ...")
+            data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
+            rm_list = remove_phases(phase_out, "um")
+            outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, B=ones(length(Pv)), progressbar=verbose, rm_list=rm_list, sys_in=sys_in) # kbar and K
+            Finalize_MAGEMin(data);
+        else; outHB = 0.0; end
+    # Call UM through SB24 to get fO₂
+        if fO2 
+            verbose && println("Calculating upper mantle fO₂...")
+            data    = Initialize_MAGEMin("sb24", verbose=false);
+            assignR_to_Xv!(Xv, R[:, 1, :])  # Oxidize bulk for UM fO₂ calculations
+            out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, progressbar=verbose, sys_in=sys_in)
+            Finalize_MAGEMin(data);
+        else; out_fO2 = 0.0; end
+    # Assemble
+        sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, nPnT, s=s, fO2=fO2)
+        if s
+            um = cat(reshape(um[:,1], nP, nT), reshape(um[:,2], nP, nT), dims=3)
+            min_s = min_sᴴ²ᴼ_assembler(tnP)
+        end
+        fO2 && (fum = cat(reshape(fum[:,1], nP, nT), reshape(fum[:,2], nP, nT), dims=3))
     # Mineral-bound sᴴ²ᴼ assembly
         verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
         min_s = min_sᴴ²ᴼ_assembler(tnP);
@@ -1735,21 +1755,32 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
     # ===========================
     # ===== Transizion Zone =====
     # ===========================
-        Clist24 = replace(Clist, "FeO" => "Fe")
 
+    # Prepare oxide list for sb24
+        Clist24 = replace(Clist, "FeO" => "Fe")
     # Transition zone mesh vectorization
         mesh_vectorization!(Ptz, Ttz, nP, nT, Pv, Tv)
     # Minimizer call + assembly
-        verbose && println("Calculating transition zone sᴴ²ᴼ...")
-        data    = Initialize_MAGEMin("sb24", verbose=false);
-        (fO2 && assignR_to_Xv!(Xv, R[:, 2, :]))  # Oxidize bulk for TZ fO₂ calculations
-        outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist24, name_solvus=true, progressbar=disp_prog, sys_in=sys_in) # kbar and K
-        Finalize_MAGEMin(data);
-
-        DHMS && verbose && println("Exploring DHMS paths...")
-        ppaths, paths, _  =  DHMS ? path_solve(XH, Clist, phase_out, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), DBswitchP, (@view outHB[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0)
-        ∫sᴴ²ᴼ!(tz, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), min_s, outHB, DHMS, ppaths, paths, nPnT)
-        tz = cat(reshape(tz[:,1], nP, nT), reshape(tz[:,2], nP, nT), dims=3)
+        if s || fO2
+            verbose && println("Calculating transition zone sᴴ²ᴼ...")
+            data    = Initialize_MAGEMin("sb24", verbose=false);
+            !unoxidized && assignR_to_Xv!(Xv, R[:, 2, :])  # Oxidize bulk for TZ fO₂ calculations
+            outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist24, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
+            Finalize_MAGEMin(data);
+        end
+    # DHMS
+        if s
+            DHMS && verbose && println("Exploring DHMS paths...")
+            ppaths, paths, _  =  DHMS ? path_solve(XH, Clist, phase_out, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), DBswitchP, (@view outHB[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0)
+    # Assemble  
+            ∫sᴴ²ᴼ!(tz, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), min_s, outHB, DHMS, ppaths, paths, nPnT)
+            tz = cat(reshape(tz[:,1], nP, nT), reshape(tz[:,2], nP, nT), dims=3)
+        end
+        if fO2 
+            verbose && println("Assembing transition zone fO₂...")
+            sᴴ²ᴼ_fO₂_assembler!(tz, ftz, outHB, outHB, nPnT, s=false)
+            ftz = cat(reshape(ftz[:,1], nP, nT), reshape(ftz[:,2], nP, nT), dims=3)
+        end
 
     # ===========================
     # ====== Lower Mantle =======
@@ -1758,27 +1789,37 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
     # Lower mantle mesh vectorization
         mesh_vectorization!(Plm, Tlm, nP, nT, Pv, Tv)
     # Minimizer call + assembly
-        verbose && println("Calculating lower mantle sᴴ²ᴼ...")
-        data    = Initialize_MAGEMin("sb24", verbose=false);
-        (fO2 && assignR_to_Xv!(Xv, R[:, 3, :])) # Oxidize bulk for LM fO₂ calculations
-        outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist24, name_solvus=true, progressbar=disp_prog, sys_in=sys_in) # kbar and K
-        ∫sᴴ²ᴼ!(lm, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), min_s, outHB, DHMS, ppaths, paths, nPnT)
-        lm = cat(reshape(lm[:,1], nP, nT), reshape(lm[:,2], nP, nT), dims=3)
-        Finalize_MAGEMin(data);
+        if s || fO2
+            verbose && println("Calculating lower mantle sᴴ²ᴼ...")
+            data    = Initialize_MAGEMin("sb24", verbose=false);
+            !unoxidized && assignR_to_Xv!(Xv, R[:, 3, :]) # Oxidize bulk for LM fO₂ calculations
+            outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist24, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
+            Finalize_MAGEMin(data);
+        end
+        if s
+            ∫sᴴ²ᴼ!(lm, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), min_s, outHB, DHMS, ppaths, paths, nPnT)
+            lm = cat(reshape(lm[:,1], nP, nT), reshape(lm[:,2], nP, nT), dims=3)
+        end
+        if fO2 
+            verbose && println("Calculating lower mantle fO₂...")
+            sᴴ²ᴼ_fO₂_assembler!(lm, flm, outHB, outHB, nPnT, s=false)
+            flm = cat(reshape(flm[:,1], nP, nT), reshape(flm[:,2], nP, nT), dims=3)
+        end
+
+    # ================================
+    # ====== Post-minimization =======
+    # ================================
+
     # Return structure
-    smap = sᴴ²ᴼ( um, tz, lm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
-    tempfO2 = zeros(Float64, nP, nT)
-    # Temporary fill starting at -1 at the lowest PT point, decreasing with both P and T. More with P.
-    tempfO2 .= -1 .- 0.5 .* (Pum' ./ maximum(Pum)) .- 0.3 .* (Tum ./ maximum(Tum))
-    fmap = sᴴ²ᴼ( cat(tempfO2, tempfO2, dims=3), cat(tempfO2, tempfO2, dims=3), cat(tempfO2, tempfO2, dims=3), Pum, Tum, Ptz, Ttz, Plm, Tlm )
+    sfmap = sfstruct( um, tz, lm, fum, ftz, flm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
 
     # Export
-    write_output(smap, fmap, s=s, fO2=fO2)
+    (s || fO2) && write_output(sfmap, s=s, fO2=fO2)
 
     # Plot
-    plt && plot_sᴴ²ᴼ(smap; cmap = cmap, interp = interp, cmap_reverse = cmap_reverse, logscale = logscale)
+    (plt && (s || fO2)) && plot_sf(sfmap; cmap = cmap, interp = interp, cmap_reverse = cmap_reverse, logscale = logscale)
 
-    return smap
+    return sfmap
 
 end
 

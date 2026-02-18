@@ -18,5 +18,3 @@ load_sims = false
 #
 
 # time_vs_field(y, "Water_lm")
-
-a = solve_sH2O_fO2(70, 70, plt=true, cmap=:Blues)

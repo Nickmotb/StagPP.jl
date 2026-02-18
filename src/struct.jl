@@ -48,18 +48,22 @@ end
 # ==== sᴴ²ᴼ/fO₂ Structures ====
 # =============================
 
-struct sᴴ²ᴼ
-    # maps
-    um       :: Array{Float64,3}    # Upper mantle sᴴ²ᴼ grid (nP x nT)
-    tz       :: Array{Float64,3}    # Transition zone sᴴ²ᴼ grid (nP x nT)
-    lm       :: Array{Float64,3}    # Lower mantle sᴴ²ᴼ grid (nP x nT)
+struct sfstruct
+    # sᴴ²ᴼ maps
+    sum       :: Union{Array{Float64,3}, Nothing}    # Upper mantle sᴴ²ᴼ grid (nP x nT x endmember)
+    stz       :: Union{Array{Float64,3}, Nothing}    # Transition zone sᴴ²ᴼ grid (nP x nT x endmember)
+    slm       :: Union{Array{Float64,3}, Nothing}    # Lower mantle sᴴ²ᴼ grid (nP x nT x endmember)
+    # fO₂ maps
+    fum      :: Union{Array{Float64,3}, Nothing}    # Upper mantle fO₂ grid (nP x nT x endmember)
+    ftz      :: Union{Array{Float64,3}, Nothing}    # Transition zone fO₂ (nP x nT x endmember)
+    flm      :: Union{Array{Float64,3}, Nothing}    # Lower mantle fO₂ (nP x nT x endmember)
     # Vectors
     Pum      :: Array{Float64,1}    # Upper mantle pressure vector (kbar)
-    Tum      :: Array{Float64,1}    # Upper mantle temperature vector (K
+    Tum      :: Array{Float64,1}    # Upper mantle temperature vector (K)
     Ptz      :: Array{Float64,1}    # Transition zone pressure vector (kbar)
-    Ttz      :: Array{Float64,1}    # Transition zone temperature vector (
+    Ttz      :: Array{Float64,1}    # Transition zone temperature vector (K)
     Plm      :: Array{Float64,1}    # Lower mantle pressure vector (kbar)
-    Tlm      :: Array{Float64,1}    # Lower mantle temperature vector (    
+    Tlm      :: Array{Float64,1}    # Lower mantle temperature vector (K)
 end
 
 struct min_sᴴ²ᴼ{T}
