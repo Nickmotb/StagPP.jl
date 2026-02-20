@@ -17,4 +17,4 @@ load_sims = false
     end
 #
 
-sim = load_local()
+sim = load_local("home")

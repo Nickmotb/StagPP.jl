@@ -307,7 +307,7 @@ function load_local(set)
     if set == "office"
         sroot = "/Users/nickmotb/Desktop/watercarb/+op/EW"
     elseif set == "home"
-        sroot = "/home/nickmb/Desktop/watercarb/+op"
+        sroot = "/home/nickmb/Desktop/watercarb/+op/EW"
     end
     sname = "local"
     loc = load_sim(sroot, sname)
