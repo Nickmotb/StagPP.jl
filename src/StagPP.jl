@@ -33,7 +33,7 @@ module StagPP
     # Constant export
     export sec2Gyr, om, m_s2cm_yr
     # Function export
-    export load_sim, data_encoding, solve_sH2O_fO2, min_sᴴ²ᴼ_assembler, solve_point, readVTK
+    export load_sim, load_local, data_encoding, solve_sH2O_fO2, min_sᴴ²ᴼ_assembler, solve_point, readVTK
     # Plot exports
     export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, 
             mantle_water, mantle_water_at_t, plot_sf, minmap, 

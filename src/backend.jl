@@ -250,6 +250,25 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
     # Encoding
     idxT, idxR, idxP = data_encoding(time ? time_header : nothing, rprof ? rprof_header : nothing, plates ? plates_header : nothing)
     # Unit conversions
+    Mmantle = 0.0
+    if rprof
+        rprof_data[:,:,idxR["vrms"]] .= m_s2cm_yr*rprof_data[:,:,idxR["vrms"]]
+        rprof_header[idxR["vrms"]] = "Vrms"
+        if haskey(idxR, "rhomean")
+            massprof = ∂m(rprof_data[:, :, idxR["r"]], Stag.rcmb, rprof_data[:, :, idxR["rhomean"]])
+            rprof_header = vcat(rprof_header, "dM")
+            rprof_data = cat(rprof_data, massprof, dims=3)
+            Mmantle = sum(massprof[:,1])
+        end
+        if Stag.H₂O_tracked
+            # Add Saturation
+            rprof_header = vcat(rprof_header, "satH2O")
+            rprof_data = cat(rprof_data, min.(1e2(rprof_data[:, :, idxR["boundH2O"]]./rprof_data[:, :, idxR["Wsol"]]), 100), dims=3)
+            # Add total H2O mass
+            rprof_header = vcat(rprof_header, "Water")
+            rprof_data = cat(rprof_data, rprof_data[:, :, idxR["boundH2O"]] .+ rprof_data[:, :, idxR["freeH2O"]], dims=3)
+        end
+    end
     if time
         time_data[:,idxT["time"]] .= sec2Gyr*time_data[:,idxT["time"]]; # Convert time to Gyr
         time_data[:,idxT["Vrms"]] .= m_s2cm_yr*time_data[:,idxT["Vrms"]]; # Convert time to Gyr
@@ -264,21 +283,8 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
             time_data = hcat(time_data, max.(time_data[:,idxT["IngassedH2O"]], 1)./max.(time_data[:,end], 1))
             # Add EruptedH2O / erupta
             time_header = vcat(time_header, "eH2O/e")
-            time_data = hcat(time_data, time_data[:,idxT["EruptedH2O"]]./time_data[:,idxT["erupta"]])
-        end
-    end
-    if rprof
-        rprof_data[:,:,idxR["vrms"]] .= m_s2cm_yr*rprof_data[:,:,idxR["vrms"]]
-        rprof_header[idxR["vrms"]] = "Vrms"
-        haskey(idxR, "H2Odarcy") && (rprof_data[:,:,idxR["H2Odarcy"]] .= m_s2cm_yr*rprof_data[:,:,idxR["H2Odarcy"]])
-        if haskey(idxR, "rhomean")
-            rprof_header = vcat(rprof_header, "dM")
-            rprof_data = cat(rprof_data, ∂m(rprof_data[:, :, idxR["r"]], Stag.rcmb, rprof_data[:, :, idxR["rhomean"]]), dims=3)
-        end
-        if Stag.H₂O_tracked
-            # Add Saturation
-            rprof_header = vcat(rprof_header, "satH2O")
-            rprof_data = cat(rprof_data, min.(1e2(rprof_data[:, :, idxR["Water"]]./rprof_data[:, :, idxR["Wsol"]]), 100), dims=3)
+            ∂erupta, ∂eH2O = diff(time_data[:,idxT["erupta"]]), diff(time_data[:,idxT["EruptedH2O"]])
+            time_data = hcat(time_data, replace(vcat(0, 1e2∂eH2O./(∂erupta*Mmantle)), Inf=>0.0, NaN=>0.0)) # wt%
         end
     end
     if plates
@@ -293,7 +299,19 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
                     time ? time_data : nothing, rprof ? rprof_data : nothing, plates ? plates_data : nothing, 
                     plates ? plates_data[:,2] : rprof ? sec2Gyr*rprof_time : nothing,
                     haskey(idxR, "r") ? ∂V(rprof_data[:, 1, idxR["r"]], Stag.rcmb) : nothing,
+                    Mmantle==0.0 ? nothing : Mmantle,
                     Stag)
+end
+
+function load_local(set)
+    if set == "office"
+        sroot = "/Users/nickmotb/Desktop/watercarb/+op/EW"
+    elseif set == "home"
+        sroot = "/home/nickmb/Desktop/watercarb/+op"
+    end
+    sname = "local"
+    loc = load_sim(sroot, sname)
+    return loc
 end
 
 # ==================

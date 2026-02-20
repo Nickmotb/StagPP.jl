@@ -17,4 +17,4 @@ load_sims = false
     end
 #
 
-# time_vs_field(y, "Water_lm")
+sim = load_local()

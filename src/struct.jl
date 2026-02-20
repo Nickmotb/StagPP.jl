@@ -36,10 +36,11 @@ struct DataBlock
     # Data
     timedata    :: Union{Array{Float64,2}, Nothing}     # Time data (2D array)
     rprofdata   :: Union{Array{Float64,3}, Nothing}     # Azimuthal-averaged profile block (nfields x 2D arrays)
-    platesdata  :: Union{Array{Float64,2}, Nothing} # Plates block (nfields x 2D arrays) (can be nothing)
+    platesdata  :: Union{Array{Float64,2}, Nothing}     # Plates block (nfields x 2D arrays) (can be nothing)
     # Extra
     rproftime   :: Union{Array{Float64,1}, Nothing}     # Time vector for rprof/plates data (Sampled)
     rprofdV     :: Union{Array{Float64,1}, Nothing}     # Radial volume differentials for rprof data
+    Mmantle     :: Union{Float64, Nothing}              # Mantle mass in kg
     # Metadata
     metadata    :: StagData     # Metadata structure
 end
