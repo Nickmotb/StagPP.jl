@@ -3,7 +3,7 @@ module StagPP
     # Dependencies
     using Mmap, Parsers, Interpolations, ForwardDiff, LinearAlgebra, StaticArrays, LightXML
     using Statistics, EasyFit, LsqFit, StatsBase, MultivariateStats, MAGEMin_C, ColorSchemes
-    using CairoMakie, GLMakie, DelimitedFiles, Printf
+    using CairoMakie, GLMakie, DelimitedFiles, Printf, NumericalIntegration
 
     # Constants
     const R = 8.31446261815324 # J mol⁻¹ K⁻¹
@@ -22,7 +22,7 @@ module StagPP
     # === Checks
         include("checks.jl")
     # === sᴴ²ᴼ
-        include("s_H2O.jl")
+        include("sf_H2O.jl")
     # === fO₂
         include("fO2.jl")
     # === Public API

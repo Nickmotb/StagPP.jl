@@ -20,4 +20,4 @@ load_sims = false
 # sim = load_local("office")
 # rprof_vs_field(y20, "Water")
 
-solve_point(10, 4000, "XH")
+solve_sH2O_fO2(300,300, s=false, fO2=false, melt_ints=true)

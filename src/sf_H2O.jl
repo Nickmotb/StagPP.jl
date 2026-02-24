@@ -15,8 +15,8 @@
         -0.14182435e+14   0.18165390e+9  -0.19769068e+6       -0.23530318e+2        0.0                 0.0
         0.0               0.0             0.92093375e+5        0.12246777e+3        0.0                 0.0]
     get_cᵢ(cᵢⱼ, Tᵢ) = cᵢⱼ * [Tᵢ^(-4) Tᵢ^(-2) Tᵢ^(-1) 1.0 Tᵢ Tᵢ^2]' # cᵢ = cᵢ₁T⁻⁴ + cᵢ₂T⁻² + cᵢ₃T⁻¹ + cᵢ₄ + cᵢ₅T + cᵢ₆T²
-    Pitzer_and_Sterner_EoS(cᵢ, ρ, Tᵢ) = (ρ + cᵢ[1]*ρ^2 - ρ^2*((cᵢ[3] + 2cᵢ[4]*ρ + 3cᵢ[5]*ρ^2 + 4cᵢ[6]*ρ^3) / (cᵢ[2] 
-                                            + cᵢ[3]*ρ + cᵢ[4]*ρ^2 + cᵢ[5]*ρ^3 + cᵢ[6]*ρ^4)^2) + cᵢ[7]*ρ^2*exp(-cᵢ[8]*ρ) 
+    Pitzer_and_Sterner_EoS(cᵢ, ρ, Tᵢ) = (ρ + cᵢ[1]*ρ^2 - ρ^2*((cᵢ[3] + 2cᵢ[4]*ρ + 3cᵢ[5]*ρ^2 + 4cᵢ[6]*ρ^3) / (cᵢ[2]
+                                            + cᵢ[3]*ρ + cᵢ[4]*ρ^2 + cᵢ[5]*ρ^3 + cᵢ[6]*ρ^4)^2) + cᵢ[7]*ρ^2*exp(-cᵢ[8]*ρ)
                                                 + cᵢ[9]*ρ^2*exp(-cᵢ[10]*ρ))*(1e6R*Tᵢ)
     # Newton solver P-V-T
     function Pitzer_and_Sterner_solver(P_target, Tᵢ, cᵢⱼ; verbose=false, volume=false, ρ₀=0.1, Lbound=1e-3, Ubound=1e3, tol=1e-6, maxiter=300)
@@ -51,7 +51,7 @@
             for p in eachindex(P)
                 ρ = Pitzer_and_Sterner_solver(1e9min(P[p], 100.), Tᵢ, cᵢⱼ) # P -> from GPa to Pa; T in K
                 # Fugacity calculation
-                fmap[p,t] = exp(log(ρ) + cᵢ[1]*ρ + (1/(cᵢ[2] + cᵢ[3]*ρ + cᵢ[4]*ρ^2 + cᵢ[5]*ρ^3 + cᵢ[6]*ρ^4) - 1/cᵢ[2]) 
+                fmap[p,t] = exp(log(ρ) + cᵢ[1]*ρ + (1/(cᵢ[2] + cᵢ[3]*ρ + cᵢ[4]*ρ^2 + cᵢ[5]*ρ^3 + cᵢ[6]*ρ^4) - 1/cᵢ[2])
                                 - cᵢ[7]/cᵢ[8] * (exp(-cᵢ[8]*ρ) - 1) - cᵢ[9]/cᵢ[10] * (exp(-cᵢ[10]*ρ) - 1) + 1e9min(P[p], 100.)/(ρ*1e6R*Tᵢ) + log(1e6R*Tᵢ) - 1)/1e9
             end
         end
@@ -194,29 +194,29 @@
         T = [1373.0, 1369., 1376., 1379., 1387., 1394., 1396., 1391., 1383., 1364., 1320., 1190., 1038.]
         r6 = extrapolate(Interpolations.interpolate((P6,), T, Gridded(Linear())), Line())
         # exit
-        Pe = [0.1923, 0.4103, 0.7821, 1.167, 1.590, 1.974, 2.410, 2.872, 3.218, 3.551, 3.936, 4.218, 4.513, 4.795, 5.038, 5.200, 5.600, 6.000, 6.400, 6.800, 7.200, 7.600, 8.000, 8.400, 8.800, 9.200, 9.600, 10.00, 
-                10.40, 10.80, 11.20, 11.60, 12.00, 12.40, 12.80, 13.20, 13.60, 14.00, 14.40, 14.80, 15.20, 
-                    15.60, 16.00, 16.40, 16.80, 17.20, 17.60, 18.00, 18.40, 18.80, 19.20, 19.60, 20.00, 20.40, 
-                        20.80, 21.20, 21.60, 22.00, 22.40, 22.80, 23.20, 23.60, 24.00, 24.40, 24.80, 25.20, 25.60, 
-                            26.00, 26.40, 26.80, 27.20, 27.60, 28.00, 28.40, 35.56, 36.40, 
-                                37.10, 37.80, 38.50, 39.20, 39.90, 40.60, 41.30, 42.00, 42.70, 43.40, 44.10, 44.80, 45.50, 
-                                    46.20, 46.90, 47.60, 48.30, 49.00, 49.70, 50.40, 51.10, 51.80, 52.50, 53.20, 53.90, 54.60, 
-                                        55.30, 56.00, 56.70, 57.40, 58.10, 58.80, 59.50, 59.90, 60.00, 60.21, 60.42, 60.52, 60.84, 
+        Pe = [0.1923, 0.4103, 0.7821, 1.167, 1.590, 1.974, 2.410, 2.872, 3.218, 3.551, 3.936, 4.218, 4.513, 4.795, 5.038, 5.200, 5.600, 6.000, 6.400, 6.800, 7.200, 7.600, 8.000, 8.400, 8.800, 9.200, 9.600, 10.00,
+                10.40, 10.80, 11.20, 11.60, 12.00, 12.40, 12.80, 13.20, 13.60, 14.00, 14.40, 14.80, 15.20,
+                    15.60, 16.00, 16.40, 16.80, 17.20, 17.60, 18.00, 18.40, 18.80, 19.20, 19.60, 20.00, 20.40,
+                        20.80, 21.20, 21.60, 22.00, 22.40, 22.80, 23.20, 23.60, 24.00, 24.40, 24.80, 25.20, 25.60,
+                            26.00, 26.40, 26.80, 27.20, 27.60, 28.00, 28.40, 35.56, 36.40,
+                                37.10, 37.80, 38.50, 39.20, 39.90, 40.60, 41.30, 42.00, 42.70, 43.40, 44.10, 44.80, 45.50,
+                                    46.20, 46.90, 47.60, 48.30, 49.00, 49.70, 50.40, 51.10, 51.80, 52.50, 53.20, 53.90, 54.60,
+                                        55.30, 56.00, 56.70, 57.40, 58.10, 58.80, 59.50, 59.90, 60.00, 60.21, 60.42, 60.52, 60.84,
                                             60.94, 61.26, 61.57, 61.78, 62.10, 62.31, 62.62, 62.83]
-        T = [886.8, 937.6, 980.3, 1001.0, 1019.0, 1025.0, 1025.0, 1013.0, 1001.0, 974.2, 931.5, 899.0, 854.2, 801.4, 746.4, 816.9, 850.2, 881.6, 913.4, 944.6, 971.2, 1009.0, 1039.0, 1073.0, 1107.0, 1144.0, 1157.0, 1183.0, 
-            1205.0, 1222.0, 1239.0, 1254.0, 1267.0, 1273.0, 1297.0, 1397.0, 1480.0, 1474.0, 1467.0, 1459.0, 1452.0, 
-                1444.0, 1434.0, 1425.0, 1416.0, 1407.0, 1407.0, 1417.0, 1427.0, 1437.0, 1448.0, 1458.0, 1468.0, 1477.0, 
-                    1484.0, 1490.0, 1500.0, 1502.0, 1510.0, 1518.0, 1525.0, 1524.0, 1516.0, 1507.0, 1494.0, 1478.0, 1462.0, 
-                        1452.0, 1440.0, 1429.0, 1419.0, 1407.0, 1395.0, 1385.0, 1363.0, 1370.0, 
-                            1384.0, 1398.0, 1413.0, 1427.0, 1441.0, 1455.0, 1469.0, 1483.0, 1496.0, 1510.0, 1524.0, 1539.0, 1553.0, 
-                                1566.0, 1581.0, 1594.0, 1607.0, 1615.0, 1627.0, 1640.0, 1651.0, 1658.0, 1663.0, 1669.0, 1674.0, 1679.0, 
-                                    1676.0, 1673.0, 1669.0, 1659.0, 1650.0, 1628.0, 1587.0, 1553.0, 1518.0, 1481.0, 1433.0, 1390.0, 1333.0, 
+        T = [886.8, 937.6, 980.3, 1001.0, 1019.0, 1025.0, 1025.0, 1013.0, 1001.0, 974.2, 931.5, 899.0, 854.2, 801.4, 746.4, 816.9, 850.2, 881.6, 913.4, 944.6, 971.2, 1009.0, 1039.0, 1073.0, 1107.0, 1144.0, 1157.0, 1183.0,
+            1205.0, 1222.0, 1239.0, 1254.0, 1267.0, 1273.0, 1297.0, 1397.0, 1480.0, 1474.0, 1467.0, 1459.0, 1452.0,
+                1444.0, 1434.0, 1425.0, 1416.0, 1407.0, 1407.0, 1417.0, 1427.0, 1437.0, 1448.0, 1458.0, 1468.0, 1477.0,
+                    1484.0, 1490.0, 1500.0, 1502.0, 1510.0, 1518.0, 1525.0, 1524.0, 1516.0, 1507.0, 1494.0, 1478.0, 1462.0,
+                        1452.0, 1440.0, 1429.0, 1419.0, 1407.0, 1395.0, 1385.0, 1363.0, 1370.0,
+                            1384.0, 1398.0, 1413.0, 1427.0, 1441.0, 1455.0, 1469.0, 1483.0, 1496.0, 1510.0, 1524.0, 1539.0, 1553.0,
+                                1566.0, 1581.0, 1594.0, 1607.0, 1615.0, 1627.0, 1640.0, 1651.0, 1658.0, 1663.0, 1669.0, 1674.0, 1679.0,
+                                    1676.0, 1673.0, 1669.0, 1659.0, 1650.0, 1628.0, 1587.0, 1553.0, 1518.0, 1481.0, 1433.0, 1390.0, 1333.0,
                                         1280.0, 1214.0, 1135.0, 1056.0, 984.2, 905.6, 839.7, 783.1]
         e = extrapolate(Interpolations.interpolate((Pe,), T, Gridded(Linear())), Line())
         return DHMS_boundaries(r1, r2, r3, r4, r5, r6, e, P1, P2, P3, P4, P5, P6, Pe)
     end
 
-    function compute_path(P, s; 
+    function compute_path(P, s;
                             T1=300.0,
                             cold=(g1=15.0, g∞=10.0,  L=2.0, m=1.4),
                             warm=(g1=190.0, g∞=10.0, L=1.0, m=1.4),
@@ -392,7 +392,7 @@
             fo_seed==0.0 && (fo_seed = 0.1)
             wad_seed==0.0 && (wad_seed = 0.1)
             st_seed==0.0 && (st_seed = 0.1)
-            
+
             # Store path
             push!(path_collection, PTpath(Tpath, atg, rh, en_seed, fo_seed, wad_seed, st_seed))
         end
@@ -529,7 +529,7 @@
         PhD = 0.5(6.7 + 11.2) # Bolfan Casanova et al. 2018
         PhH = 15.2 # Nishiet et al. 2014
 
-        return min_sᴴ²ᴼ(ol, wad, rw, grt, opx, opx_al, cpx_lp_di, cpx_lp_jd, cpx_hp, st, CaCl₂_st, α_PbO₂_st, coe, Dppv_al, 
+        return min_sᴴ²ᴼ(ol, wad, rw, grt, opx, opx_al, cpx_lp_di, cpx_lp_jd, cpx_hp, st, CaCl₂_st, α_PbO₂_st, coe, Dppv_al,
                             Dppv_noal, pv, cpv, cf, crst, fp, D_rw_aki, cor, PhA, PhE, shB, PhD, PhH)
     end
 
@@ -577,7 +577,7 @@
         P = [14.5, 15.2, 15.2, 15.5, 16, 16, 17, 18.5, 19, 19, 20, 20, 20, 14.0, 14.0, 14.0, 15.0, 15.5, 16.0, 18.5, 20.0, 20.0]
         T = [1873, 1673, 1873, 1673, 1773, 1773, 1673, 1673, 1723, 1923, 1773, 1873, 2173, 1473, 1573, 1673, 1573, 1673, 1773, 1573, 1773, 1873]
         W = [0.6, 2.49, 0.56, 1.06, 0.47, 1., 1.15, 1.31, 0.85, 0.35, 0.95, 0.8, 0.4, 2.07, 1.83, 0.81, 1.02, 0.58, 0.55, 1.13, 0.52, 0.44]
-        
+
         # Computation
         fug = local_fug(P, T, ns)
         n = 1.0
@@ -609,7 +609,7 @@
         W = [1.16, 1.04, 0.89, 1.60, 1.74, 0.87]
         fug = local_fug(P, T, ns)
         A, ΔH, ΔV = fit_Keppler([P T], W, fug, n; unit="GPa", p=[1e-2, -1e4, 1e4])
-        
+
         P, T = LinRange(minimum(P), maximum(P), ns), LinRange(minimum(T), maximum(T), ns)
         rw = zeros(Float64, ns, ns)
         for j in eachindex(T)
@@ -831,11 +831,11 @@
         T_al = [1800, 2750, 3550, 1850, 2620, 3300, 3900, 1890, 2500, 3100, 3650, 1950, 2420, 2800, 3350, 3750, 1910, 2380, 2750, 3200, 3510, 4000]
         P_al = [90, 90, 90, 100, 100, 100, 100, 110, 110, 110, 110, 120, 120, 120, 120, 120, 130, 130, 130, 130, 130, 130]
         D_al = [0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.4, 0.1, 0.2, 0.3, 0.4, 0.1, 0.2, 0.3, 0.4, 0.5, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
-        T_noal = [1080, 1200, 1310, 1670, 2820, 1075, 1130, 1230, 1380, 1700, 2900, 1030, 1100, 1170, 1240, 1420, 1770, 3000, 
+        T_noal = [1080, 1200, 1310, 1670, 2820, 1075, 1130, 1230, 1380, 1700, 2900, 1030, 1100, 1170, 1240, 1420, 1770, 3000,
                     1050, 1120, 1190, 1250, 1450, 1800, 3030, 1060, 1125, 1200, 1260, 1470, 1850, 3200,]
         P_noal = [90, 90, 90, 90, 90, 100, 100, 100, 100, 100, 100, 110, 110, 110, 110, 110, 110, 110, 120, 120, 120, 120, 120, 120, 120, 130, 130, 130, 130, 130, 130, 130]
         D_noal = [12.5, 10.0, 7.5, 5.0, 2.5, 15.0, 12.5, 10.0, 7.5, 5.0, 2.5, 17.5, 15.0, 12.5, 10.0, 7.5, 5.0, 2.5, 17.5, 15.0, 12.5, 10.0, 7.5, 5.0, 2.5, 17.5, 15.0, 12.5, 10.0, 7.5, 5.0, 2.5,]
-        
+
         # fit
         fit_al = curve_fit(fitmodel, hcat(P_al, T_al), D_al, [1e-6; 1e-6; 1e-6; 1e-2; 1e-5; 1e-2])
         fit_noal = curve_fit(fitmodel, hcat(P_noal, T_noal), D_noal, [1e-6; 1e-6; 1e-6; 1e-2; 1e-5; 1e-2])
@@ -901,7 +901,7 @@
             ax = Axis(fig[3, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched,\;wt%)", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
             hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, logscale ? log10.(sfmap.slm[:,:,2]') : sfmap.slm[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 4], hm)
-        
+
         # Big Picture
             if bigpicture[1]
                 bigP = vcat(sfmap.Pum, sfmap.Ptz, sfmap.Plm)
@@ -987,15 +987,26 @@
 
     # --- Field Smoother
     function average_spikes!(f, threshold)
-        for j in axes(f, 2)
-            for i in axes(f, 1)
-                if f[i,j]>=threshold
-                    f[i,j] = 0.0; cnt = 0
-                    (i>1 && f[i-1,j] < threshold) && (f[i,j] += f[i-1,j]; cnt += 1)
-                    (j>1 && f[i,j-1] < threshold) && (f[i,j] += f[i,j-1]; cnt += 1)
-                    (i<size(f, 1) && f[i+1,j] < threshold) && (f[i,j] += f[i+1,j]; cnt += 1)
-                    (j<size(f, 2) && f[i,j+1] < threshold) && (f[i,j] += f[i,j+1]; cnt += 1)
-                    f[i,j] *= 1.0/cnt
+        if length(size(f)) == 1
+            for i in eachindex(f)
+                if abs(f[i]-f[i-1])>=threshold
+                    f[i] = 0.0; cnt = 0
+                    (i>1 && f[i-1] < threshold) && (f[i] += f[i-1]; cnt += 1)
+                    (i<size(f, 1) && f[i+1] < threshold) && (f[i] += f[i+1]; cnt += 1)
+                    f[i] *= 1.0/cnt
+                end
+            end
+        else
+            for j in axes(f, 2)
+                for i in axes(f, 1)
+                    if f[i,j]>=threshold
+                        f[i,j] = 0.0; cnt = 0
+                        (i>1 && f[i-1,j] < threshold) && (f[i,j] += f[i-1,j]; cnt += 1)
+                        (j>1 && f[i,j-1] < threshold) && (f[i,j] += f[i,j-1]; cnt += 1)
+                        (i<size(f, 1) && f[i+1,j] < threshold) && (f[i,j] += f[i+1,j]; cnt += 1)
+                        (j<size(f, 2) && f[i,j+1] < threshold) && (f[i,j] += f[i,j+1]; cnt += 1)
+                        f[i,j] *= 1.0/cnt
+                    end
                 end
             end
         end
@@ -1005,7 +1016,7 @@
 # ======= Export =======
 # ======================
 
-    function write_output(sfmap; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", s=true, fO2=true)
+    function write_output(sfmap; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", fname_melt_ints="StagIDVs.dat", s=true, fO2=true, melt_ints=true)
         # Array dimensions
         nP, nT = length(sfmap.Pum), length(sfmap.Tum)
         pmap = zeros(Float64, nP, nT)
@@ -1046,4 +1057,267 @@
                 end
             end
         end
+
+        if melt_ints
+            open(joinpath(savedir, fname_melt_ints), "w") do io
+                # Header
+                println(io, nP, " ", nT, "\n");
+                println(io, sfmap.Pum[1], " ", sfmap.Pum[end], " ", sfmap.Tum[1], " ", sfmap.Tum[end])
+                println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
+                println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end], "\n")
+                # Data
+                for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
+                    pmap .= n>4 ? sfmap.DVlm[:,:,slot] : n>2 ? sfmap.DVtz[:,:,slot] : sfmap.DVum[:,:,slot]
+                    for i in 1:nP
+                        for j in 1:nT
+                            print(io, pmap[i,j], " ")
+                        end; println(io, "")
+                    end; println(io, "")
+                end
+            end
+        end
     end
+
+"""
+        Adjust bulk composition for a given oxidation state (R = Fe³⁺/∑Fe) by adding O accordingly. (used for SB24 database)
+
+        \t Basic usage: \t oxidize_bulk(X::Vector{Float64}, Xox::Vector{String}, R::Float64; wt=false)
+
+        Required arguments:
+
+        • X::Vector{Float64} \t-->\t Bulk composition vector (either in wt% or mol%)
+
+        • Xox::Vector{String} \t-->\t Corresponding oxide names for the bulk composition vector
+
+        • R::Float64 \t\t-->\t Desired oxidation state defined as R = Fe³⁺/∑Fe
+
+        Optional arguments:
+
+        - onlyvals::Bool \t\t-->\t If true, returns only the adjusted composition vector without oxide names [default: false]
+
+        - wt::Bool \t\t-->\t Indicates if the input composition is in weight percent (wt%) [default: false (molar fraction)]
+"""
+function oxidize_bulk(X, Xox, R; wt=false, onlyvals=false)
+
+    # R = Fe³/∑Fe
+    # Incoming composition oxide list must be with FeO + extra O
+
+    # Molar masses (g/mol)
+    mm = Dict(
+        "SiO2" => 60.08, "Al2O3" => 101.96, "CaO" => 56.08, "MgO" => 40.30, "FeO" => 71.85, "Fe2O3" => 159.69,
+        "K2O" => 94.2, "Na2O" => 61.98, "TiO2" => 79.88, "O" => 16.0, "Cr2O3" => 151.99, "MnO" => 70.937,
+        "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
+    )
+
+    # if given in wt%, convert to mol%
+    Xmol = wt ? X ./ [mm[ox] for ox in Xox] : X
+    wt && (Xmol .= Xmol ./ sum(Xmol)) #Normalize
+
+    # Calculate extra oxygen given R = Fe³⁺/Fe
+    nFe² = Xmol[Xox .== "FeO"][1]
+    nFe³ = (R*nFe²)/(1 - R)
+    nO³ = 1.5nFe³
+
+    # Recompute FeO + O -> Fe + O (negative O for reduced systems, positive for oxidized systems)
+    X_out, Xox_out = copy(X), copy(Xox)
+    idxFeO, idxO = findfirst(Xox .== "FeO"), findfirst(Xox .== "O")
+    nFeᵀ, nOᵀ = (2nO³/3 + nFe²), (nFe² + nO³)
+    if ("O" in Xox)
+        Xox_out[idxFeO] = "Fe"
+        X_out[idxO] = nOᵀ
+        X_out[idxFeO] = nFeᵀ
+    else
+        Xox_out[idxFeO] = "Fe"
+        X_out[idxFeO] = nFeᵀ
+        push!(Xox_out, "O")
+        push!(X_out, nOᵀ)
+    end
+
+    # Retrace to wt% if required
+    if wt
+        X_out .= X_out .* [mm[ox] for ox in Xox_out]
+    end
+
+    # Normalize
+    X_out .= 1e2(X_out ./ sum(X_out))
+
+    # Return
+    onlyvals ? (return X_out) : (return X_out, Xox_out)
+
+end
+
+# Composition conversion
+function comp2sb24(X, Xox; wt=false, unoxidize=false, totals=false)
+
+    # Xox = ["SiO2", "MgO", "FeO", "Fe2O3", "CaO", "Al2O3", "Na2O", "Cr2O3"]
+    # X = [43.43, 45.93, 8.34, 0.09, 0.90, 1.00, 0.01, 0.30] # Harzburgite
+    # X = [50.42, 9.77, 7.10, 1.07, 12.54, 16.80, 2.23, 0.07] # MORB
+
+    # Molar masses (g/mol)
+    mm = Dict(
+        "SiO2" => 60.08, "Al2O3" => 101.96, "CaO" => 56.08, "MgO" => 40.30, "FeO" => 71.85, "Fe2O3" => 159.69,
+        "K2O" => 94.2, "Na2O" => 61.98, "TiO2" => 79.88, "O" => 16.0, "Cr2O3" => 151.99, "MnO" => 70.937,
+        "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
+    )
+
+    # Convert from wt to mols if needed
+    Xc, Xoxc = copy(X), copy(Xox)
+    wt && (Xc ./= [mm[ox] for ox in Xox])
+    Xc ./= sum(Xc)
+
+    idxF2 = findfirst(Xox .== "FeO")
+    idxF3 = findfirst(Xox .== "Fe2O3")
+
+    # Compute total amount of Fe³⁺, Fe²⁺ and O
+    F2, F3 = Xc[idxF2], Xc[idxF3]
+    FT = F2 + F3
+    O3 = 3F3/2
+    OT = O3 + F2
+    Xoxc[idxF3] = "O"
+    if totals
+        Xoxc[idxF2] = "Fe"
+        Xc[idxF2] = FT
+        Xc[idxF3] = unoxidize ? FT : OT
+    else
+        Xoxc[idxF2] = "FeO"
+        Xc[idxF2] = F2
+        Xc[idxF3] = unoxidize ? 0.0 : O3
+    end
+
+    # Retrace to wt
+    Xcm = copy(Xc)
+    Xcm .*= [mm[ox] for ox in Xoxc]
+    Xcm ./= sum(Xcm)
+    Xc ./= sum(Xc)
+
+    # Printing
+    println("Resulting composition after conversion:")
+    println("Oxides: ", Xoxc)
+    println("Molar %: ", round.(1e2Xc, digits=3))
+    println("Weight %: ", round.(1e2Xcm, digits=3))
+    println("Fe³⁺/Fe²⁺ ratio: ", unoxidize ? 0.0 : F3/FT)
+
+    return wt ? Xcm : Xc, Xoxc
+
+end
+
+# Melt fO2 according to Sun and Yao (2024)
+function melt_fO2(X, Xox, P, T)
+    a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, h = 2.1479, -230.2593, -1.8557e-4, 34.3293, 1.4138, -17.3040, -10.1820,
+                    -6.7463, -7.3886, -14.5430, -9.9776, -16.1506, -37.5572, 2.1410
+
+    # Create dictionary of composition
+    Xcc = copy(X)./sum(X)
+    Xc = Dict{String,Float64}()
+    for (i, ox) in enumerate(Xox)
+        Xc[ox] = Xcc[i]
+    end
+
+    # Check all oxides are there, if not add them as 0.0
+    required_oxides = ["FeO", "Fe2O3", "SiO2", "Al2O3", "TiO2", "CaO", "MgO", "Na2O", "K2O"]
+    for ox in required_oxides
+        if !haskey(Xc, ox)
+            Xc[ox] = 0.0
+        end
+    end
+
+    # Restructure composition if needed
+    if (Xc["Fe"]==0) && (Xc["O"]==0)
+        # Nothing
+    elseif (Xc["Fe2O3"]==0) && (Xc["FeO"]==0)
+        Xc["FeO"] = Xc["O"] - Xc["Fe"]
+        Xc["Fe2O3"] = 2/3 * (Xc["O"] - Xc["Fe"])
+    elseif (Xc["Fe2O3"]==0) && (Xc["Fe"]==0)
+        Xc["Fe2O3"] = 2Xc["O"]/3
+    else
+        error("Fe | FeO not found in oxide list. Either provide the composition list as Fe and O, or FeO and O")
+    end
+
+    # Normalize
+    Xc = Dict(k => v/sum(values(Xc)) for (k,v) in Xc)
+
+    # ==================
+    # == Thermal Part ==
+    # ==================
+    omega = a1 + a2*(T-273.13)^(1.5) + a3*log(T-273.15)
+    psi = a4*log(Xc["FeO"]) + a5*Xc["FeO"] + a6*Xc["SiO2"] + a7*Xc["Al2O3"] + a8*Xc["TiO2"] + a9*Xc["CaO"] + a10*Xc["MgO"] + (a11 + a12*Xc["FeO"])*(Xc["Na2O"]+Xc["K2O"])
+    logK = a0*√Xc["FeO"]*log10(Xc["Fe2O3"]/Xc["FeO"]) + omega + psi # Thermal part
+    # =========================
+    # == Volumetric (P) part ==
+    # =========================
+    logfO2 = logK + log10(Xc["Fe2O3"]/Xc["FeO"])
+    return logfO2
+end
+
+# Solves the ∫(ΔV/RT)dP part of the Sun and Yao (2024) fO₂ model -> using Deng et al (2020) from ab-initio molecular dynamic fits
+function solve_∫ΔVdP(P, T)
+
+    # Resolution
+    nP, nT = length(P), length(T)
+
+    # Map must match resolution
+    ∫ΔVdP = zeros(nP, nT, 2)
+
+    # Ferric + ferrous 4th order BM fit parameters
+    pars = Dict{String, Dict{String, Float64}}(
+        #                      [A³]           [GPa]          [-]          [GPa⁻¹]
+        "RH" => Dict("V0" => 1180.10, "K0" => 26.76, "Kp" => 2.80, "Kpp" => 0.01 , "a" => 35.70, "b" => 71.10, "c" => 36.60),
+        "OH" => Dict("V0" => 1204.69, "K0" => 23.18, "Kp" => 3.22, "Kpp" => 0.01 , "a" => 34.53, "b" => 68.64, "c" => 35.27),
+        "RB" => Dict("V0" => 1192.01, "K0" => 23.95, "Kp" => 3.32, "Kpp" => -0.01, "a" => 31.35, "b" => 62.49, "c" => 32.47),
+        "OB" => Dict("V0" => 1256.73, "K0" => 16.13, "Kp" => 4.58, "Kpp" => -0.18, "a" => 30.38, "b" => 59.11, "c" => 29.65),
+    )
+
+    # 4th order BM EoS
+    f(V, p) = 0.5((p["V0"]/V)^(2/3) - 1)
+    BM4th(V, p, fv) = 3p["K0"] * fv * (1+2fv)^2.5 * (1 + 1.5(p["Kp"]-4)*fv + 1.5(p["K0"]*p["Kpp"] + (p["Kp"]-4)*(p["Kp"]-3) + (35/9))*fv^2)
+    Bth(V, p) = 1e-3(p["a"] - p["b"]*(V/p["V0"]) + p["c"]*(V/p["V0"])^2)
+    function SunYao(V,T,p)
+        fv = f(V,p)
+        BM4th(V,p,fv) + Bth(V,p)*(T-3000) # T₀ = 3000 K
+    end
+
+    # Delta V function
+    ΔV(P, T, C) = PVT.(P, T, "O"*C) - PVT.(P, T, "R"*C)
+
+    # Bisection solver for V
+    function PVT(P, T, C)
+        # Initial guess
+        Ubound = 1400; Lbound = 400
+        v = 0.5(Ubound+Lbound) # A³
+        # Iterative solve
+        P_guess = 0.0
+        error = 1e-1
+        for n in 1:70
+            P_guess = SunYao(v, T, pars[C]) # GPa
+            # Update guess
+            (P_guess > P) ? (Lbound = v) : (Ubound = v)
+            v = 0.5(Lbound+Ubound)
+            # Convergence check
+            error = abs(P_guess - P)
+            (error < 0.01) && break
+        end
+        return v # Convert A³ to cm³/mol
+    end
+
+    # A³ to cm³/mol conversion
+    fac = 1e-24 * 6.022e23 * 0.5 # cm³/A³ * mol⁻¹ * nFe
+
+    # Compute ΔV/RT for each P-T point
+    ΔV_RT_H, ΔV_RT_B = zeros(nP, nT), zeros(nP, nT)
+    for it in eachindex(T)
+        for ip in eachindex(P)
+            # Compute Integral
+            ΔV_RT_H[ip,it] = fac*ΔV(P[ip], T[it], "H")/R/T[it] # Pᵣ = 1 bar = 0.0001 GPa
+            ΔV_RT_B[ip,it] = fac*ΔV(P[ip], T[it], "B")/R/T[it]# Pᵣ = 1 bar = 0.0001 GPa
+        end
+    end
+
+    # Integrate numerically
+    for it in eachindex(T)
+        ∫ΔV_H = cumul_integrate(P, ΔV_RT_H[:,it]); ∫ΔVdP[:,it,1] = ∫ΔV_H
+        ∫ΔV_B = cumul_integrate(P, ΔV_RT_B[:,it]); ∫ΔVdP[:,it,2] = ∫ΔV_B
+    end
+
+    return ∫ΔVdP
+
+end

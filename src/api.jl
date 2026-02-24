@@ -1831,11 +1831,11 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
                         XB=[50.42, 9.77, 7.1, 0.0, 12.54, 16.8, 2.23, 0.07, 100.0], # From stxirtude & Bertelloni 2024
                         Prange=(0.1, 135.0), Trange=(500.0, 4000.0), verbose=true,
                         cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"],
-                        test_path=false, sys_in="mol", unoxidized=false,
+                        test_path=false, sys_in="mol", unoxidized=false, melt_ints=true
                         )
 
     # Checks
-    (!s && !fO2) && return
+    (!s && !fO2 && !melt_ints) && return
     @assert length(Clist) == length(XB) "Length of Clist and XB must match."
     @assert length(Clist) == length(XH) "Length of Clist and XH must match."
 
@@ -1903,8 +1903,10 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         end
         fO2 && (fum = cat(reshape(fum[:,1], nP, nT), reshape(fum[:,2], nP, nT), dims=3))
     # Mineral-bound sᴴ²ᴼ assembly
-        verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
-        min_s = min_sᴴ²ᴼ_assembler(tnP);
+        if s
+            verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
+            min_s = min_sᴴ²ᴼ_assembler(tnP);
+        end
 
     # ===========================
     # ===== Transizion Zone =====
@@ -1964,11 +1966,19 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
     # ====== Post-minimization =======
     # ================================
 
+    # Compute ΔV of Fe³⁺ -> Fe²⁺ reduction for both endmembers
+    if melt_ints
+        println("Calculating melt ∫(ΔV/RT)dP integrals...")
+        ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm = solve_∫ΔVdP(Pum, Tum), solve_∫ΔVdP(Ptz, Ttz), solve_∫ΔVdP(Plm, Tlm)
+    else
+        ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm = nothing, nothing, nothing
+    end
+
     # Return structure
-    sfmap = sfstruct( um, tz, lm, fum, ftz, flm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
+    sfmap = sfstruct( um, tz, lm, fum, ftz, flm, ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
 
     # Export
-    (s || fO2) && write_output(sfmap, s=s, fO2=fO2)
+    (s || fO2 || melt_ints) && write_output(sfmap, s=s, fO2=fO2, melt_ints=melt_ints)
 
     # Plot
     (plt && (s || fO2)) && plot_sf(sfmap; cmap = cmap, interp = interp, cmap_reverse = cmap_reverse, logscale = logscale)
@@ -2122,71 +2132,4 @@ function solve_point(P, T, em;
     Finalize_MAGEMin(data);
 
     return out
-end
-
-"""
-        Adjust bulk composition for a given oxidation state (R = Fe³⁺/∑Fe) by adding O accordingly. (used for SB24 database)
-    
-        \t Basic usage: \t oxidize_bulk(X::Vector{Float64}, Xox::Vector{String}, R::Float64; wt=false)
-    
-        Required arguments:
-    
-        • X::Vector{Float64} \t-->\t Bulk composition vector (either in wt% or mol%)
-    
-        • Xox::Vector{String} \t-->\t Corresponding oxide names for the bulk composition vector
-    
-        • R::Float64 \t\t-->\t Desired oxidation state defined as R = Fe³⁺/∑Fe
-    
-        Optional arguments:
-
-        - onlyvals::Bool \t\t-->\t If true, returns only the adjusted composition vector without oxide names [default: false]
-
-        - wt::Bool \t\t-->\t Indicates if the input composition is in weight percent (wt%) [default: false (molar fraction)]
-"""
-function oxidize_bulk(X, Xox, R; wt=false, onlyvals=false)
-
-    # R = Fe³/∑Fe
-
-    # Molar masses (g/mol)
-    mm = Dict(
-        "SiO2" => 60.08, "Al2O3" => 101.96, "CaO" => 56.08, "MgO" => 40.30, "FeO" => 71.85, "Fe2O3" => 159.69,
-        "K2O" => 94.2, "Na2O" => 61.98, "TiO2" => 79.88, "O" => 16.0, "Cr2O3" => 151.99, "MnO" => 70.937,
-        "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
-    )
-
-    # if given in wt%, convert to mol%
-    Xmol = wt ? X ./ [mm[ox] for ox in Xox] : X
-    wt && (Xmol .= Xmol ./ sum(Xmol)) #Normalize
-
-    # Calculate extra oxygen given R = Fe³⁺/Fe
-    nFe² = Xmol[Xox .== "FeO"][1]
-    nFe³ = (R*nFe²)/(1 - R)
-    nO³ = 1.5nFe³
-
-    # Recompute FeO + O -> Fe + O (negative O for reduced systems, positive for oxidized systems)
-    X_out, Xox_out = copy(X), copy(Xox)
-    idxFeO, idxO = findfirst(Xox .== "FeO"), findfirst(Xox .== "O")
-    nFeᵀ, nOᵀ = (2nO³/3 + nFe²), (nFe² + nO³)
-    if ("O" in Xox)
-        Xox_out[idxFeO] = "Fe"
-        X_out[idxO] = nOᵀ
-        X_out[idxFeO] = nFeᵀ
-    else
-        Xox_out[idxFeO] = "Fe"
-        X_out[idxFeO] = nFeᵀ
-        push!(Xox_out, "O")
-        push!(X_out, nOᵀ)
-    end
-
-    # Retrace to wt% if required
-    if wt
-        X_out .= X_out .* [mm[ox] for ox in Xox_out]
-    end
-
-    # Normalize
-    X_out .= 1e2(X_out ./ sum(X_out))
-
-    # Return
-    onlyvals ? (return X_out) : (return X_out, Xox_out)
-
 end
