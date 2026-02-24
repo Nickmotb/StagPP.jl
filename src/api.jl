@@ -76,6 +76,10 @@ LRN = Dict(
     "Wsol_tz" => L"H_2O\;storage\;capacity\;TZ\;[\mathrm{wt%}]", "logWsol_tz" => L"H_2O\;storage\;capacity\;TZ\;[log_{10}(\mathrm{wt%})]",
     "Wsol_lm" => L"H_2O\;storage\;capacity\;LM\;[\mathrm{wt%}]", "logWsol_lm" => L"H_2O\;storage\;capacity\;LM\;[log_{10}(\mathrm{wt%})]",
     "Wsol_crust" => L"H_2O\;storage\;capacity\;Crust\;[\mathrm{wt%}]", "logWsol_crust" => L"H_2O\;storage\;capacity\;Crust\;[log_{10}(\mathrm{wt%})]",
+    "satH2O_um" => L"H_2O\;saturation\;UM\;[\mathrm{%}]", "logsatH2O_um" => L"H_2O\;saturation\;UM\;[log_{10}(\mathrm{%})]",
+    "satH2O_tz" => L"H_2O\;saturation\;TZ\;[\mathrm{%}]", "logsatH2O_tz" => L"H_2O\;saturation\;TZ\;[log_{10}(\mathrm{%})]",
+    "satH2O_lm" => L"H_2O\;saturation\;LM\;[\mathrm{%}]", "logsatH2O_lm" => L"H_2O\;saturation\;LM\;[log_{10}(\mathrm{%})]",
+    "satH2O_crust" => L"H_2O\;saturation\;Crust\;[\mathrm{%}]", "logsatH2O_crust" => L"H_2O\;saturation\;Crust\;[log_{10}(\mathrm{%})]",
 )
 
 # Colormap to field dictionary
@@ -197,7 +201,8 @@ function time_vs_field(Dblock, field::String; fsize=(800, 600), subsample=0, col
 
     # Vectors
     xvec = in_plates ? Dblock.platesdata[1:subsample:end, idxP["time"]] : in_time ? Dblock.timedata[1:subsample:end,idxT["time"]] : Dblock.rproftime[1:subsample:end]
-    yvec = in_plates ? Dblock.platesdata[1:subsample:end, idxP[field2use]] : in_time ? Dblock.timedata[1:subsample:end, idxT[field2use]] : vec(mean(Dblock.rprofdata[rprof_range, 1:subsample:end, idxR[field2use]], dims=1))
+    yvec = in_plates ? Dblock.platesdata[1:subsample:end, idxP[field2use]] : in_time ? Dblock.timedata[1:subsample:end, idxT[field2use]] : 
+            vec(map(col -> mean(skipmissing(col)), eachcol(replace(Dblock.rprofdata[rprof_range, 1:subsample:end, idxR[field2use]], NaN=>missing))))
     isnothing(tstart) && (tstart  = first(xvec))
     isnothing(tend) && (tend    = last(xvec))
 
@@ -280,7 +285,8 @@ function time_vs_field_multiple(Dblock, field::String; fsize=(800, 600), subsamp
 
         # Vectors
         xvec = in_plates ? blck.platesdata[1:subsample:end, idxP["time"]] : in_time ? blck.timedata[1:subsample:end,idxT["time"]] : blck.rproftime[1:subsample:end]
-        yvec = in_plates ? blck.platesdata[1:subsample:end, idxP[field2use]] : in_time ? blck.timedata[1:subsample:end, idxT[field2use]] : vec(mean(blck.rprofdata[rprof_range, 1:subsample:end, idxR[field2use]], dims=1))
+        yvec = in_plates ? blck.platesdata[1:subsample:end, idxP[field2use]] : in_time ? blck.timedata[1:subsample:end, idxT[field2use]] : 
+                    vec(map(col -> mean(skipmissing(col)), eachcol(replace(blck.rprofdata[rprof_range, 1:subsample:end, idxR[field2use]], NaN=>missing))))
         
         # Time axis cuts
         isnothing(tstart) && (ts  = min(first(xvec), ts); idxt1 = findfirst(xvec .>= ts))
@@ -2093,6 +2099,9 @@ function solve_point(P, T, em;
     @assert length(XH) == length(Clist) "Length of Clist and XH must match."
     @assert em in ["XH", "XB", "Custom"] "Endmember must be either: XB, XH or Custom"
     @assert (em!="Custom" || (em=="Custom" && sum(ccomp)!=0.0)) "Please provide a custom composition if chosen"
+
+    # Transform int inputs to real if needed
+    P = Float64(P); T = Float64(T)
 
     # Minimize
     X = em=="XB" ? XB : em=="XH" ? XH : ccomp

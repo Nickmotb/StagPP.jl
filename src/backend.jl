@@ -679,6 +679,7 @@ end
         Xcm = copy(Xc)
         Xcm .*= [mm[ox] for ox in Xoxc]
         Xcm ./= sum(Xcm)
+        Xc ./= sum(Xc)
 
         # Printing
         println("Resulting composition after conversion:")
@@ -687,6 +688,48 @@ end
         println("Weight %: ", round.(1e2Xcm, digits=3))
         println("Fe³⁺/Fe²⁺ ratio: ", unoxidize ? 0.0 : F3/FT)
 
-        return Xc, Xoxc
+        return wt ? Xcm : Xc, Xoxc
 
+    end
+
+    # Melt fO2 according to Sun and Yao (2024)
+    function melt_fO2(X, Xox, T)
+        a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, h = 2.1479, -230.2593, -1.8557e-4, 34.3293, 1.4138, -17.3040, -10.1820,
+                       -6.7463, -7.3886, -14.5430, -9.9776, -16.1506, -37.5572, 2.1410
+        
+        # Create dictionary of composition
+        Xcc = copy(X)./sum(X)
+        Xc = Dict{String,Float64}()
+        for (i, ox) in enumerate(Xox)
+            Xc[ox] = Xcc[i]
+        end
+
+        # Check all oxides are there, if not add them as 0.0
+        required_oxides = ["FeO", "Fe2O3", "SiO2", "Al2O3", "TiO2", "CaO", "MgO", "Na2O", "K2O"]
+        for ox in required_oxides
+            if !haskey(Xc, ox)
+                Xc[ox] = 0.0
+            end
+        end
+
+        # Restructure composition if needed
+        if (Xc["Fe"]==0) && (Xc["O"]==0)
+            # Nothing
+        elseif (Xc["Fe2O3"]==0) && (Xc["FeO"]==0)
+            Xc["FeO"] = Xc["O"] - Xc["Fe"]
+            Xc["Fe2O3"] = 2/3 * (Xc["O"] - Xc["Fe"])
+        elseif (Xc["Fe2O3"]==0) && (Xc["Fe"]==0)
+            Xc["Fe2O3"] = 2Xc["O"]/3
+        else
+            error("Fe | FeO not found in oxide list. Either provide the composition list as Fe and O, or FeO and O")
+        end
+
+        # Normalize
+        Xc = Dict(k => v/sum(values(Xc)) for (k,v) in Xc)
+
+        omega = a1 + a2*(T-273.13)^(1.5) + a3*log(T-273.15)
+        psi = a4*log(Xc["FeO"]) + a5*Xc["FeO"] + a6*Xc["SiO2"] + a7*Xc["Al2O3"] + a8*Xc["TiO2"] + a9*Xc["CaO"] + a10*Xc["MgO"] + (a11 + a12*Xc["FeO"])*(Xc["Na2O"]+Xc["K2O"])
+        logK = a0*√Xc["FeO"]*log10(Xc["Fe2O3"]/Xc["FeO"]) + omega + psi
+        logfO2 = logK + log10(Xc["Fe2O3"]/Xc["FeO"])
+        return logfO2
     end
