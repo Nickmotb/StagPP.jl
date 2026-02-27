@@ -945,7 +945,7 @@
 # ======= Others =======
 # ======================
 
-    function sᴴ²ᴼ_fO₂_assembler!(smap, fmap, out_s, out_fO2, n; s=true, fO2=true)
+    function sᴴ²ᴼ_fO₂_assembler!(smap, fmap, out_s, out_fO2, ΔFMQ, n; s=true, fO2=true)
         (!s && !fO2) && return
         Threads.@threads for i in 1:n
             if s # sᴴ²ᴼ
@@ -955,7 +955,7 @@
                     ("H2O" in out_s[i].SS_vec[j].emNames) && continue
                     H₂O += sum(out_s[i].SS_vec[j].Comp[end-1])
                 end; smap[i, 1] = sum(H₂O)
-                # Enriched (Lherzolite)
+                # Enriched (Basalt)
                 H₂O = 0.0
                 for j in eachindex(out_s[i+n].SS_vec)
                     ("H2O" in out_s[i+n].SS_vec[j].emNames) && continue
@@ -965,6 +965,8 @@
             if fO2# fO₂
                 fmap[i, 1] = out_fO2[i].dQFM # Depleted (Harzburgite)
                 fmap[i, 2] = out_fO2[i+n].dQFM # Enriched (Basalt)
+                ΔFMQ[i] = out_fO2[i].fO2 - out_fO2[i].dQFM # Depleted (Harzburgite) FMQ surface point
+
             end
         end
     end
@@ -1016,7 +1018,7 @@
 # ======= Export =======
 # ======================
 
-    function write_output(sfmap; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", fname_melt_ints="StagIDVs.dat", s=true, fO2=true, melt_ints=true)
+    function write_output(sfmap; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", fname_melt_ints="StagIDVs.dat", fname_FMQ="FMQbase.dat", s=true, fO2=true, melt_ints=true)
         # Array dimensions
         nP, nT = length(sfmap.Pum), length(sfmap.Tum)
         pmap = zeros(Float64, nP, nT)
@@ -1049,6 +1051,22 @@
                 # Data
                 for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
                     pmap .= n>4 ? sfmap.flm[:,:,slot] : n>2 ? sfmap.ftz[:,:,slot] : sfmap.fum[:,:,slot]
+                    for i in 1:nP
+                        for j in 1:nT
+                            print(io, pmap[i,j], " ")
+                        end; println(io, "")
+                    end; println(io, "")
+                end
+            end
+            open(joinpath(savedir, fname_FMQ), "w") do io
+                # Header
+                println(io, nP, " ", nT, "\n");
+                println(io, sfmap.Pum[1], " ", sfmap.Pum[end], " ", sfmap.Tum[1], " ", sfmap.Tum[end])
+                println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
+                println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end], "\n")
+                # Data
+                for n in 1:3
+                    pmap .= n>2 ? sfmap.FMQlm : n>1 ? sfmap.FMQtz : sfmap.FMQum
                     for i in 1:nP
                         for j in 1:nT
                             print(io, pmap[i,j], " ")
@@ -1099,6 +1117,7 @@
 """
 function oxidize_bulk(X, Xox, R; wt=false, onlyvals=false)
 
+    # 2FeO + O -> Fe₂O₃
     # R = Fe³/∑Fe
     # Incoming composition oxide list must be with FeO + extra O
 
@@ -1116,6 +1135,7 @@ function oxidize_bulk(X, Xox, R; wt=false, onlyvals=false)
     # Calculate extra oxygen given R = Fe³⁺/Fe
     nFe² = Xmol[Xox .== "FeO"][1]
     nFe³ = (R*nFe²)/(1 - R)
+    nFe² = nFe² - nFe³
     nO³ = 1.5nFe³
 
     # Recompute FeO + O -> Fe + O (negative O for reduced systems, positive for oxidized systems)
@@ -1201,20 +1221,28 @@ function comp2sb24(X, Xox; wt=false, unoxidize=false, totals=false)
 
 end
 
-# Melt fO2 according to Sun and Yao (2024)
-function melt_fO2(X, Xox, P, T)
-    a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, h = 2.1479, -230.2593, -1.8557e-4, 34.3293, 1.4138, -17.3040, -10.1820,
-                    -6.7463, -7.3886, -14.5430, -9.9776, -16.1506, -37.5572, 2.1410
+function R_to_Oex(X, Xox; wt=false, R=nothing)
+    # Xox = ["SiO2", "MgO", "FeO", "Fe2O3", "CaO", "Al2O3", "Na2O", "Cr2O3"]
+    # X = [43.43, 45.93, 8.34, 0.09, 0.90, 1.00, 0.01, 0.30] # Harzburgite
+    # X = [50.42, 9.77, 7.10, 1.07, 12.54, 16.80, 2.23, 0.07] # MORB
+
+    # Molar masses (g/mol)
+    mm = Dict(
+        "SiO2" => 60.08, "Al2O3" => 101.96, "CaO" => 56.08, "MgO" => 40.30, "FeO" => 71.85, "Fe2O3" => 159.69,
+        "K2O" => 94.2, "Na2O" => 61.98, "TiO2" => 79.88, "O" => 16.0, "Cr2O3" => 151.99, "MnO" => 70.937,
+        "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
+    )
 
     # Create dictionary of composition
-    Xcc = copy(X)./sum(X)
+    Xccc = wt ? X ./ [mm[ox] for ox in Xox] : X
+    Xcc = copy(Xccc); Xcc ./= sum(Xccc)
     Xc = Dict{String,Float64}()
     for (i, ox) in enumerate(Xox)
         Xc[ox] = Xcc[i]
     end
 
     # Check all oxides are there, if not add them as 0.0
-    required_oxides = ["FeO", "Fe2O3", "SiO2", "Al2O3", "TiO2", "CaO", "MgO", "Na2O", "K2O"]
+    required_oxides = ["FeO", "Fe2O3", "SiO2", "Al2O3", "TiO2", "CaO", "MgO", "Na2O", "K2O", "Fe", "O"]
     for ox in required_oxides
         if !haskey(Xc, ox)
             Xc[ox] = 0.0
@@ -1228,7 +1256,55 @@ function melt_fO2(X, Xox, P, T)
         Xc["FeO"] = Xc["O"] - Xc["Fe"]
         Xc["Fe2O3"] = 2/3 * (Xc["O"] - Xc["Fe"])
     elseif (Xc["Fe2O3"]==0) && (Xc["Fe"]==0)
-        Xc["Fe2O3"] = 2Xc["O"]/3
+        Xc["Fe2O3"] = 0.25Xc["O"]
+    else
+        error("Fe | FeO not found in oxide list. Either provide the composition list as Fe and O, or FeO and O")
+    end
+
+    if isnothing(R)
+
+        R = 2Xc["Fe2O3"] / (Xc["FeO"] + 2Xc["Fe2O3"])
+        println("Fe³⁺/Fe²⁺ ratio (R) not provided. Calculating from composition: ", R)
+        return R
+    else
+
+        totFe = Xc["FeO"] + 2Xc["Fe2O3"] + Xc["Fe"]
+        Oex = 1.5(R*totFe)
+        normalized_Oex = Oex / sum(values(Xc))
+        println("Ratio given. Calculated oxygen excess (Oex) for is: ", normalized_Oex)
+        return normalized_Oex
+    end
+
+end
+
+# Melt fO2 according to Sun and Yao (2024)
+function thermal_melt_fO2(X, Xox, T)
+    a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12 = 2.1479, -230.2593, -1.8557e-4, 34.3293, 1.4138, -17.3040, -10.1820,
+                    -6.7463, -7.3886, -14.5430, -9.9776, -16.1506, -37.5572
+
+    # Create dictionary of composition
+    Xcc = copy(X)./sum(X)
+    Xc = Dict{String,Float64}()
+    for (i, ox) in enumerate(Xox)
+        Xc[ox] = Xcc[i]
+    end
+
+    # Check all oxides are there, if not add them as 0.0
+    required_oxides = ["FeO", "Fe2O3", "SiO2", "Al2O3", "TiO2", "CaO", "MgO", "Na2O", "K2O", "Fe", "O"]
+    for ox in required_oxides
+        if !haskey(Xc, ox)
+            Xc[ox] = 0.0
+        end
+    end
+
+    # Restructure composition if needed
+    if (Xc["Fe"]==0) && (Xc["O"]==0)
+        # Nothing
+    elseif (Xc["Fe2O3"]==0) && (Xc["FeO"]==0)
+        Xc["FeO"] = Xc["O"] - Xc["Fe"]
+        Xc["Fe2O3"] = 2/3 * (Xc["O"] - Xc["Fe"])
+    elseif (Xc["Fe2O3"]==0) && (Xc["Fe"]==0)
+        Xc["Fe2O3"] = 0.25Xc["O"]
     else
         error("Fe | FeO not found in oxide list. Either provide the composition list as Fe and O, or FeO and O")
     end
@@ -1241,13 +1317,17 @@ function melt_fO2(X, Xox, P, T)
     # ==================
     omega = a1 + a2*(T-273.13)^(1.5) + a3*log(T-273.15)
     psi = a4*log(Xc["FeO"]) + a5*Xc["FeO"] + a6*Xc["SiO2"] + a7*Xc["Al2O3"] + a8*Xc["TiO2"] + a9*Xc["CaO"] + a10*Xc["MgO"] + (a11 + a12*Xc["FeO"])*(Xc["Na2O"]+Xc["K2O"])
-    logK = a0*√Xc["FeO"]*log10(Xc["Fe2O3"]/Xc["FeO"]) + omega + psi # Thermal part
-    # =========================
-    # == Volumetric (P) part ==
-    # =========================
-    logfO2 = logK + log10(Xc["Fe2O3"]/Xc["FeO"])
+    logK0 = a0*√Xc["FeO"]*log10(Xc["Fe2O3"]/Xc["FeO"]) + omega + psi # Thermal part
+    return logK0, Xc
+end
+
+function melt_fO2(X, Xox, T, DVterm)
+    h = 2.1410
+    logK0, Xc = thermal_melt_fO2(X, Xox, T)
+    logfO2 = (logK0 + h*DVterm) + 4*log10(Xc["Fe2O3"]/Xc["FeO"])
     return logfO2
 end
+
 
 # Solves the ∫(ΔV/RT)dP part of the Sun and Yao (2024) fO₂ model -> using Deng et al (2020) from ab-initio molecular dynamic fits
 function solve_∫ΔVdP(P, T)
@@ -1307,8 +1387,8 @@ function solve_∫ΔVdP(P, T)
     for it in eachindex(T)
         for ip in eachindex(P)
             # Compute Integral
-            ΔV_RT_H[ip,it] = fac*ΔV(P[ip], T[it], "H")/R/T[it] # Pᵣ = 1 bar = 0.0001 GPa
-            ΔV_RT_B[ip,it] = fac*ΔV(P[ip], T[it], "B")/R/T[it]# Pᵣ = 1 bar = 0.0001 GPa
+            ΔV_RT_H[ip,it] = fac*ΔV(P[ip], T[it], "H")/(1e-3R)/T[it]
+            ΔV_RT_B[ip,it] = fac*ΔV(P[ip], T[it], "B")/(1e-3R)/T[it]
         end
     end
 

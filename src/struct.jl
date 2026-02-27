@@ -62,6 +62,10 @@ struct sfstruct
     DVum     :: Union{Array{Float64,3}, Nothing}    # Upper mantle melt ∫(ΔV/RT)dP grid (nP x nT x endmember)
     DVtz     :: Union{Array{Float64,3}, Nothing}    # Transition zone melt ∫(ΔV/RT)dP grid (nP x nT x endmember)
     DVlm     :: Union{Array{Float64,3}, Nothing}    # Lower mantle melt ∫(ΔV/RT)dP grid (nP x nT x endmember)
+    # ΔFMQ maps
+    FMQum     :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)
+    FMQtz     :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)
+    FMQlm     :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)
     # Vectors
     Pum      :: Array{Float64,1}    # Upper mantle pressure vector (kbar)
     Tum      :: Array{Float64,1}    # Upper mantle temperature vector (K)

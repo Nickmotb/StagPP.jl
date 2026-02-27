@@ -1829,7 +1829,7 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
                         Clist=["SiO2", "MgO", "FeO", "O", "CaO", "Al2O3", "Na2O", "Cr2O3", "H2O"],
                         XH=[43.43, 45.93, 8.34, 0.0, 0.9, 1.0, 0.01, 0.3, 100.0], # From stxirtude & Bertelloni 2024
                         XB=[50.42, 9.77, 7.1, 0.0, 12.54, 16.8, 2.23, 0.07, 100.0], # From stxirtude & Bertelloni 2024
-                        Prange=(0.1, 135.0), Trange=(500.0, 4000.0), verbose=true,
+                        Prange=(1e-4, 135.0), Trange=(500.0, 4000.0), verbose=true,
                         cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"],
                         test_path=false, sys_in="mol", unoxidized=false, melt_ints=true
                         )
@@ -1869,8 +1869,10 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         end
         if fO2
             fum, ftz, flm = zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2)   # later reshaped as 'T, P, reshape(um, nP, :)'
+            ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm = zeros(Float64, nP*nT), zeros(Float64, nP*nT), zeros(Float64, nP*nT)
         else
             fum, ftz, flm = nothing, nothing, nothing
+            ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm = nothing, nothing, nothing
         end
 
     # ========================
@@ -1896,12 +1898,15 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
             Finalize_MAGEMin(data);
         else; out_fO2 = 0.0; end
     # Assemble
-        sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, nPnT, s=s, fO2=fO2)
+        sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, ΔFMQ_um, nPnT, s=s, fO2=fO2)
         if s
             um = cat(reshape(um[:,1], nP, nT), reshape(um[:,2], nP, nT), dims=3)
             min_s = min_sᴴ²ᴼ_assembler(tnP)
         end
-        fO2 && (fum = cat(reshape(fum[:,1], nP, nT), reshape(fum[:,2], nP, nT), dims=3))
+        if fO2
+            fum = cat(reshape(fum[:,1], nP, nT), reshape(fum[:,2], nP, nT), dims=3)
+            ΔFMQ_um = reshape(ΔFMQ_um[:,1], nP, nT)
+        end
     # Mineral-bound sᴴ²ᴼ assembly
         if s
             verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
@@ -1934,8 +1939,9 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         end
         if fO2 
             verbose && println("Assembing transition zone fO₂...")
-            sᴴ²ᴼ_fO₂_assembler!(tz, ftz, outHB, outHB, nPnT, s=false)
+            sᴴ²ᴼ_fO₂_assembler!(tz, ftz, outHB, outHB, ΔFMQ_tz, nPnT, s=false)
             ftz = cat(reshape(ftz[:,1], nP, nT), reshape(ftz[:,2], nP, nT), dims=3)
+            ΔFMQ_tz = reshape(ΔFMQ_tz[:,1], nP, nT)
         end
 
     # ===========================
@@ -1958,8 +1964,9 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         end
         if fO2 
             verbose && println("Calculating lower mantle fO₂...")
-            sᴴ²ᴼ_fO₂_assembler!(lm, flm, outHB, outHB, nPnT, s=false)
+            sᴴ²ᴼ_fO₂_assembler!(lm, flm, outHB, outHB, ΔFMQ_lm, nPnT, s=false)
             flm = cat(reshape(flm[:,1], nP, nT), reshape(flm[:,2], nP, nT), dims=3)
+            ΔFMQ_lm = reshape(ΔFMQ_lm[:,1], nP, nT)
         end
 
     # ================================
@@ -1975,7 +1982,7 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
     end
 
     # Return structure
-    sfmap = sfstruct( um, tz, lm, fum, ftz, flm, ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
+    sfmap = sfstruct( um, tz, lm, fum, ftz, flm, ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm, ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
 
     # Export
     (s || fO2 || melt_ints) && write_output(sfmap, s=s, fO2=fO2, melt_ints=melt_ints)
@@ -2101,7 +2108,7 @@ function solve_point(P, T, em;
                     Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
                     XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
                     XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
-                    ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0,phase_out=["chl"],H2Osat=true
+                    ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0,phase_out=["chl"],H2Osat=true,R=0.02
                     )
 
     # Checks
@@ -2117,16 +2124,17 @@ function solve_point(P, T, em;
     X = em=="XB" ? XB : em=="XH" ? XH : ccomp
     H2Osat && (X[end] = 100.0) # Set H2O to 100 for saturation calculations
     if P <= DBswitchP
-    data = H2Osat ? Initialize_MAGEMin("um", verbose=false, buffer="aH2O") : Initialize_MAGEMin("um", verbose=false);
-    rm_list = remove_phases(phase_out, "um")
-    out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, B=1.0, name_solvus=true, rm_list=rm_list)
+        data = H2Osat ? Initialize_MAGEMin("um", verbose=false, buffer="aH2O") : Initialize_MAGEMin("um", verbose=false);
+        rm_list = remove_phases(phase_out, "um")
+        out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, B=1.0, name_solvus=true, rm_list=rm_list)
     else
         data = Initialize_MAGEMin(P<=25. ? "sb24" : "sb24", verbose=false);
+        Xo, Xlist = oxidize_bulk(X, Clist, R; wt=false, onlyvals=false)
         if em=="XH"
             rm_list = remove_phases(["st"], "sb24")
-            out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, name_solvus=true, rm_list=rm_list)
+            out = single_point_minimization(10P, T-273.15, data, X=Xo, Xoxides=Xlist, name_solvus=true, rm_list=rm_list)
         else
-            out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, name_solvus=true)
+            out = single_point_minimization(10P, T-273.15, data, X=Xo, Xoxides=Xlist, name_solvus=true)
         end
     end
     Finalize_MAGEMin(data);

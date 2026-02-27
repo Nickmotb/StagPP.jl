@@ -267,6 +267,10 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
             # Add total H2O mass
             rprof_header = vcat(rprof_header, "Water")
             rprof_data = cat(rprof_data, rprof_data[:, :, idxR["boundH2O"]] .+ rprof_data[:, :, idxR["freeH2O"]], dims=3)
+            if haskey(idxR, "H2Odarcy")
+                # Converts units of Darcy velocity to cm/yr.
+                rprof_data[:,:,idxR["H2Odarcy"]] .*= m_s2cm_yr
+            end
         end
     end
     if time
