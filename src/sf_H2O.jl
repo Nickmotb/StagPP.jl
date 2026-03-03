@@ -1128,12 +1128,19 @@ function oxidize_bulk(X, Xox, R; wt=false, onlyvals=false)
         "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
     )
 
+    # Filter H2O
+    if ("H2O" in Xox)
+        id = findfirst(Xox .== "H2O")
+        Xox_out = filter(x->x!="H2O", Xox)
+        X_out = filter(x->x!=X[id], X)
+    end
+
     # if given in wt%, convert to mol%
-    Xmol = wt ? X ./ [mm[ox] for ox in Xox] : X
+    Xmol = wt ? X_out ./ [mm[ox] for ox in Xox_out] : X_out
     wt && (Xmol .= Xmol ./ sum(Xmol)) #Normalize
 
     # Calculate extra oxygen given R = Fe³⁺/Fe
-    nFe² = Xmol[Xox .== "FeO"][1]
+    nFe² = Xmol[Xox_out .== "FeO"][1]
     nFe³ = (R*nFe²)/(1 - R)
     nFe² = nFe² - nFe³
     nO³ = 1.5nFe³
