@@ -553,11 +553,6 @@ end
             return iP, iT
         end
 
-        @inline function get_ip_it_ncols(nT, i)
-            iP = Int(ceil(i/nT)); iT = i - (iP-1)*nT;
-            return iP, iT
-        end
-
     # Right axis for plots
         function second_axis!(fig, fpos, x, y, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, timeplot, trange, locals)
 

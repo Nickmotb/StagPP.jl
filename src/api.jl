@@ -1786,12 +1786,12 @@ end
 # =================================================================================
 
 function compose_∑Fe³⁺_∑Fe!(R, nP)
-    R[:, 1, 1] .= LinRange(0.005, 0.03, nP) # UM Harz
-    R[:, 1, 2] .= LinRange(0.02, 0.06, nP) # UM MORB
-    R[:, 2, 1] .= LinRange(0.03, 0.10, nP) # TZ Harz
-    R[:, 2, 2] .= LinRange(0.03, 0.10, nP) # TZ MORB
-    R[:, 3, 1] .= 0.03ones(nP) # LM MORB
-    R[:, 3, 2] .= 0.03ones(nP) # LM MORB
+    R[:, 1, 1] .= LinRange(0.005, 0.05, nP) # UM Harz
+    R[:, 1, 2] .= LinRange(0.02, 0.05, nP) # UM MORB
+    R[:, 2, 1] .= LinRange(0.03, 0.05, nP) # TZ Harz
+    R[:, 2, 2] .= LinRange(0.03, 0.05, nP) # TZ MORB
+    R[:, 3, 1] .= 0.05ones(nP) # LM MORB
+    R[:, 3, 2] .= 0.05ones(nP) # LM MORB
 end
 
 """
@@ -1831,13 +1831,18 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
                         XB=[50.42, 9.77, 7.1, 0.0, 12.54, 16.8, 2.23, 0.07, 100.0], # From stxirtude & Bertelloni 2024
                         Prange=(1e-4, 135.0), Trange=(500.0, 4000.0), verbose=true,
                         cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"],
-                        test_path=false, sys_in="mol", unoxidized=false, melt_ints=true
+                        test_path=false, sys_in="mol", unoxidized=false, melt_ints=true, melt_fO2=false,
+                        Rv=0.05
                         )
 
     # Checks
-    (!s && !fO2 && !melt_ints) && return
+    (!s && !fO2 && !melt_ints && !melt_fO2) && return
     @assert length(Clist) == length(XB) "Length of Clist and XB must match."
     @assert length(Clist) == length(XH) "Length of Clist and XH must match."
+    if (melt_fO2 && !melt_ints)
+        println("Warning: melt_fO2 requires melt_ints to be computed. Setting melt_ints=true.")
+        melt_ints = true
+    end
 
     # Oxidizing routine 
     function assignR_to_Xv!(Xv, R)
@@ -1852,7 +1857,7 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
 
     # Memory allocations
     # --- Compose R = ∑Fe³⁺/∑Fe for fO₂ calculations
-        R = zeros(nP, 3, 2); compose_∑Fe³⁺_∑Fe!(R, nP)
+        R = Rv.*ones(nP, 3, 2); #compose_∑Fe³⁺_∑Fe!(R, nP)
     # --- Axis Vectors
         Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 2000., nT)
         Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(1000., Trange[2], nT)
@@ -1870,10 +1875,27 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         if fO2
             fum, ftz, flm = zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2)   # later reshaped as 'T, P, reshape(um, nP, :)'
             ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm = zeros(Float64, nP*nT), zeros(Float64, nP*nT), zeros(Float64, nP*nT)
+            if melt_fO2
+                mfum, mftz, mflm = zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2), zeros(Float64, nP*nT, 2)
+            else
+                mfum, mftz, mflm = nothing, nothing, nothing
+            end
         else
             fum, ftz, flm = nothing, nothing, nothing
             ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm = nothing, nothing, nothing
+            mfum, mftz, mflm = nothing, nothing, nothing
         end
+
+    # ==========================
+    # ===== Pre-Processing =====
+    # ==========================
+    # Compute ΔV of Fe³⁺ -> Fe²⁺ reduction for both endmembers
+    if melt_ints
+        println("Calculating melt ∫(ΔV/RT)dP integrals...")
+        ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm = solve_∫ΔVdP(Pum, Tum), solve_∫ΔVdP(Ptz, Ttz), solve_∫ΔVdP(Plm, Tlm)
+    else
+        ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm = nothing, nothing, nothing
+    end
 
     # ========================
     # ===== Upper Mantle =====
@@ -1893,7 +1915,7 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         if fO2 
             verbose && println("Calculating upper mantle fO₂...")
             data    = Initialize_MAGEMin("sb24", verbose=false);
-            assignR_to_Xv!(Xv, R[:, 1, :])  # Oxidize bulk for UM fO₂ calculations
+            !unoxidized && assignR_to_Xv!(Xv, R[:, 1, :])  # Oxidize bulk for UM fO₂ calculations
             out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, progressbar=verbose, sys_in=sys_in)
             Finalize_MAGEMin(data);
         else; out_fO2 = 0.0; end
@@ -1904,9 +1926,19 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
             min_s = min_sᴴ²ᴼ_assembler(tnP)
         end
         if fO2
+            if melt_fO2
+                verbose && println("Calculating upper mantle melt fO₂...")
+                Threads.@threads for i in 1:nPnT
+                    ip, it = get_ip_it_nrows(nP, i)
+                    mfum[i,1] = total_melt_fO2(Xv[i], Clist, Tv[i], ∫ΔVdP_um[ip, it, 1]) - ΔFMQ_um[i]
+                    mfum[i,2] = total_melt_fO2(Xv[i+nPnT], Clist, Tv[i], ∫ΔVdP_um[ip, it, 2]) - ΔFMQ_um[i]
+                end
+                mfum = cat(reshape(mfum[:,1], nP, nT), reshape(mfum[:,2], nP, nT), dims=3)
+            end
             fum = cat(reshape(fum[:,1], nP, nT), reshape(fum[:,2], nP, nT), dims=3)
             ΔFMQ_um = reshape(ΔFMQ_um[:,1], nP, nT)
         end
+    # Mineral-bound sᴴ²ᴼ assembly
     # Mineral-bound sᴴ²ᴼ assembly
         if s
             verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
@@ -1940,6 +1972,15 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         if fO2 
             verbose && println("Assembing transition zone fO₂...")
             sᴴ²ᴼ_fO₂_assembler!(tz, ftz, outHB, outHB, ΔFMQ_tz, nPnT, s=false)
+            if melt_fO2
+                verbose && println("Calculating transition zone melt fO₂...")
+                Threads.@threads for i in 1:nPnT
+                    ip, it = get_ip_it_nrows(nP, i)
+                    mftz[i,1] = total_melt_fO2(Xv[i], Clist, Tv[i], ∫ΔVdP_tz[ip, it, 1]) - ΔFMQ_tz[i]
+                    mftz[i,2] = total_melt_fO2(Xv[i+nPnT], Clist, Tv[i], ∫ΔVdP_tz[ip, it, 2]) - ΔFMQ_tz[i]
+                end
+                mftz = cat(reshape(mftz[:,1], nP, nT), reshape(mftz[:,2], nP, nT), dims=3)
+            end
             ftz = cat(reshape(ftz[:,1], nP, nT), reshape(ftz[:,2], nP, nT), dims=3)
             ΔFMQ_tz = reshape(ΔFMQ_tz[:,1], nP, nT)
         end
@@ -1965,6 +2006,15 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         if fO2 
             verbose && println("Calculating lower mantle fO₂...")
             sᴴ²ᴼ_fO₂_assembler!(lm, flm, outHB, outHB, ΔFMQ_lm, nPnT, s=false)
+            if melt_fO2
+                verbose && println("Calculating lower mantle melt fO₂...")
+                Threads.@threads for i in 1:nPnT
+                    ip, it = get_ip_it_nrows(nP, i)
+                    mflm[i,1] = total_melt_fO2(Xv[i], Clist, Tv[i], ∫ΔVdP_lm[ip, it, 1]) - ΔFMQ_lm[i]
+                    mflm[i,2] = total_melt_fO2(Xv[i+nPnT], Clist, Tv[i], ∫ΔVdP_lm[ip, it, 2]) - ΔFMQ_lm[i]
+                end
+                mflm = cat(reshape(mflm[:,1], nP, nT), reshape(mflm[:,2], nP, nT), dims=3)
+            end
             flm = cat(reshape(flm[:,1], nP, nT), reshape(flm[:,2], nP, nT), dims=3)
             ΔFMQ_lm = reshape(ΔFMQ_lm[:,1], nP, nT)
         end
@@ -1973,16 +2023,8 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
     # ====== Post-minimization =======
     # ================================
 
-    # Compute ΔV of Fe³⁺ -> Fe²⁺ reduction for both endmembers
-    if melt_ints
-        println("Calculating melt ∫(ΔV/RT)dP integrals...")
-        ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm = solve_∫ΔVdP(Pum, Tum), solve_∫ΔVdP(Ptz, Ttz), solve_∫ΔVdP(Plm, Tlm)
-    else
-        ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm = nothing, nothing, nothing
-    end
-
     # Return structure
-    sfmap = sfstruct( um, tz, lm, fum, ftz, flm, ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm, ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
+    sfmap = sfstruct( um, tz, lm, fum, ftz, flm, ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm, ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm, mfum, mftz, mflm, Pum, Tum, Ptz, Ttz, Plm, Tlm )
 
     # Export
     (s || fO2 || melt_ints) && write_output(sfmap, s=s, fO2=fO2, melt_ints=melt_ints)

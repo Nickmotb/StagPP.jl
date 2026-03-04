@@ -874,10 +874,10 @@
 
         # Inputs
         xlabsz, ylabsz, titlesz, xticklabsz, yticklabsz, xticksz, yticksz = 20, 20, 22, 16, 16, 12, 12
-        s, f = !isnothing(sfmap.sum), !isnothing(sfmap.fum)
-        both = s && f
+        s, f, mf = !isnothing(sfmap.sum), !isnothing(sfmap.fum), !isnothing(sfmap.mfum)
+        sz = (s && f && mf) ? (1800,1000) : (s && f) ? (1600,1000) : (1400,1000)
 
-        fig = Figure(size = both ? (1800, 1000) : (1000, 1000))
+        fig = Figure(size = sz)
         cmap_reverse && (cmap = Reverse(cmap))
         if s
         # Upper Mantle
@@ -936,6 +936,31 @@
             ax = Axis(fig[3, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched,\;log_{10}\;\Delta FQM)", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
             hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, sfmap.flm[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[3, 4+ipp], hm)
+        end
+
+        if mf
+            ipp = (s && f) ? 8 : 4
+            # Upper Mantle
+            ax = Axis(fig[1, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted,\;log_{10}\;\Delta FQM)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=!s, xlabelvisible=!s)
+            hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, sfmap.mfum[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[1, 2+ipp], hm)
+            ax = Axis(fig[1, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched,\;log_{10}\;\Delta FQM)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, sfmap.mfum[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[1, 4+ipp], hm)
+        # Transition zone
+            ax = Axis(fig[2, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Depleted,\;log_{10}\;\Delta FQM)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, sfmap.mftz[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[2, 2+ipp], hm)
+            ax = Axis(fig[2, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched,\;log_{10}\;\Delta FQM)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, sfmap.mftz[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[2, 4+ipp], hm)
+        # Lower Mantle
+            ax = Axis(fig[3, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Depleted,\;log_{10}\;\Delta FQM)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, sfmap.mflm[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[3, 2+ipp], hm)
+            ax = Axis(fig[3, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched,\;log_{10}\;\Delta FQM)", yreversed=true,
+                        xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+            hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, sfmap.mflm[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[3, 4+ipp], hm)
         end
         display(fig)
         savein!="" && CairoMakie.save(savein*".png", fig)
@@ -1230,8 +1255,9 @@ end
 
 function R_to_Oex(X, Xox; wt=false, R=nothing)
     # Xox = ["SiO2", "MgO", "FeO", "Fe2O3", "CaO", "Al2O3", "Na2O", "Cr2O3"]
-    # X = [43.43, 45.93, 8.34, 0.09, 0.90, 1.00, 0.01, 0.30] # Harzburgite
-    # X = [50.42, 9.77, 7.10, 1.07, 12.54, 16.80, 2.23, 0.07] # MORB
+    # XH = [43.43, 45.93, 8.34, 0.09, 0.90, 1.00, 0.01, 0.30] # Harzburgite
+    # XB = [50.42, 9.77, 7.10, 1.07, 12.54, 16.80, 2.23, 0.07] # MORB
+    # X = 0.2XB .+ 0.8XH
 
     # Molar masses (g/mol)
     mm = Dict(
@@ -1284,13 +1310,17 @@ function R_to_Oex(X, Xox; wt=false, R=nothing)
 
 end
 
-# Melt fO2 according to Sun and Yao (2024)
-function thermal_melt_fO2(X, Xox, T)
-    a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12 = 2.1479, -230.2593, -1.8557e-4, 34.3293, 1.4138, -17.3040, -10.1820,
-                    -6.7463, -7.3886, -14.5430, -9.9776, -16.1506, -37.5572
+function X_Xox_to_full_list(X, Xox; wt_in=false, wt_out=false)
+    # Molar masses (g/mol)
+    mm = Dict(
+        "SiO2" => 60.08, "Al2O3" => 101.96, "CaO" => 56.08, "MgO" => 40.30, "FeO" => 71.85, "Fe2O3" => 159.69,
+        "K2O" => 94.2, "Na2O" => 61.98, "TiO2" => 79.88, "O" => 16.0, "Cr2O3" => 151.99, "MnO" => 70.937,
+        "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
+    )
 
     # Create dictionary of composition
-    Xcc = copy(X)./sum(X)
+    Xccc = wt_in ? X ./ [mm[ox] for ox in Xox] : X
+    Xcc = copy(Xccc); Xcc ./= sum(Xccc)
     Xc = Dict{String,Float64}()
     for (i, ox) in enumerate(Xox)
         Xc[ox] = Xcc[i]
@@ -1311,13 +1341,25 @@ function thermal_melt_fO2(X, Xox, T)
         Xc["FeO"] = Xc["O"] - Xc["Fe"]
         Xc["Fe2O3"] = 2/3 * (Xc["O"] - Xc["Fe"])
     elseif (Xc["Fe2O3"]==0) && (Xc["Fe"]==0)
-        Xc["Fe2O3"] = 0.25Xc["O"]
+        Xc["Fe2O3"] = Xc["O"]
     else
         error("Fe | FeO not found in oxide list. Either provide the composition list as Fe and O, or FeO and O")
     end
 
     # Normalize
     Xc = Dict(k => v/sum(values(Xc)) for (k,v) in Xc)
+
+    # Retrace to wt if needed
+    return wt_out ? Dict(k => v*mm[k] for (k,v) in Xc) : Xc
+end
+
+# Melt fO2 according to Sun and Yao (2024)
+function thermal_melt_fO2(X, Xox, T; wt_in=false)
+    a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12 = 2.1479, -230.2593, -1.8557e-4, 34.3293, 1.4138, -17.3040, -10.1820,
+                    -6.7463, -7.3886, -14.5430, -9.9776, -16.1506, -37.5572
+
+    # Convert composition to full list of oxides and normalize
+    Xc = X_Xox_to_full_list(X, Xox; wt_in=wt_in, wt_out=false)
 
     # ==================
     # == Thermal Part ==
@@ -1328,13 +1370,12 @@ function thermal_melt_fO2(X, Xox, T)
     return logK0, Xc
 end
 
-function melt_fO2(X, Xox, T, DVterm)
+function total_melt_fO2(X, Xox, T, DVterm; wt=false)
     h = 2.1410
-    logK0, Xc = thermal_melt_fO2(X, Xox, T)
+    logK0, Xc = thermal_melt_fO2(X, Xox, T; wt_in=wt)
     logfO2 = (logK0 + h*DVterm) + 4*log10(Xc["Fe2O3"]/Xc["FeO"])
     return logfO2
 end
-
 
 # Solves the ∫(ΔV/RT)dP part of the Sun and Yao (2024) fO₂ model -> using Deng et al (2020) from ab-initio molecular dynamic fits
 function solve_∫ΔVdP(P, T)

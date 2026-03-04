@@ -51,9 +51,9 @@ end
 
 struct sfstruct
     # sᴴ²ᴼ maps
-    sum       :: Union{Array{Float64,3}, Nothing}    # Upper mantle sᴴ²ᴼ grid (nP x nT x endmember)
-    stz       :: Union{Array{Float64,3}, Nothing}    # Transition zone sᴴ²ᴼ grid (nP x nT x endmember)
-    slm       :: Union{Array{Float64,3}, Nothing}    # Lower mantle sᴴ²ᴼ grid (nP x nT x endmember)
+    sum      :: Union{Array{Float64,3}, Nothing}    # Upper mantle sᴴ²ᴼ grid (nP x nT x endmember)
+    stz      :: Union{Array{Float64,3}, Nothing}    # Transition zone sᴴ²ᴼ grid (nP x nT x endmember)
+    slm      :: Union{Array{Float64,3}, Nothing}    # Lower mantle sᴴ²ᴼ grid (nP x nT x endmember)
     # fO₂ maps
     fum      :: Union{Array{Float64,3}, Nothing}    # Upper mantle fO₂ grid (nP x nT x endmember)
     ftz      :: Union{Array{Float64,3}, Nothing}    # Transition zone fO₂ (nP x nT x endmember)
@@ -63,9 +63,13 @@ struct sfstruct
     DVtz     :: Union{Array{Float64,3}, Nothing}    # Transition zone melt ∫(ΔV/RT)dP grid (nP x nT x endmember)
     DVlm     :: Union{Array{Float64,3}, Nothing}    # Lower mantle melt ∫(ΔV/RT)dP grid (nP x nT x endmember)
     # ΔFMQ maps
-    FMQum     :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)
-    FMQtz     :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)
-    FMQlm     :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)
+    FMQum    :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)
+    FMQtz    :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)
+    FMQlm    :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)
+    # Melt fO2 maps (Sun & Yao 2024)
+    mfum     :: Union{Array{Float64,3}, Nothing}    # Melt fO₂ grid (nP x nT x endmember)
+    mftz     :: Union{Array{Float64,3}, Nothing}    # Melt fO₂ grid (nP x nT x endmember)
+    mflm     :: Union{Array{Float64,3}, Nothing}    #
     # Vectors
     Pum      :: Array{Float64,1}    # Upper mantle pressure vector (kbar)
     Tum      :: Array{Float64,1}    # Upper mantle temperature vector (K)
