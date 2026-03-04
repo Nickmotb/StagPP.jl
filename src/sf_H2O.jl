@@ -1172,17 +1172,15 @@ function oxidize_bulk(X, Xox, R; wt=false, onlyvals=false)
 
     # Recompute FeO + O -> Fe + O (negative O for reduced systems, positive for oxidized systems)
     X_out, Xox_out = copy(X), copy(Xox)
-    idxFeO, idxO = findfirst(Xox .== "FeO"), findfirst(Xox .== "O")
-    nFeᵀ, nOᵀ = (2nO³/3 + nFe²), (nFe² + nO³)
+    idxFeO = findfirst(Xox .== "FeO")
     if ("O" in Xox)
-        Xox_out[idxFeO] = "Fe"
-        X_out[idxO] = nOᵀ
-        X_out[idxFeO] = nFeᵀ
+        idxO = findfirst(Xox .== "O")
+        X_out[idxO] = nO³
+        X_out[idxFeO] = nFe²
     else
-        Xox_out[idxFeO] = "Fe"
-        X_out[idxFeO] = nFeᵀ
+        X_out[idxFeO] = nFe²
         push!(Xox_out, "O")
-        push!(X_out, nOᵀ)
+        push!(X_out, nO³)
     end
 
     # Retrace to wt% if required

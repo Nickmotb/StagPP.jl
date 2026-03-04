@@ -1860,8 +1860,8 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
         R = Rv.*ones(nP, 3, 2); #compose_∑Fe³⁺_∑Fe!(R, nP)
     # --- Axis Vectors
         Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 2000., nT)
-        Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(1000., Trange[2], nT)
-        Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(1000., Trange[2], nT)
+        Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(700., Trange[2], nT)
+        Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(700., Trange[2], nT)
     # --- Others
         Pv, Tv = zeros(Float64, 2nPnT), zeros(Float64, 2nPnT)
         Xv = vcat(map(Vector, eachrow(repeat(XH', outer=nPnT))), map(Vector, eachrow(repeat(XB', outer=nPnT))))
@@ -1908,19 +1908,19 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
             verbose && println("Calculating upper mantle sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
             rm_list = remove_phases(phase_out, "um")
+            !unoxidized && assignR_to_Xv!(Xv, R[:, 1, :])  # Oxidize bulk for UM fO₂ calculations
             outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, B=ones(length(Pv)), progressbar=verbose, rm_list=rm_list, sys_in=sys_in) # kbar and K
             Finalize_MAGEMin(data);
         else; outHB = 0.0; end
     # Call UM through SB24 to get fO₂
-        if fO2 
-            verbose && println("Calculating upper mantle fO₂...")
-            data    = Initialize_MAGEMin("sb24", verbose=false);
-            !unoxidized && assignR_to_Xv!(Xv, R[:, 1, :])  # Oxidize bulk for UM fO₂ calculations
-            out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, progressbar=verbose, sys_in=sys_in)
-            Finalize_MAGEMin(data);
-        else; out_fO2 = 0.0; end
+        # if fO2 
+        #     verbose && println("Calculating upper mantle fO₂...")
+        #     data    = Initialize_MAGEMin("sb24", verbose=false);
+        #     out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, progressbar=verbose, sys_in=sys_in)
+        #     Finalize_MAGEMin(data);
+        # else; out_fO2 = 0.0; end
     # Assemble
-        sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, ΔFMQ_um, nPnT, s=s, fO2=fO2)
+        sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, outHB, ΔFMQ_um, nPnT, s=s, fO2=fO2)
         if s
             um = cat(reshape(um[:,1], nP, nT), reshape(um[:,2], nP, nT), dims=3)
             min_s = min_sᴴ²ᴼ_assembler(tnP)
@@ -1949,8 +1949,6 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
     # ===== Transizion Zone =====
     # ===========================
 
-    # Prepare oxide list for sb24
-        Clist24 = replace(Clist, "FeO" => "Fe")
     # Transition zone mesh vectorization
         mesh_vectorization!(Ptz, Ttz, nP, nT, Pv, Tv)
     # Minimizer call + assembly
@@ -1958,7 +1956,7 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
             verbose && println("Calculating transition zone sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("sb24", verbose=false);
             !unoxidized && assignR_to_Xv!(Xv, R[:, 2, :])  # Oxidize bulk for TZ fO₂ calculations
-            outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist24, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
+            outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
             Finalize_MAGEMin(data);
         end
     # DHMS
@@ -1996,7 +1994,7 @@ function solve_sH2O_fO2(nP::Int64, nT::Int64;
             verbose && println("Calculating lower mantle sᴴ²ᴼ...")
             data    = Initialize_MAGEMin("sb24", verbose=false);
             !unoxidized && assignR_to_Xv!(Xv, R[:, 3, :]) # Oxidize bulk for LM fO₂ calculations
-            outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist24, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
+            outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
             Finalize_MAGEMin(data);
         end
         if s
