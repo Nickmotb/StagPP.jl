@@ -37,7 +37,7 @@ module StagPP
     # Function export
     export load_sim, load_local, data_encoding, solve_sH2O_fO2, min_sᴴ²ᴼ_assembler, solve_point
     # Misc export
-    export SM_fO2_XCO2_solution_space
+    export SM_fO2_Oex_solution_space
     # Plot exports
     export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, 
             mantle_water, mantle_water_at_t, plot_sf, minmap, 
