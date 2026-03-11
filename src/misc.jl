@@ -21,10 +21,10 @@
         - savein :: \t\t\t-->\t Path where image is saved. "" to skip [default: ""]
 
 """
-function SM_fO2_Oex_solution_space(; ns=60, fsize=(1200, 800), savein="", fO2range=(-13,1), P=3.5, T=1821., slimit=0.8, Oexrange=(1e-7,1e-3), Ocut=nothing, crblim=0.4)
+function SM_fO2_Oex_solution_space(; phi=0.0, ns=60, fsize=(1400, 800), savein="", fO2range=(-13.,1.), P=3.5, T=1400., slimit=0.8, Oexrange=(1e-7,1e-2), Ocut=nothing, crblim=0.8)
 
-    smass, fmass = 3.342e16, 2.120e13
-    mmO = 16.00
+    tmass = 1; 
+    smass, fmass = (1-phi)*tmass, phi*tmass
 
     # IDV = ∫ΔVdP
     IDV = solve_∫ΔVdP([P-0.05P, P, P+0.05P],[T-0.05T, T, T+0.05T])[2,2,1]
@@ -44,7 +44,7 @@ function SM_fO2_Oex_solution_space(; ns=60, fsize=(1200, 800), savein="", fO2ran
     out = single_point_minimization(10P, T-273.15, data, X=collect(values(X)), Xoxides=collect(keys(X)));
     Finalize_MAGEMin(data); ΔFMQ = out.fO2 - out.dQFM
 
-    # Sun and Yao 2024 (1 Oex per 1 Fe₂O₃)
+    # Sun and Yao 2024 (1 Oex per 1 Fe₂O₃) (Melt Fe²⁺ -> Fe³⁺ ==> fO₂ to XFe₂O₃ mapping)
     a0=-0.0001; a1=0.0002; a2=-0.0003; a3=-0.0004; a4=-0.0005; a5=-0.0006; a6=-0.0007; a7=-0.0008; a8=-0.0009; a9=-0.0010; a10=-0.0011; a11=-0.0012; a12=-0.0013; h=2.1410
     function reverseSY(logfO2)
         Ω = a1 + a2*T^(1.5) + a3*log(T)
@@ -63,16 +63,16 @@ function SM_fO2_Oex_solution_space(; ns=60, fsize=(1200, 800), savein="", fO2ran
         # Convert to mass fraction
         Xc = Dict(k => v*mm[k] for (k,v) in Xc)
         Xc = Dict(k => v/sum(values(Xc)) for (k,v) in Xc)
-        return Xc["Fe2O3"]
+        return Xc["Fe2O3"] # XOex as mass/mass
     end
 
-    # Stagno and Frost XCO2 equilibrium (2 Oex per 1 CO₂)
-    function eq_XCO2(logfO2)
-        XCO2 = min(10^(logfO2 - 5.44 + 21380/T - 0.078(1e4P-1)/T + ΔFMQ), min(slimit, crblim))
-        XCO2 = 2(XCO2/(sum(values(X))+XCO2)) # Normalized mols of O
-        Xc = copy(X)
-        Xc = Dict(k => v*mm[k] for (k,v) in Xc)
-        XCO2 = (XCO2*mmO)/(sum(values(Xc))+XCO2*mmO) # Normalized mass f of O
+    # Stagno and Frost XCO2 equilibrium (2 Oex per 1 CO₂) (Melt C⁰ -> C⁴⁺ ==> fO₂ to XCO₂ mapping)
+    function eq_XCO2(logfO2; CO=false)
+        XCO2temp = min(10^(logfO2 - 5.44 + 21380/T - 0.078(1e4P-1)/T + ΔFMQ), min(slimit, crblim))
+        CO && (return XCO2temp)
+        XOex = 2XCO2temp/(sum(values(X))+2XCO2temp) # Normalized mols of O
+        Xc = copy(X); Xc = Dict(k => v*mm[k] for (k,v) in Xc)
+        return XOex = (XOex*mm["O"])/(sum(values(Xc))+XOex*mm["O"]) # XOex as mass/mass
     end
 
     # Δ function
@@ -97,30 +97,49 @@ function SM_fO2_Oex_solution_space(; ns=60, fsize=(1200, 800), savein="", fO2ran
         crv = itpmap(logfO2, Ocut)
     end
     fig = Figure(size=fsize)
-    ax = Axis3(fig[1:5, 1], xlabel=L"Equilibrium\;fO_2", ylabel=L"O_{excess}\;budget\;[prop.\;tracer\;mass]", zlabel=L"Residual");
-        surface!(ax, logfO2, Oex, res, colormap=:vik100)
-        scatter!(ax, logfO2, Ocut*ones(ns), crv, color=:yellow, markersize=12, strokewidth=0.5, strokecolor=:black)
+    ax = Axis3(fig[1, 1:2], xlabel=L"Equilibrium\;fO_2", ylabel=L"O_{excess}\;budget\;[prop.\;tracer\;mass]", zlabel=L"Residual", azimuth=0.6π);
+        extent = max(maximum(res), abs(minimum(res)))
+        surface!(ax, logfO2, log10.(Oex), res, colormap=Reverse(:vik100), colorrange=(-extent, extent))
+        scatter!(ax, logfO2, log10.(Ocut*ones(ns)), crv, color=:yellow, markersize=12, strokewidth=0.5, strokecolor=:black)
+        surface!(ax, logfO2, log10.(Oex), zeros(ns,ns), alpha=0.2, colormap=:sun)
 
-    ax = Axis(fig[2:4, 2], xlabel=L"Equilibrium\;fO_2");
+    ax = Axis(fig[2, 1], xlabel=L"Equilibrium\;fO_2", ylabel=L"Residual", xgridvisible=false, ygridvisible=false);
         scatterlines!(ax, logfO2, crv, color=:red, strokewidth=0.4, strokecolor=:black, label="Residual ($P GPa | $T K)")
+        axislegend(ax, position=:lt)
         dy, dx = 0.1(crv[end] - crv[1]), 0.1(logfO2[end] - logfO2[1])
-        ylims!(ax, minimum(crv)-dy, maximum(crv)+dy)
+        (phi!=0.0) && (ylims!(ax, minimum(crv)-dy, maximum(crv)+dy))
 
         # resulting fO2
         itp = interpolate((logfO2,), crv, Gridded(Linear()))
         logfO2fine = LinRange(logfO2[1], logfO2[end], 10ns)
         idx = argmin(abs.(itp(logfO2fine)))
-        lines!(ax, [logfO2fine[idx], logfO2fine[idx]], [minimum(crv), maximum(crv)], color=:black, linestyle=:dash)
-        text!(ax, logfO2fine[idx]-0.1, maximum(crv)-2.6dy, text="log fO₂ = $(round(logfO2fine[idx], digits=3))", color=:black, rotation=0.5π)
+        lines!(ax, [logfO2fine[idx], logfO2fine[idx]], [minimum(crv), maximum(crv)], color=:red, linestyle=:dash)
+        text!(ax, logfO2fine[idx]+0.5dx, minimum(crv)+dy, text="log fO₂ = $(round(logfO2fine[idx], digits=3))", color=:red, rotation=0.5π)
 
+    ax = Axis(fig[2, 2], xlabel=L"Equilibrium\;fO_2", ylabel=L"XFe₂O₃", xgridvisible=false, ygridvisible=false, yticklabelcolor=:blue, ylabelcolor=:blue, rightspinecolor=:blue, ytickcolor=:blue);
+        # XFe2O3
+        Xfe3 = reverseSY.(logfO2); dy = 0.1(maximum(Xfe3) - minimum(Xfe3))
+        Xfe3sol = Float64.(round(reverseSY(logfO2fine[idx]), digits=3))
+        scatterlines!(ax, logfO2, Xfe3, color=:blue, strokewidth=0.4, strokecolor=:black, marker=:utriangle)
+        lines!(ax, [logfO2[1], logfO2[end]], [Xfe3sol, Xfe3sol], color=:blue, linestyle=:dash)
+        text!(ax, logfO2[1]+2dx, Xfe3sol+0.2dy, text="XFe₂O₃ equilibrium = $Xfe3sol", color=:blue)
+        ylims!(ax, minimum(Xfe3)-dy, maximum(Xfe3)+dy)
+
+    ax2 = Axis(fig[2, 2], ylabel="XCO₂", yaxisposition=:right, yticklabelcolor=:green, ylabelcolor=:green, rightspinecolor=:green, ytickcolor=:green, ygridvisible=false, xgridvisible=false)
+            hidespines!(ax2); hidexdecorations!(ax2)
         # XCO2
-        scatter!(ax, logfO2, eq_XCO2.(logfO2), color=:green, strokewidth=0.4, strokecolor=:black, marker=:utriangle, label="XCO₂ = $(round(eq_XCO2(logfO2fine[idx]), digits=3))")
-        lines!(ax, [logfO2[1], logfO2[end]], [slimit, slimit], color=:green, linestyle=:dash)
-        text!(ax, logfO2[1]+0.5dx, slimit+0.2dy, text="XCO₂ saturation = $slimit", color=:green)
-        scatter!(ax, logfO2[1], crv[1], alpha=0.0, label="Solid O budget = $(round(log10(smass*Ocut), digits=3))")
+        XCO2 = eq_XCO2.(logfO2, CO=true); dy = 0.1(maximum(XCO2) - minimum(XCO2))
+        XCO2sol = Float64.(round(eq_XCO2(logfO2fine[idx], CO=true), digits=3))
+        scatterlines!(ax2, logfO2, XCO2, color=:green, strokewidth=0.4, strokecolor=:black, marker=:utriangle)
+        lines!(ax2, [logfO2[1], logfO2[end]], [slimit, slimit], color=:green, alpha=0.3)
+        lines!(ax2, [logfO2[1], logfO2[end]], [XCO2sol, XCO2sol], color=:green, linestyle=:dash)
+        text!(ax2, logfO2[1]+2dx, XCO2sol+0.2dy, text="XCO₂ equilibrium = $XCO2sol", color=:green)
+        text!(ax2, logfO2[1]+0.2dx, slimit+0.2dy, text="XCO₂ saturation = $slimit", color=:green, alpha=0.3)
+        ylims!(ax2, minimum(XCO2)-dy, maximum(XCO2)+dy)
+        scatter!(ax2, logfO2[1], crv[1], alpha=0.0, label="Solid O budget (log kg) = $(round(log10(smass*Ocut), digits=3))")
         rOex = fmass*(reverseSY(logfO2fine[idx]) + eq_XCO2(logfO2fine[idx]))
-        scatter!(ax, logfO2[1], crv[1], alpha=0.0, label="Requested O budget = $(round(log10(rOex), digits=3))")
-        axislegend(ax, position=:lb)
+        scatter!(ax2, logfO2[1], crv[1], alpha=0.0, label="Requested O budget (log kg) = $(round(log10(rOex), digits=3))")
+        scatter!(ax2, logfO2[1], crv[1], alpha=0.0, label="Eq. XCO2 = $XCO2sol")
 
     display(fig)
     !isempty(savein) && save(joinpath(savein, "SM_fO2_XCO2_solution_space.png"), fig)

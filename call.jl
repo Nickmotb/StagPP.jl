@@ -1,6 +1,6 @@
 using StagPP, GLMakie
 
-load_sims = true
+load_sims = false
 # Sims
     if load_sims
         y20 = load_sim("/Volumes/Sinergia/EarthWater/y20e19/+op/EW", "γ20");
@@ -19,4 +19,6 @@ load_sims = true
 
 # sim = load_local("office")
 # rprof_vs_field(y45, "Water", logscale=true, cmap=:Blues, cmap_reverse=false, colorrange=(-3, 1))
-mantle_water_at_t(y35, 4.5)
+# mantle_water_at_t(y35, 4.5)
+
+SM_fO2_Oex_solution_space(phi=0.02, Ocut=2e-3)
