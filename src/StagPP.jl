@@ -23,8 +23,6 @@ module StagPP
         include("checks.jl")
     # === sᴴ²ᴼ
         include("sf_H2O.jl")
-    # === fO₂
-        include("fO2.jl")
     # === Misc
         include("misc.jl")
     # === Public API
@@ -37,11 +35,11 @@ module StagPP
     # Function export
     export load_sim, load_local, data_encoding, solve_sH2O_fO2, min_sᴴ²ᴼ_assembler, solve_point
     # Misc export
-    export SM_fO2_Oex_solution_space
+    export SM_fO2_Oex_solution_space, Hirschmann_fO2_to_R
     # Plot exports
     export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, 
             mantle_water, mantle_water_at_t, plot_sf, minmap, 
             snapshot, IOplot, omplot, H2O_memory_time, H2O_memory_time_multiple, H2O_PCA, melt_fO2,
     # Auxilliaries
-            idx_ph_transitions, t_avg
+            idx_ph_transitions, t_avg, oxidize_bulk
 end

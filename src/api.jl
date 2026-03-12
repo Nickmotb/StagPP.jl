@@ -1283,10 +1283,10 @@ end
 
         - nP::Int64 \t\t-->\t Number of pressure points [default: 50]
         - nT::Int64 \t\t-->\t Number of temperature points [default: 50]
-        - Clist::Array{String,1} \t-->\t List of oxides in composition [default: ["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"]]
+        - Xox::Array{String,1} \t-->\t List of oxides in composition [default: ["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"]]
         - XB::Array{Float64,1} \t-->\t StagYY's enriched endmember [default: [49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0]]
         - XH::Array{Float64,1} \t-->\t Bulk composition for HARZBURGITE (wt%) [default: [45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0]]
-        - ccomp::Array{Float64,1} \t-->\t Custom bulk composition (wt%) [default: zeros(Float64, length(Clist))]
+        - ccomp::Array{Float64,1} \t-->\t Custom bulk composition (wt%) [default: zeros(Float64, length(Xox))]
         - DBswitchP::Float64 \t-->\t Pressure (GPa) of upper mantle to transition zone switch [default: 7.0]
         - interp::Bool \t\t-->\t Interpolates heatmap [default: false]
         - cmap::Symbol \t\t-->\t Colormap [default: :BuPu]
@@ -1298,10 +1298,10 @@ end
         - H2Osat::Bool \t-->\t Considers H2O saturation in upper mantle calculations [default: true]
 """
 function minmap(sector, em::String; nP=70, nT=70,
-                Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
+                Xox=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
                 XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
                 XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
-                ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0, interp=false, cmap=:BuPu,
+                ccomp=zeros(Float64, length(Xox)),DBswitchP=7.0, interp=false, cmap=:BuPu,
                 Prange=(0.1, 130.0), Trange=(500.0, 4000.0), ncols=4, savein="", phase_out=["chl"], H2Osat=true
                 )
 
@@ -1321,14 +1321,14 @@ function minmap(sector, em::String; nP=70, nT=70,
     if sector == "um"
         data = H2Osat ? Initialize_MAGEMin("um", verbose=false, buffer="aH2O") : Initialize_MAGEMin("um", verbose=false);
         rm_list = remove_phases(phase_out, "um")
-        out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, B=ones(length(Pv)), sys_in="wt", name_solvus=true, rm_list=rm_list)
+        out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox, B=ones(length(Pv)), sys_in="wt", name_solvus=true, rm_list=rm_list)
     else
         data = Initialize_MAGEMin(sector=="tz" ? "sb24" : "sb24", verbose=false);
         if em=="XH"
             rm_list = remove_phases(["st"], "sb24")
-            out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, rm_list=rm_list)
+            out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox, name_solvus=true, rm_list=rm_list)
         else
-            out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true)
+            out = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox, name_solvus=true)
         end
     end
     Finalize_MAGEMin(data);
@@ -1366,24 +1366,24 @@ end
 
     Optional arguments (kwargs):
 
-        - Clist::Array{String,1} \t-->\t List of oxides in the composition [default: ["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"]]
+        - Xox::Array{String,1} \t-->\t List of oxides in the composition [default: ["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"]]
         - XB::Array{Float64,1} \t\t-->\t StagYY's default enriched endmember [default: [49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0]]
         - XH::Array{Float64,1} \t\t-->\t StagYY's default depleted endmember [default: [45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0]]
-        - ccomp::Array{Float64,1} \t-->\t Custom composition in wt% [default: zeros(Float64, length(Clist))]
+        - ccomp::Array{Float64,1} \t-->\t Custom composition in wt% [default: zeros(Float64, length(Xox))]
         - DBswitchP::Float64 \t\t-->\t Pressure (GPa) at which to switch from upper mantle to transition zone database [default: 7.0 GPa]
         - phase_out::Array{String,1} \t-->\t List of phases to remove from the minimization [default: ["chl"]]
         - H2Osat::Bool \t\t-->\t Considers H2O saturation in upper mantle calculations [default: true]
 """
 function solve_point(P, T, em;
-                    Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
+                    Xox=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
                     XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
                     XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
-                    ccomp=zeros(Float64, length(Clist)),DBswitchP=7.0,phase_out=["chl"],H2Osat=true,R=0.02
+                    ccomp=zeros(Float64, length(Xox)),DBswitchP=7.0,phase_out=["chl"],H2Osat=true,R=0.02
                     )
 
     # Checks
-    @assert length(XB) == length(Clist) "Length of Clist and XB must match."
-    @assert length(XH) == length(Clist) "Length of Clist and XH must match."
+    @assert length(XB) == length(Xox) "Length of Xox and XB must match."
+    @assert length(XH) == length(Xox) "Length of Xox and XH must match."
     @assert em in ["XH", "XB", "Custom"] "Endmember must be either: XB, XH or Custom"
     @assert (em!="Custom" || (em=="Custom" && sum(ccomp)!=0.0)) "Please provide a custom composition if chosen"
 
@@ -1396,10 +1396,10 @@ function solve_point(P, T, em;
     if P <= DBswitchP
         data = H2Osat ? Initialize_MAGEMin("um", verbose=false, buffer="aH2O") : Initialize_MAGEMin("um", verbose=false);
         rm_list = remove_phases(phase_out, "um")
-        out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Clist, B=1.0, name_solvus=true, rm_list=rm_list)
+        out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Xox, B=1.0, name_solvus=true, rm_list=rm_list)
     else
         data = Initialize_MAGEMin(P<=25. ? "sb24" : "sb24", verbose=false);
-        Xo, Xlist = oxidize_bulk(X, Clist, R; wt=false, onlyvals=false)
+        Xo, Xlist = oxidize_bulk(X, Xox, R; wt=false, onlyvals=false)
         if em=="XH"
             rm_list = remove_phases(["st"], "sb24")
             out = single_point_minimization(10P, T-273.15, data, X=Xo, Xoxides=Xlist, name_solvus=true, rm_list=rm_list)

@@ -16,7 +16,7 @@
             - DBswitchP::Float64 \t\t-->\t Pressure (GPa) to switch between upper mantle and transition zone databases [default: 7.0]
             - plt::Bool \t\t\t-->\t Plot results [default: false]
             - DHMS::Bool \t\t\t-->\t Explore DHMS paths for transition zone calculations [default: true]
-            - Clist::Vector{String} \t-->\t List of oxides in the system [default: ["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"]]
+            - Xox::Vector{String} \t-->\t List of oxides in the system [default: ["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"]]
             - XB::Vector{Float64} \t\t-->\t Bulk composition in wt% for sᴴ²ᴼ calculations [default: Upper mantle composition]
             - XH::Vector{Float64} \t\t-->\t Bulk composition in wt% for fO₂ calculations [default: Mid-ocean ridge basalt composition]
             - Prange::Tuple{Float64, Float64} \t-->\t Pressure range in GPa [default: (0.1, 130.0)]
@@ -33,45 +33,46 @@
     """
     function solve_sH2O_fO2(nP::Int64, nT::Int64;
                             s=true, fO2=true, DBswitchP=7.0, plt=false, DHMS=true,
-                            # Clist=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
-                            Clist=["SiO2", "MgO", "FeO", "O", "CaO", "Al2O3", "Na2O", "Cr2O3", "H2O"],
-                            XH=[43.43, 45.93, 8.34, 0.0, 0.9, 1.0, 0.01, 0.3, 100.0], # From stxirtude & Bertelloni 2024
-                            XB=[50.42, 9.77, 7.1, 0.0, 12.54, 16.8, 2.23, 0.07, 100.0], # From stxirtude & Bertelloni 2024
+                            # Xox=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
+                            Xox_in=["SiO2", "MgO", "FeO", "Fe2O3", "CaO", "Al2O3", "Na2O", "Cr2O3", "H2O"],
+                            XH=[43.43, 45.93, 8.34, 0.0, 0.9, 1.0, 0.01, 0.3, 10.0], # From stxirtude & Bertelloni 2024
+                            XB=[50.42, 9.77, 7.1, 0.0, 12.54, 16.8, 2.23, 0.07, 10.0], # From stxirtude & Bertelloni 2024
                             Prange=(1e-4, 135.0), Trange=(500.0, 4000.0), verbose=true,
                             cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"],
                             test_path=false, sys_in="mol", unoxidized=false, melt_ints=true, melt_fO2=false,
-                            Rv=0.05
+                            Rv=0.01
                             )
 
         # Checks
         (!s && !fO2 && !melt_ints && !melt_fO2) && return
-        @assert length(Clist) == length(XB) "Length of Clist and XB must match."
-        @assert length(Clist) == length(XH) "Length of Clist and XH must match."
+        @assert length(Xox_in) == length(XB) "Length of Xox and XB must match."
+        @assert length(Xox_in) == length(XH) "Length of Xox and XH must match."
         if (melt_fO2 && !melt_ints)
             println("Warning: melt_fO2 requires melt_ints to be computed. Setting melt_ints=true.")
             melt_ints = true
         end
 
         # Oxidizing routine 
-        function assignR_to_Xv!(Xv, R)
+        function assignR_to_Xv!(Xv, Xox, Rv; rmH2O=false)
             for i in 1:nPnT
-                Xv[i] .= oxidize_bulk(Xv[i], Clist, R[(i-1)%nP+1, 1]; wt=(sys_in=="wt"), onlyvals=true)
-                Xv[i+nPnT] .= oxidize_bulk(Xv[i+nPnT], Clist, R[(i-1)%nP+1, 2]; wt=(sys_in=="wt"), onlyvals=true)
+                Xv[i] .= oxidize_bulk(Xv[i], Xox, Rv; wt_in=(sys_in=="wt"), wt_out=false, rmH2O=rmH2O, onlyvals=true);
+                Xv[i+nPnT] .= oxidize_bulk(Xv[i+nPnT], Xox, Rv; wt_in=(sys_in=="wt"), wt_out=false, rmH2O=rmH2O, onlyvals=true);
             end
         end
+
+        # Oxide list to use
+        Xox = ["SiO2", "MgO", "Fe", "O", "CaO", "Al2O3", "Na2O", "Cr2O3", "H2O"]
 
         # Vetorization size
         nPnT = nP*nT
 
         # Memory allocations
-        # --- Compose R = ∑Fe³⁺/∑Fe for fO₂ calculations
-            R = Rv.*ones(nP, 3, 2); #compose_∑Fe³⁺_∑Fe!(R, nP)
         # --- Axis Vectors
             Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 2000., nT)
             Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(700., Trange[2], nT)
             Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(700., Trange[2], nT)
         # --- Others
-            Pv, Tv = zeros(Float64, 2nPnT), zeros(Float64, 2nPnT)
+            Pv, Tv = zeros(Float64, 2nPnT), zeros(Float64, 2nPnT);
             Xv = vcat(map(Vector, eachrow(repeat(XH', outer=nPnT))), map(Vector, eachrow(repeat(XB', outer=nPnT))))
             tnP, tnP05 = Int64(ceil(1.1max(nP, nT))), Int64(ceil(0.5max(nP, nT)))
         # --- Maps
@@ -116,19 +117,19 @@
                 verbose && println("Calculating upper mantle sᴴ²ᴼ...")
                 data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
                 rm_list = remove_phases(phase_out, "um")
-                !unoxidized && assignR_to_Xv!(Xv, R[:, 1, :])  # Oxidize bulk for UM fO₂ calculations
-                outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, B=ones(length(Pv)), progressbar=verbose, rm_list=rm_list, sys_in=sys_in) # kbar and K
+                outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox, name_solvus=true, B=ones(length(Pv)), progressbar=verbose, rm_list=rm_list, sys_in=sys_in) # kbar and K
                 Finalize_MAGEMin(data);
             else; outHB = 0.0; end
         # Call UM through SB24 to get fO₂
-            # if fO2 
-            #     verbose && println("Calculating upper mantle fO₂...")
-            #     data    = Initialize_MAGEMin("sb24", verbose=false);
-            #     out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, progressbar=verbose, sys_in=sys_in)
-            #     Finalize_MAGEMin(data);
-            # else; out_fO2 = 0.0; end
+            if fO2 
+                verbose && println("Calculating upper mantle fO₂...")
+                data    = Initialize_MAGEMin("sb24", verbose=false);
+                !unoxidized && assignR_to_Xv!(Xv, Xox_in, Rv)  # Oxidize bulk for UM fO₂ calculations
+                out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox, name_solvus=true, progressbar=verbose, sys_in=sys_in)
+                Finalize_MAGEMin(data);
+            else; out_fO2 = 0.0; end
         # Assemble
-            sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, outHB, ΔFMQ_um, nPnT, s=s, fO2=fO2)
+            sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, ΔFMQ_um, nPnT, s=s, fO2=fO2)
             if s
                 um = cat(reshape(um[:,1], nP, nT), reshape(um[:,2], nP, nT), dims=3)
                 min_s = min_sᴴ²ᴼ_assembler(tnP)
@@ -138,15 +139,14 @@
                     verbose && println("Calculating upper mantle melt fO₂...")
                     Threads.@threads for i in 1:nPnT
                         ip, it = get_ip_it_nrows(nP, i)
-                        mfum[i,1] = total_melt_fO2(Xv[i], Clist, Tv[i], ∫ΔVdP_um[ip, it, 1]) - ΔFMQ_um[i]
-                        mfum[i,2] = total_melt_fO2(Xv[i+nPnT], Clist, Tv[i], ∫ΔVdP_um[ip, it, 2]) - ΔFMQ_um[i]
+                        mfum[i,1] = total_melt_fO2(Xv[i], Xox, Tv[i], ∫ΔVdP_um[ip, it, 1]) - ΔFMQ_um[i]
+                        mfum[i,2] = total_melt_fO2(Xv[i+nPnT], Xox, Tv[i], ∫ΔVdP_um[ip, it, 2]) - ΔFMQ_um[i]
                     end
                     mfum = cat(reshape(mfum[:,1], nP, nT), reshape(mfum[:,2], nP, nT), dims=3)
                 end
                 fum = cat(reshape(fum[:,1], nP, nT), reshape(fum[:,2], nP, nT), dims=3)
                 ΔFMQ_um = reshape(ΔFMQ_um[:,1], nP, nT)
             end
-        # Mineral-bound sᴴ²ᴼ assembly
         # Mineral-bound sᴴ²ᴼ assembly
             if s
                 verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
@@ -161,29 +161,29 @@
             mesh_vectorization!(Ptz, Ttz, nP, nT, Pv, Tv)
         # Minimizer call + assembly
             if s || fO2
-                verbose && println("Calculating transition zone sᴴ²ᴼ...")
+                verbose && println("Calculating transition zone fO₂ | sᴴ²ᴼ...")
                 data    = Initialize_MAGEMin("sb24", verbose=false);
-                !unoxidized && assignR_to_Xv!(Xv, R[:, 2, :])  # Oxidize bulk for TZ fO₂ calculations
-                outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
+                !unoxidized && assignR_to_Xv!(Xv, Xox_in, Rv)  # Oxidize bulk for TZ fO₂ calculations
+                outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
                 Finalize_MAGEMin(data);
             end
         # DHMS
             if s
                 DHMS && verbose && println("Exploring DHMS paths...")
-                ppaths, paths, _  =  DHMS ? path_solve(XH, Clist, phase_out, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), DBswitchP, (@view outHB[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0)
+                ppaths, paths, _  =  DHMS ? path_solve(XH, Xox, phase_out, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), DBswitchP, (@view outHB[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0)
         # Assemble  
                 ∫sᴴ²ᴼ!(tz, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), min_s, outHB, DHMS, ppaths, paths, nPnT)
                 tz = cat(reshape(tz[:,1], nP, nT), reshape(tz[:,2], nP, nT), dims=3)
             end
             if fO2 
-                verbose && println("Assembing transition zone fO₂...")
+                verbose && println("Extracting transition zone fO₂...")
                 sᴴ²ᴼ_fO₂_assembler!(tz, ftz, outHB, outHB, ΔFMQ_tz, nPnT, s=false)
                 if melt_fO2
                     verbose && println("Calculating transition zone melt fO₂...")
                     Threads.@threads for i in 1:nPnT
                         ip, it = get_ip_it_nrows(nP, i)
-                        mftz[i,1] = total_melt_fO2(Xv[i], Clist, Tv[i], ∫ΔVdP_tz[ip, it, 1]) - ΔFMQ_tz[i]
-                        mftz[i,2] = total_melt_fO2(Xv[i+nPnT], Clist, Tv[i], ∫ΔVdP_tz[ip, it, 2]) - ΔFMQ_tz[i]
+                        mftz[i,1] = total_melt_fO2(Xv[i], Xox, Tv[i], ∫ΔVdP_tz[ip, it, 1]) - ΔFMQ_tz[i]
+                        mftz[i,2] = total_melt_fO2(Xv[i+nPnT], Xox, Tv[i], ∫ΔVdP_tz[ip, it, 2]) - ΔFMQ_tz[i]
                     end
                     mftz = cat(reshape(mftz[:,1], nP, nT), reshape(mftz[:,2], nP, nT), dims=3)
                 end
@@ -201,8 +201,8 @@
             if s || fO2
                 verbose && println("Calculating lower mantle sᴴ²ᴼ...")
                 data    = Initialize_MAGEMin("sb24", verbose=false);
-                !unoxidized && assignR_to_Xv!(Xv, R[:, 3, :]) # Oxidize bulk for LM fO₂ calculations
-                outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Clist, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
+                !unoxidized && assignR_to_Xv!(Xv, Xox_in, Rv) # Oxidize bulk for LM fO₂ calculations
+                outHB   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
                 Finalize_MAGEMin(data);
             end
             if s
@@ -210,14 +210,14 @@
                 lm = cat(reshape(lm[:,1], nP, nT), reshape(lm[:,2], nP, nT), dims=3)
             end
             if fO2 
-                verbose && println("Calculating lower mantle fO₂...")
+                verbose && println("Extracting lower mantle fO₂...")
                 sᴴ²ᴼ_fO₂_assembler!(lm, flm, outHB, outHB, ΔFMQ_lm, nPnT, s=false)
                 if melt_fO2
                     verbose && println("Calculating lower mantle melt fO₂...")
                     Threads.@threads for i in 1:nPnT
                         ip, it = get_ip_it_nrows(nP, i)
-                        mflm[i,1] = total_melt_fO2(Xv[i], Clist, Tv[i], ∫ΔVdP_lm[ip, it, 1]) - ΔFMQ_lm[i]
-                        mflm[i,2] = total_melt_fO2(Xv[i+nPnT], Clist, Tv[i], ∫ΔVdP_lm[ip, it, 2]) - ΔFMQ_lm[i]
+                        mflm[i,1] = total_melt_fO2(Xv[i], Xox, Tv[i], ∫ΔVdP_lm[ip, it, 1]) - ΔFMQ_lm[i]
+                        mflm[i,2] = total_melt_fO2(Xv[i+nPnT], Xox, Tv[i], ∫ΔVdP_lm[ip, it, 2]) - ΔFMQ_lm[i]
                     end
                     mflm = cat(reshape(mflm[:,1], nP, nT), reshape(mflm[:,2], nP, nT), dims=3)
                 end
@@ -255,7 +255,7 @@
             - `savein::String`: Path to save the figure. Default is `""` (does not save).
             - `bigpicture::Tuple{Bool, Int}`: Whether to create a big picture figure. Default is `(false, 1)`.
     """
-    function plot_sf(sfmap; cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, savein="", bigpicture=(false, 1) )
+    function plot_sf(sfmap; cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, savein="", bigpicture=(false, 1))
 
         # Inputs
         xlabsz, ylabsz, titlesz, xticklabsz, yticklabsz, xticksz, yticksz = 20, 20, 22, 16, 16, 12, 12
@@ -301,24 +301,24 @@
         if f
             ipp = s ? 4 : 0
             # Upper Mantle
-            ax = Axis(fig[1, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted,\;log_{10}\;\Delta FQM)", yreversed=true,
+            ax = Axis(fig[1, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted,\;log_{10})", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=!s, xlabelvisible=!s)
             hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, sfmap.fum[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[1, 2+ipp], hm)
-            ax = Axis(fig[1, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched,\;log_{10}\;\Delta FQM)", yreversed=true,
+            ax = Axis(fig[1, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched,\;log_{10})", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
             hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, sfmap.fum[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[1, 4+ipp], hm)
         # Transition zone
-            ax = Axis(fig[2, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Depleted,\;log_{10}\;\Delta FQM)", yreversed=true,
+            ax = Axis(fig[2, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Depleted,\;log_{10})", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
             hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, sfmap.ftz[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[2, 2+ipp], hm)
-            ax = Axis(fig[2, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched,\;log_{10}\;\Delta FQM)", yreversed=true,
+            ax = Axis(fig[2, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched,\;log_{10})", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
             hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, sfmap.ftz[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[2, 4+ipp], hm)
         # Lower Mantle
-            ax = Axis(fig[3, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Depleted,\;log_{10}\;\Delta FQM)", yreversed=true,
+            ax = Axis(fig[3, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Depleted,\;log_{10})", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
             hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, sfmap.flm[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[3, 2+ipp], hm)
-            ax = Axis(fig[3, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched,\;log_{10}\;\Delta FQM)", yreversed=true,
+            ax = Axis(fig[3, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched,\;log_{10})", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
             hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, sfmap.flm[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[3, 4+ipp], hm)
         end
@@ -370,7 +370,7 @@
 
         - wt::Bool \t\t-->\t Indicates if the input composition is in weight percent (wt%) [default: false (molar fraction)]
     """
-    function oxidize_bulk(X, Xox, R; wt=false, onlyvals=false)
+    function oxidize_bulk(X, Xox, Rv; wt_in=false, wt_out=false, onlyvals=false, frac=false, rmH2O=false, FeO_Fe2O3=false)
 
         # 2FeO + O -> Fe₂O₃
         # R = Fe³/∑Fe
@@ -383,28 +383,96 @@
             "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
         )
 
+        # Filter H2O
+        rmH2O ? (Xoxc=filter(x->(x!="H2O"), Xox)) : (Xoxc=copy(Xox))
+
         # Process to FeO + Fe₂O₃
-        Xc = X_Xox_to_full_list(X, Xox; wt_in=wt, wt_out=false)
+        Xc = X_Xox_to_full_list(X, Xoxc; wt_in=wt_in, wt_out=false)
 
         # Calculate extra oxygen given R = Fe³⁺/Fe
-        nFe² = Xc["FeO"]
-        nFe³ = (R*nFe²)/(1 - R)
-        nFe² = nFe² - nFe³
-        nO³ = 1.5nFe³
+        if Rv >= 0.0
+            nFe² = Xc["FeO"]
+            nFe³ = (Rv*nFe²)/(1 - Rv)
+            nFe² = nFe² - nFe³
+            nO³ = 1.5nFe³
+            Xc["FeO"] = nFe²; Xc["Fe2O3"] = nO³
+            X_out = [Xc[ox] for ox in Xox]
 
-        # Recompute FeO + O -> Fe + O (negative O for reduced systems, positive for oxidized systems)
-        Xc["FeO"] = nFe²; Xc["Fe2O3"] = nO³
-        Xox_out = filter(x->(x!="Fe")&&(x!="O"), collect(keys(Xc)))
-        X_out = [Xc[ox] for ox in Xox_out]
+            # Process to Fe + O
+            !FeO_Fe2O3 && (X_out, Xoxc = FeO_Fe2O3_to_Fe_O(X_out, Xoxc))
+
+        elseif Rv<=0.0
+            Xc["Fe2O3"] = 0.0
+            X_out = [Xc[ox] for ox in Xox]
+
+            # Process to Fe + O
+            X_out, Xoxc = FeO_Fe2O3_to_Fe_O(X_out, Xoxc)
+
+            # Rv negative -> amount to remove in mols to the O pool
+            idxO = findfirst(Xoxc.=="O")
+            X_out[idxO] -= min(abs(Rv), X_out[idxO])
+        end
 
         # Retrace to wt% if required
-        wt && (X_out .= X_out .* [mm[ox] for ox in Xox_out])
+        wt_out && (X_out .= X_out .* [mm[ox] for ox in Xoxc])
 
         # Normalize
-        X_out .= 1e2(X_out ./ sum(X_out))
+        X_out .= frac ? (X_out ./ sum(X_out)) : 1e2(X_out ./ sum(X_out))
 
         # Return
-        onlyvals ? (return X_out) : (return X_out, Xox_out)
+        onlyvals ? (return X_out) : (return X_out, Xoxc)
+
+    end
+
+    function oxidize_bulk(Xdict, Rv; wt_in=false, wt_out=false, frac=false, rmH2O=false, FeO_Fe2O3=false)
+
+        # Molar masses (g/mol)
+        mm = Dict(
+            "SiO2" => 60.08, "Al2O3" => 101.96, "CaO" => 56.08, "MgO" => 40.30, "FeO" => 71.85, "Fe2O3" => 159.69,
+            "K2O" => 94.2, "Na2O" => 61.98, "TiO2" => 79.88, "O" => 16.0, "Cr2O3" => 151.99, "MnO" => 70.937,
+            "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
+        )
+
+        X = collect(values(Xdict)); Xox = collect(keys(Xdict))
+
+        # Filter H2O
+        rmH2O ? (Xoxc=filter(x->(x!="H2O"), Xox)) : (Xoxc=copy(Xox))
+
+        # Process to FeO + Fe₂O₃
+        Xc = X_Xox_to_full_list(X, Xoxc; wt_in=wt_in, wt_out=false)
+
+        # Calculate extra oxygen given R = Fe³⁺/Fe
+        if Rv >= 0.0
+            nFe² = Xc["FeO"]
+            nFe³ = (Rv*nFe²)/(1 - Rv)
+            nFe² = nFe² - nFe³
+            nO³ = 1.5nFe³
+            Xc["FeO"] = nFe²; Xc["Fe2O3"] = nO³
+            X_out = [Xc[ox] for ox in Xox]
+
+            # Process to Fe + O
+            !FeO_Fe2O3 && (X_out, Xoxc = FeO_Fe2O3_to_Fe_O(X_out, Xoxc))
+        else
+            Xc["Fe2O3"] = 0.0
+            X_out = [Xc[ox] for ox in Xox]
+
+            # Process to Fe + O
+            X_out, Xoxc = FeO_Fe2O3_to_Fe_O(X_out, Xoxc)
+
+            # Rv negative -> amount to remove in mols to the O pool
+            idxO = findfirst(Xoxc.=="O")
+            X_out[idxO] -= min(abs(Rv), X_out[idxO])
+        end
+
+        # Retrace to wt% if required
+        wt_out && (X_out .= X_out .* [mm[ox] for ox in Xoxc])
+
+        # Normalize
+        X_out .= frac ? (X_out ./ sum(X_out)) : 1e2(X_out ./ sum(X_out))
+
+        # Return
+        Xdict_out = Dict{String, Float64}(); [Xdict_out[Xoxc[i]] = X_out[i] for i in eachindex(Xoxc)]
+        return Xdict_out
 
     end
 
@@ -1226,7 +1294,7 @@
     # Assumes DHMS are entirely isolated within region of stability. And only DHMS
     # phase carries over across boundaries.
 
-    function path_solve(XH, Clist, phase_out, Pvtz, Tvtz, DBswitchP, outH, test_path; npaths=50, ns=250, Pend=130.0)
+    function path_solve(XH, Xox, phase_out, Pvtz, Tvtz, DBswitchP, outH, test_path; npaths=50, ns=250, Pend=130.0)
 
         # Initialize variables
         P = LinRange(0.5, Pend, ns)
@@ -1248,7 +1316,7 @@
             idx = max(findfirst(Tpath(P) .>= reactions.r1(P))-1, 1)
             # Minimize crossing point
             rm_list = remove_phases(phase_out, "um")
-            out = single_point_minimization(10*P[idx], Tpath(P[idx])-273.15, data, X=XH, Xoxides=Clist, B=1.0, sys_in="wt", name_solvus=true, rm_list=rm_list)
+            out = single_point_minimization(10*P[idx], Tpath(P[idx])-273.15, data, X=XH, Xoxides=Xox, B=1.0, sys_in="wt", name_solvus=true, rm_list=rm_list)
             # Extract atg mol%, if none get out.
             atg = 0.0
             any(out.ph .== "atg") ? (atg = out.ph_frac[findfirst(out.ph .== "atg")]; rh .*= "1") : (push!(path_collection, PTpath(Tpath, atg, rh, 0.0, 0.0, 0.0, 0.0)); continue)
@@ -1771,10 +1839,9 @@
                 end; smap[i, 2] = sum(H₂O)
             end
             if fO2# fO₂
-                fmap[i, 1] = out_fO2[i].dQFM # Depleted (Harzburgite)
-                fmap[i, 2] = out_fO2[i+n].dQFM # Enriched (Basalt)
+                fmap[i, 1] = out_fO2[i].fO2 # Depleted (Harzburgite)
+                fmap[i, 2] = out_fO2[i+n].fO2 # Enriched (Basalt)
                 ΔFMQ[i] = out_fO2[i].fO2 - out_fO2[i].dQFM # Depleted (Harzburgite) FMQ surface point
-
             end
         end
     end
@@ -1916,12 +1983,8 @@
             "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
         )
 
-        # Filter H2O
-        if ("H2O" in Xox)
-            id = findfirst(Xox .== "H2O")
-            Xox_out = filter(x->x!="H2O", Xox)
-            X_out = filter(x->x!=X[id], X)
-        end
+        Xox_out = Xox
+        X_out = X
 
         # Create dictionary of composition
         Xccc = wt_in ? X_out ./ [mm[ox] for ox in Xox_out] : X_out
@@ -1932,7 +1995,7 @@
         end
 
         # Check all oxides are there, if not add them as 0.0
-        required_oxides = ["FeO", "Fe2O3", "SiO2", "Al2O3", "TiO2", "CaO", "MgO", "Na2O", "K2O", "Fe", "O"]
+        required_oxides = ["FeO", "Fe2O3", "SiO2", "Al2O3", "TiO2", "CaO", "MgO", "Na2O", "K2O", "Fe", "O", "H2O"]
         for ox in required_oxides
             if !haskey(Xc, ox)
                 Xc[ox] = 0.0
@@ -1958,6 +2021,15 @@
 
         # Retrace to wt if needed
         return wt_out ? Dict(k => v*mm[k] for (k,v) in Xc) : Xc
+    end
+
+    function FeO_Fe2O3_to_Fe_O(Xin, Xoxin)
+        X = copy(Xin); Xox = copy(Xoxin)
+        idxFeO = findfirst(Xox.=="FeO"); idxFe2O3 = findfirst(Xox.=="Fe2O3")
+        XFe = X[idxFeO] + 2*X[idxFe2O3]; XO = X[idxFeO] + 3X[idxFe2O3]
+        Xox[idxFeO] = "Fe"; Xox[idxFe2O3] = "O"
+        X[idxFeO] = XFe; X[idxFe2O3] = XO
+        return X, Xox
     end
 
     # Melt fO2 according to Sun and Yao (2024)
@@ -2055,13 +2127,4 @@
 
         return ∫ΔVdP
 
-    end
-
-    function compose_∑Fe³⁺_∑Fe!(R, nP)
-        R[:, 1, 1] .= LinRange(0.005, 0.05, nP) # UM Harz
-        R[:, 1, 2] .= LinRange(0.02, 0.05, nP) # UM MORB
-        R[:, 2, 1] .= LinRange(0.03, 0.05, nP) # TZ Harz
-        R[:, 2, 2] .= LinRange(0.03, 0.05, nP) # TZ MORB
-        R[:, 3, 1] .= 0.05ones(nP) # LM MORB
-        R[:, 3, 2] .= 0.05ones(nP) # LM MORB
     end
