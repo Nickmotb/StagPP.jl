@@ -21,6 +21,6 @@ load_sims = false
 # rprof_vs_field(y45, "Water", logscale=true, cmap=:Blues, cmap_reverse=false, colorrange=(-3, 1))
 # mantle_water_at_t(y35, 4.5)
 
-# Δ = Hirschmann_fO2_to_R(RF=0.01, FMQ=false, P=3.5, T=1200., p=0.0);
-a = solve_sH2O_fO2(20, 20, s=true, Rv=0.01);
-# plot_sf(a)
+Δ = Hirschmann_fO2_to_R(RF=0.01, FMQ=true, P=3.5, T=1200., p=0.0);
+# a = solve_sH2O_fO2(30, 30, s=false, Rv=0.05); plot_sf(a, FMQ=true)
+# 

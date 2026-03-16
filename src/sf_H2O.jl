@@ -255,7 +255,7 @@
             - `savein::String`: Path to save the figure. Default is `""` (does not save).
             - `bigpicture::Tuple{Bool, Int}`: Whether to create a big picture figure. Default is `(false, 1)`.
     """
-    function plot_sf(sfmap; cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, savein="", bigpicture=(false, 1))
+    function plot_sf(sfmap; cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, savein="", bigpicture=(false, 1), FMQ=false)
 
         # Inputs
         xlabsz, ylabsz, titlesz, xticklabsz, yticklabsz, xticksz, yticksz = 20, 20, 22, 16, 16, 12, 12
@@ -303,24 +303,24 @@
             # Upper Mantle
             ax = Axis(fig[1, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted,\;log_{10})", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=!s, xlabelvisible=!s)
-            hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, sfmap.fum[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[1, 2+ipp], hm)
+            hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, FMQ ? (sfmap.fum[:,:,1].-sfmap.FMQum[:,:])' : sfmap.fum[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[1, 2+ipp], hm)
             ax = Axis(fig[1, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched,\;log_{10})", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
-            hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, sfmap.fum[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[1, 4+ipp], hm)
+            hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, FMQ ? (sfmap.fum[:,:,2].-sfmap.FMQum[:,:])' : sfmap.fum[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[1, 4+ipp], hm)
         # Transition zone
             ax = Axis(fig[2, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Depleted,\;log_{10})", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
-            hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, sfmap.ftz[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[2, 2+ipp], hm)
+            hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, FMQ ? (sfmap.ftz[:,:,1].-sfmap.FMQtz[:,:])' : sfmap.ftz[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[2, 2+ipp], hm)
             ax = Axis(fig[2, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched,\;log_{10})", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
-            hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, sfmap.ftz[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[2, 4+ipp], hm)
+            hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, FMQ ? (sfmap.ftz[:,:,2].-sfmap.FMQtz[:,:])' : sfmap.ftz[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[2, 4+ipp], hm)
         # Lower Mantle
             ax = Axis(fig[3, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Depleted,\;log_{10})", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
-            hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, sfmap.flm[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[3, 2+ipp], hm)
+            hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, FMQ ? (sfmap.flm[:,:,1].-sfmap.FMQlm[:,:])' : sfmap.flm[:,:,1]'; colormap=:vik100, interpolate=interp); Colorbar(fig[3, 2+ipp], hm)
             ax = Axis(fig[3, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched,\;log_{10})", yreversed=true,
                         xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
-            hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, sfmap.flm[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[3, 4+ipp], hm)
+            hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, FMQ ? (sfmap.flm[:,:,2].-sfmap.FMQlm[:,:])' : sfmap.flm[:,:,2]'; colormap=:vik100, interpolate=interp); Colorbar(fig[3, 4+ipp], hm)
         end
 
         if mf
@@ -390,7 +390,7 @@
         Xc = X_Xox_to_full_list(X, Xoxc; wt_in=wt_in, wt_out=false)
 
         # Calculate extra oxygen given R = Fe³⁺/Fe
-        if Rv >= 0.0
+        if Rv > 0.0
             nFe² = Xc["FeO"]
             nFe³ = (Rv*nFe²)/(1 - Rv)
             nFe² = nFe² - nFe³

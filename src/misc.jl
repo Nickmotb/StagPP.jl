@@ -126,8 +126,8 @@ function Hirschmann_fO2_to_R(; RF=0.02, fO2range=(-15., 0.), P=3.5, T=1400., sli
         XCO2, res = eq_XCO2(logfO2[i], P, T, Xc)
         arr[i,1] = XCO2; arr[i,2] = res
     end
-    plot!(ax, logfO2, arr[:,1], color=:red)
-    plot!(ax2, logfO2, arr[:,2], color=:blue)
+    plot!(ax, FMQ ? logfO2 .- ΔFMQ : logfO2, arr[:,1], color=:red)
+    plot!(ax2, FMQ ? logfO2 .- ΔFMQ : logfO2, arr[:,2], color=:blue)
     display(fig)
 
     return Δ
