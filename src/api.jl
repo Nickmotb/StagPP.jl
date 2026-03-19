@@ -1378,20 +1378,23 @@ function solve_point(P, T, em;
                     Xox=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
                     XB=[49.33, 15.31, 10.82, 7.41, 10.33, 0.19, 2.53, 1.46, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
                     XH=[45.5, 2.59, 4.05, 35.22, 7.26, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0], # From stxirtude & Bertelloni 2024
-                    ccomp=zeros(Float64, length(Xox)),DBswitchP=7.0,phase_out=["chl"],H2Osat=true,R=0.02
-                    )
+                    ccomp=zeros(Float64, length(Xox)),DBswitchP=7.0,phase_out=["chl"],H2Osat=true,Rv=0.02,oxidize=true)
 
     # Checks
-    @assert length(XB) == length(Xox) "Length of Xox and XB must match."
-    @assert length(XH) == length(Xox) "Length of Xox and XH must match."
-    @assert em in ["XH", "XB", "Custom"] "Endmember must be either: XB, XH or Custom"
+    if em!="Custom"
+        @assert length(XB) == length(Xox) "Length of Xox and XB must match."
+        @assert length(XH) == length(Xox) "Length of Xox and XH must match."
+    else
+        @assert length(ccomp) == length(Xox) "Length of Xox and ccomp must match."
+    end
+    @assert em in ["XH", "XB", "XP", "Custom"] "Endmember must be either: XB, XH or Custom"
     @assert (em!="Custom" || (em=="Custom" && sum(ccomp)!=0.0)) "Please provide a custom composition if chosen"
 
     # Transform int inputs to real if needed
     P = Float64(P); T = Float64(T)
 
     # Minimize
-    X = em=="XB" ? XB : em=="XH" ? XH : ccomp
+    X = copy(em=="XB" ? XB : em=="XH" ? XH : em=="XP" ? 0.2XB+0.8XH : ccomp)
     H2Osat && (X[end] = 100.0) # Set H2O to 100 for saturation calculations
     if P <= DBswitchP
         data = H2Osat ? Initialize_MAGEMin("um", verbose=false, buffer="aH2O") : Initialize_MAGEMin("um", verbose=false);
@@ -1399,12 +1402,12 @@ function solve_point(P, T, em;
         out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Xox, B=1.0, name_solvus=true, rm_list=rm_list)
     else
         data = Initialize_MAGEMin(P<=25. ? "sb24" : "sb24", verbose=false);
-        Xo, Xlist = oxidize_bulk(X, Xox, R; wt=false, onlyvals=false)
+        oxidize && (X, Xlist = oxidize_bulk(X, Xox, Rv; wt_in=false))
         if em=="XH"
             rm_list = remove_phases(["st"], "sb24")
-            out = single_point_minimization(10P, T-273.15, data, X=Xo, Xoxides=Xlist, name_solvus=true, rm_list=rm_list)
+            out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Xlist, name_solvus=true, rm_list=rm_list)
         else
-            out = single_point_minimization(10P, T-273.15, data, X=Xo, Xoxides=Xlist, name_solvus=true)
+            out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Xlist, name_solvus=true)
         end
     end
     Finalize_MAGEMin(data);

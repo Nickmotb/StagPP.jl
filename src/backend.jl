@@ -635,3 +635,6 @@ end
         yHD = order==1 ? ord1(xHD, fit.param) : ord2(xHD, fit.param)
         return xHD, yHD
     end
+
+    @inline c2k(T) = T+273.15
+    @inline k2c(T) = T-273.15

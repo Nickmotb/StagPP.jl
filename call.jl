@@ -15,12 +15,11 @@ load_sims = false
         # # sets
         y = [y20, y25, y30, y35, y40, y45, y50, y55];
     end
-#
 
-# sim = load_local("office")
-# rprof_vs_field(y45, "Water", logscale=true, cmap=:Blues, cmap_reverse=false, colorrange=(-3, 1))
-# mantle_water_at_t(y35, 4.5)
+# b = Hirschmann_fO2_to_R(RF=0.001, FMQ=true, P=13.0, T=1800, p=0.0, fsize=(1000, 600));
+# a = solve_sH2O_fO2(70, 70, nR=4);
+# a2 = solve_sH2O_fO2(70, 70, nR=1, Rv=-0.07, s=false);
+a = solve_sH2O_fO2(30, 30, nR=10, Rrange=(0.0005, 0.01), s=false);
+plot_sf(a, fsize=(1200,800), FMQ=false, fblck=true)
 
-Δ = Hirschmann_fO2_to_R(RF=0.01, FMQ=true, P=3.5, T=1200., p=0.0);
-# a = solve_sH2O_fO2(30, 30, s=false, Rv=0.05); plot_sf(a, FMQ=true)
-# 
+# out = solve_point(50., 1500., "XH")

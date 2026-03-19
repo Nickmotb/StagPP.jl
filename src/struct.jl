@@ -51,13 +51,13 @@ end
 
 struct sfstruct
     # sᴴ²ᴼ maps
-    sum      :: Union{Array{Float64,3}, Nothing}    # Upper mantle sᴴ²ᴼ grid (nP x nT x endmember)
-    stz      :: Union{Array{Float64,3}, Nothing}    # Transition zone sᴴ²ᴼ grid (nP x nT x endmember)
-    slm      :: Union{Array{Float64,3}, Nothing}    # Lower mantle sᴴ²ᴼ grid (nP x nT x endmember)
+    sum      :: Union{Array{Float64,3}, Array{Float64,4}, Nothing}    # Upper mantle sᴴ²ᴼ grid (nP x nT x endmember)
+    stz      :: Union{Array{Float64,3}, Array{Float64,4}, Nothing}    # Transition zone sᴴ²ᴼ grid (nP x nT x endmember)
+    slm      :: Union{Array{Float64,3}, Array{Float64,4}, Nothing}    # Lower mantle sᴴ²ᴼ grid (nP x nT x endmember)
     # fO₂ maps
-    fum      :: Union{Array{Float64,3}, Nothing}    # Upper mantle fO₂ grid (nP x nT x endmember)
-    ftz      :: Union{Array{Float64,3}, Nothing}    # Transition zone fO₂ (nP x nT x endmember)
-    flm      :: Union{Array{Float64,3}, Nothing}    # Lower mantle fO₂ (nP x nT x endmember)
+    fum      :: Union{Array{Float64,3}, Array{Float64,4}, Nothing}    # Upper mantle fO₂ grid (nP x nT x endmember)
+    ftz      :: Union{Array{Float64,3}, Array{Float64,4}, Nothing}    # Transition zone fO₂ (nP x nT x endmember)
+    flm      :: Union{Array{Float64,3}, Array{Float64,4}, Nothing}    # Lower mantle fO₂ (nP x nT x endmember)
     # Melt ∫(ΔV/RT)dP maps
     DVum     :: Union{Array{Float64,3}, Nothing}    # Upper mantle melt ∫(ΔV/RT)dP grid (nP x nT x endmember)
     DVtz     :: Union{Array{Float64,3}, Nothing}    # Transition zone melt ∫(ΔV/RT)dP grid (nP x nT x endmember)
@@ -66,10 +66,6 @@ struct sfstruct
     FMQum    :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)
     FMQtz    :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)
     FMQlm    :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)
-    # Melt fO2 maps (Sun & Yao 2024)
-    mfum     :: Union{Array{Float64,3}, Nothing}    # Melt fO₂ grid (nP x nT x endmember)
-    mftz     :: Union{Array{Float64,3}, Nothing}    # Melt fO₂ grid (nP x nT x endmember)
-    mflm     :: Union{Array{Float64,3}, Nothing}    #
     # Vectors
     Pum      :: Array{Float64,1}    # Upper mantle pressure vector (kbar)
     Tum      :: Array{Float64,1}    # Upper mantle temperature vector (K)
@@ -77,6 +73,7 @@ struct sfstruct
     Ttz      :: Array{Float64,1}    # Transition zone temperature vector (K)
     Plm      :: Array{Float64,1}    # Lower mantle pressure vector (kbar)
     Tlm      :: Array{Float64,1}    # Lower mantle temperature vector (K)
+    FeR      :: Union{Float64, Array{Float64,1}} # Contains ∑Fe³⁺/∑Feᵀ ratio
 end
 
 struct min_sᴴ²ᴼ{T}

@@ -80,14 +80,11 @@
             Rdom = nR>1 ? LinRange(Rrange[1], Rrange[2], nR) : Rv
         # --- Others
             Pv, Tv, Rvec = zeros(Float64, 2nPnTnR), zeros(Float64, 2nPnTnR), (nR>1) ? zeros(Float64, nPnTnR) : Rv.*ones(Float64, nPnTnR);
-            if s # sH2O requires only 1 Fe ratio.
-                sPv, sTv, sXv = zeros(Float64, 2nPnT), zeros(Float64, 2nPnT), Vector{Vector{Float64}}(undef,2nPnT)
-            end
             Xv = reset_Xv()
             tnP, tnP05 = Int64(ceil(1.1max(nP, nT))), Int64(ceil(0.5max(nP, nT)))
         # --- Maps
             if s
-                um, tz, lm = zeros(Float64, nPnT, 2), zeros(Float64, nPnT, 2), zeros(Float64, nPnT, 2)  # later reshaped as 'T, P, reshape(um, nP, :)'
+                um, tz, lm = zeros(Float64, nPnTnR, 2), zeros(Float64, nPnTnR, 2), zeros(Float64, nPnTnR, 2)  # later reshaped as 'T, P, reshape(um, nP, :)'
             else
                 um, tz, lm = nothing, nothing, nothing
             end
@@ -114,14 +111,16 @@
         # ========================
 
         # Upper mantle mesh vectorization (MAGEMin parallelization)
-            mesh_vectorization!(Pum, Tum, Rdom, nP, nT, nR, Pv, Tv, Rvec, sPv, sTv, Xv, sXv)
+            mesh_vectorization!(Pum, Tum, Rdom, nP, nT, nR, Pv, Tv, Rvec)
         # Minimizer call + assembly
             if s
                 verbose && println("Calculating upper mantle sᴴ²ᴼ...")
                 data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
-                rm_list = remove_phases(phase_out, "um")
-                outHB   = multi_point_minimization(10sPv, sTv.-273.15, data, X=sXv, Xoxides=Xox_in, name_solvus=true, B=ones(length(sPv)), progressbar=verbose, rm_list=rm_list, sys_in=sys_in) # kbar and K
+                # rm_list = remove_phases(phase_out, "um")
+                outHB   = multi_point_minimization(10Pv[1:2nPnT], Tv[1:2nPnT].-273.15, data, X=vcat(Xv[1:nPnT], Xv[nPnTnR+1:nPnTnR+nPnT]), Xoxides=Xox_in, name_solvus=true, B=ones(length(Pv[1:2nPnT])), progressbar=verbose, sys_in=sys_in) # kbar and K
                 Finalize_MAGEMin(data);
+                # duplicate to fit size
+                outHB = vcat(repeat(outHB[1:nPnT], nR), repeat(outHB[nPnT+1:2nPnT], nR))
             else; outHB = 0.0; end
         # Call UM through SB24 to get fO₂
             if fO2
@@ -134,7 +133,7 @@
         # Assemble
             sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, ΔFMQ_um, nPnTnR, nR, s=s, fO2=fO2)
             if s
-                um = cat(reshape(um[:,1], nP, nT), reshape(um[:,2], nP, nT), dims=3)
+                um = cat(reshape(um[:,1], nP, nT, nR), reshape(um[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                 verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
                 min_s = min_sᴴ²ᴼ_assembler(tnP)
             end
@@ -150,27 +149,26 @@
         # Reset composition array for oxidation
             Xv .= reset_Xv()
         # Transition zone mesh vectorization
-            mesh_vectorization!(Ptz, Ttz, Rdom, nP, nT, nR, Pv, Tv, Rvec, sPv, sTv, Xv, sXv)
+            mesh_vectorization!(Ptz, Ttz, Rdom, nP, nT, nR, Pv, Tv, Rvec)
         # Minimizer call + assembly
             if s || fO2
                 verbose && println("Calculating transition zone fO₂ | sᴴ²ᴼ...")
                 data    = Initialize_MAGEMin("sb24", verbose=false);
                 !unoxidized && (Xox=assignR_to_Xv!(Xv, Xox_in, Rvec))  # Oxidize bulk for TZ fO₂ calculations
-                out_fO2   .= multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
+                out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
                 Finalize_MAGEMin(data);
-                outHB .= vcat(out_fO2[1:nPnT], out_fO2[nPnTnR+1:nPnTnR+nPnT])
             end; 
         # DHMS
             if s
                 DHMS && verbose && println("Exploring DHMS paths...")
-                ppaths, paths, _  =  DHMS ? path_solve(XH, Xox_in, phase_out, (@view sPv[1:nPnT]), (@view sTv[1:nPnT]), DBswitchP, (@view outHB[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0, 0.0)
+                ppaths, paths, _  =  DHMS ? path_solve(XH, Xox_in, phase_out, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), DBswitchP, (@view out_fO2[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0, 0.0)
         # Assemble  
-                ∫sᴴ²ᴼ!(tz, (@view sPv[1:nPnT]), (@view sTv[1:nPnT]), min_s, outHB, DHMS, ppaths, paths, nPnT)
-                tz = cat(reshape(tz[:,1], nP, nT), reshape(tz[:,2], nP, nT), dims=3)
+                ∫sᴴ²ᴼ!(tz, (@view Pv[1:nPnTnR]), (@view Tv[1:nPnTnR]), min_s, out_fO2, DHMS, ppaths, paths, nPnTnR)
+                tz = cat(reshape(tz[:,1], nP, nT, nR), reshape(tz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
             end
             if fO2 
                 verbose && println("Extracting transition zone fO₂...")
-                sᴴ²ᴼ_fO₂_assembler!(tz, ftz, outHB, out_fO2, ΔFMQ_tz, nPnTnR, nR, s=false)
+                sᴴ²ᴼ_fO₂_assembler!(tz, ftz, 0.0, out_fO2, ΔFMQ_tz, nPnTnR, nR, s=false)
                 ftz = cat(reshape(ftz[:,1], nP, nT, nR), reshape(ftz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                 ΔFMQ_tz = reshape(ΔFMQ_tz[:,1], nP, nT)
             end
@@ -182,7 +180,7 @@
         # Reset composition array for oxidation
             Xv .= reset_Xv()
         # Lower mantle mesh vectorization
-            mesh_vectorization!(Plm, Tlm, Rdom, nP, nT, nR, Pv, Tv, Rvec, sPv, sTv, Xv, sXv)
+            mesh_vectorization!(Plm, Tlm, Rdom, nP, nT, nR, Pv, Tv, Rvec)
 
         # Minimizer call + assembly
             if s || fO2
@@ -191,15 +189,14 @@
                 !unoxidized && (Xox = assignR_to_Xv!(Xv, Xox_in, Rvec)) # Oxidize bulk for LM fO₂ calculations
                 out_fO2   .= multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
                 Finalize_MAGEMin(data);
-                outHB .= vcat(out_fO2[1:nPnT], out_fO2[nPnTnR+1:nPnTnR+nPnT])
             end
             if s
-                ∫sᴴ²ᴼ!(lm, (@view sPv[1:nPnT]), (@view sTv[1:nPnT]), min_s, outHB, DHMS, ppaths, paths, nPnT)
-                lm = cat(reshape(lm[:,1], nP, nT), reshape(lm[:,2], nP, nT), dims=3)
+                ∫sᴴ²ᴼ!(lm, (@view Pv[1:nPnTnR]), (@view Tv[1:nPnTnR]), min_s, out_fO2, DHMS, ppaths, paths, nPnTnR)
+                lm = cat(reshape(lm[:,1], nP, nT, nR), reshape(lm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
             end
             if fO2 
                 verbose && println("Extracting lower mantle fO₂...")
-                sᴴ²ᴼ_fO₂_assembler!(lm, flm, outHB, out_fO2, ΔFMQ_lm, nPnTnR, nR, s=false)
+                sᴴ²ᴼ_fO₂_assembler!(lm, flm, 0.0, out_fO2, ΔFMQ_lm, nPnTnR, nR, s=false)
                 flm = cat(reshape(flm[:,1], nP, nT, nR), reshape(flm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                 ΔFMQ_lm = reshape(ΔFMQ_lm[:,1], nP, nT)
             end
@@ -235,22 +232,41 @@
             - `savein::String`: Path to save the figure. Default is `""` (does not save).
             - `bigpicture::Tuple{Bool, Int}`: Whether to create a big picture figure. Default is `(false, 1)`.
     """
-    function plot_sf(sfmap; cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, savein="", FMQ=true, fsize=nothing, blck=false)
+    function plot_sf(sfmap; cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, savein="", FMQ=true, fsize=nothing, sblck=false, fblck=false, Rv=nothing)
+
+        function f_at_Rv(FeR, Rv, field)
+            idx = findfirst(FeR.>=Rv)
+            isnothing(idx) && (return field[:,:,end,:])
+            (idx==1) && (return field[:,:,1,:])
+            p = (Rv - FeR[idx-1])/(FeR[idx]-FeR[idx-1])
+            return (1-p).*field[:,:,idx-1,:] .+ p.*field[:,:,idx,:]
+        end
+
+        # Checks
+        s, f = !isnothing(sfmap.sum), !isnothing(sfmap.fum)
+        ((sblck||fblck) && length(sfmap.FeR)==1) && error("fo₂ block plotting requires multiple redox states (nR>1)")
+        sblck && (fblck=false)
+        fblck && (sblck=false)
+        (sblck && !s) && (sblck=false)
+        (fblck && !f) && (fblck=false)
 
         # Inputs
         xlabsz, ylabsz, titlesz, xticklabsz, yticklabsz, xticksz, yticksz = 20, 20, 22, 16, 16, 12, 12
-        s, f = !isnothing(sfmap.sum), !isnothing(sfmap.fum)
         sz = (s && f) ? (1800,1000) : (1400,1000)
-        (blck && length(sfmap.FeR)==1) && error("fo₂ block plotting requires multiple redox states (nR>1)")
 
         fig = Figure(size = isnothing(fsize) ? sz : fsize)
         cmap_reverse && (cmap = Reverse(cmap))
+        bcmap = sblck ? :Blues : fblck ? :vik100 : nothing
         
-        if blck
-            nP, nT, nR = size(sfmap.fum, 1), size(sfmap.fum, 2), size(sfmap.fum, 3)
-            um, tz, lm = copy(sfmap.fum), copy(sfmap.ftz), copy(sfmap.flm)
-            replace!(um, 0.0=>NaN); replace!(tz, 0.0=>NaN); replace!(lm, 0.0=>NaN)
-            if FMQ
+        if sblck||fblck
+            um = sblck ? copy(sfmap.sum) : copy(sfmap.fum)
+            tz = sblck ? copy(sfmap.stz) : copy(sfmap.ftz)
+            lm = sblck ? copy(sfmap.slm) : copy(sfmap.flm)
+            nP, nT, nR = size(um, 1), size(um, 2), size(um, 3)
+            if fblck; replace!(um, 0.0=>NaN); replace!(tz, 0.0=>NaN); replace!(lm, 0.0=>NaN); end
+            if sblck; replace!(um, 0.0=>1e-3); replace!(tz, 0.0=>1e-3); replace!(lm, 0.0=>1e-3); end
+            sblck && (um.=log10.(um); tz.=log10.(tz); lm.=log10.(lm))
+            if FMQ && fblck
                 um .-= repeat(sfmap.FMQum, 1, 1, nR, 2)
                 tz .-= repeat(sfmap.FMQtz, 1, 1, nR, 2)
                 lm .-= repeat(sfmap.FMQlm, 1, 1, nR, 2)
@@ -259,33 +275,34 @@
             ax = Axis3(fig[2,1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", zlabel=L"Fe^{3+} / Fe^T", title=L"Upper\;Mantle\;(Depleted,\;wt%)")
             ax2 = Axis3(fig[3,1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", zlabel=L"Fe^{3+} / Fe^T", title=L"Upper\;Mantle\;(Enriched,\;wt%)")
             for i in 1:nR
-                sf = surface!(ax, sfmap.Tum, sfmap.Pum, sfmap.FeR[i]*ones(nP, nT)', color=um[:,:,i,1], colormap=:vik100, colorrange=(minimum(filter(x->!isnan(x), um[:,:,:,1])), maximum(filter(x->!isnan(x), um[:,:,:,1]))))
+                sf = surface!(ax, sfmap.Tum, sfmap.Pum, sfmap.FeR[i]*ones(nP, nT)', color=um[:,:,i,1], colormap=bcmap, colorrange=(minimum(filter(x->!isnan(x), um[:,:,:,1])), maximum(filter(x->!isnan(x), um[:,:,:,1]))))
                 (i==1) && Colorbar(fig[1,1], sf, vertical=false, flipaxis=false)
-                sf = surface!(ax2, sfmap.Tum, sfmap.Pum, sfmap.FeR[i]*ones(nP, nT)', color=um[:,:,i,2], colormap=:vik100, colorrange=(minimum(filter(x->!isnan(x), um[:,:,:,2])), maximum(filter(x->!isnan(x), um[:,:,:,2]))))
+                sf = surface!(ax2, sfmap.Tum, sfmap.Pum, sfmap.FeR[i]*ones(nP, nT)', color=um[:,:,i,2], colormap=bcmap, colorrange=(minimum(filter(x->!isnan(x), um[:,:,:,2])), maximum(filter(x->!isnan(x), um[:,:,:,2]))))
                 (i==1) && Colorbar(fig[4,1], sf, vertical=false, flipaxis=false)
             end
             # TZ
-            ax = Axis3(fig[2,2], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", zlabel=L"Fe^{3+} / Fe^T", title=L"Upper\;Mantle\;(Depleted,\;wt%)")
-            ax2 = Axis3(fig[3,2], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", zlabel=L"Fe^{3+} / Fe^T", title=L"Upper\;Mantle\;(Enriched,\;wt%)")
+            ax = Axis3(fig[2,2], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", zlabel=L"Fe^{3+} / Fe^T", title=L"Transition\;Zone\;(Depleted,\;wt%)")
+            ax2 = Axis3(fig[3,2], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", zlabel=L"Fe^{3+} / Fe^T", title=L"Transition\;Zone\;(Enriched,\;wt%)")
             for i in 1:nR
-                sf =surface!(ax, sfmap.Ttz, sfmap.Ptz, sfmap.FeR[i]*ones(nP, nT)', color=tz[:,:,i,1], colormap=:vik100, colorrange=(minimum(filter(x->!isnan(x), tz[:,:,:,1])), maximum(filter(x->!isnan(x), tz[:,:,:,1]))))
+                sf =surface!(ax, sfmap.Ttz, sfmap.Ptz, sfmap.FeR[i]*ones(nP, nT)', color=tz[:,:,i,1], colormap=bcmap, colorrange=(minimum(filter(x->!isnan(x), tz[:,:,:,1])), maximum(filter(x->!isnan(x), tz[:,:,:,1]))))
                 (i==1) && Colorbar(fig[1,2], sf, vertical=false, flipaxis=false)
-                sf =surface!(ax2, sfmap.Ttz, sfmap.Ptz, sfmap.FeR[i]*ones(nP, nT)', color=tz[:,:,i,2], colormap=:vik100, colorrange=(minimum(filter(x->!isnan(x), tz[:,:,:,2])), maximum(filter(x->!isnan(x), tz[:,:,:,2]))))
+                sf =surface!(ax2, sfmap.Ttz, sfmap.Ptz, sfmap.FeR[i]*ones(nP, nT)', color=tz[:,:,i,2], colormap=bcmap, colorrange=(minimum(filter(x->!isnan(x), tz[:,:,:,2])), maximum(filter(x->!isnan(x), tz[:,:,:,2]))))
                 (i==1) && Colorbar(fig[4,2], sf, vertical=false, flipaxis=false)
             end
             # LM
-            ax = Axis3(fig[2,3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", zlabel=L"Fe^{3+} / Fe^T", title=L"Upper\;Mantle\;(Depleted,\;wt%)")
-            ax2 = Axis3(fig[3,3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", zlabel=L"Fe^{3+} / Fe^T", title=L"Upper\;Mantle\;(Enriched,\;wt%)")
+            ax = Axis3(fig[2,3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", zlabel=L"Fe^{3+} / Fe^T", title=L"Lower\;Mantle\;(Depleted,\;wt%)")
+            ax2 = Axis3(fig[3,3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", zlabel=L"Fe^{3+} / Fe^T", title=L"Lower\;Mantle\;(Enriched,\;wt%)")
             for i in 1:nR
-                sf = surface!(ax, sfmap.Tlm, sfmap.Plm, sfmap.FeR[i]*ones(nP, nT)', color=lm[:,:,i,1], colormap=:vik100, colorrange=(minimum(filter(x->!isnan(x), lm[:,:,:,1])), maximum(filter(x->!isnan(x), lm[:,:,:,1]))))
+                sf = surface!(ax, sfmap.Tlm, sfmap.Plm, sfmap.FeR[i]*ones(nP, nT)', color=lm[:,:,i,1], colormap=bcmap, colorrange=(minimum(filter(x->!isnan(x), lm[:,:,:,1])), maximum(filter(x->!isnan(x), lm[:,:,:,1]))))
                 (i==1) && Colorbar(fig[1,3], sf, vertical=false, flipaxis=false)
-                sf = surface!(ax2, sfmap.Tlm, sfmap.Plm, sfmap.FeR[i]*ones(nP, nT)', color=lm[:,:,i,2], colormap=:vik100, colorrange=(minimum(filter(x->!isnan(x), lm[:,:,:,2])), maximum(filter(x->!isnan(x), lm[:,:,:,2]))))
+                sf = surface!(ax2, sfmap.Tlm, sfmap.Plm, sfmap.FeR[i]*ones(nP, nT)', color=lm[:,:,i,2], colormap=bcmap, colorrange=(minimum(filter(x->!isnan(x), lm[:,:,:,2])), maximum(filter(x->!isnan(x), lm[:,:,:,2]))))
                 (i==1) && Colorbar(fig[4,3], sf, vertical=false, flipaxis=false)
             end
             
         else
+            (length(sfmap.FeR)!=1) && (Rval = isnothing(Rv) ? 0.5(sfmap.FeR[1]+sfmap.FeR[end]) : max(min(Rv, sfmap.FeR[end]), sfmap.FeR[1]))
             if s
-                um, tz, lm = copy(sfmap.sum), copy(sfmap.stz), copy(sfmap.slm)
+                um, tz, lm = copy(f_at_Rv(sfmap.FeR, Rval, sfmap.sum)), copy(f_at_Rv(sfmap.FeR, Rval, sfmap.stz)), copy(f_at_Rv(sfmap.FeR, Rval, sfmap.slm))
                 # Upper Mantle
                 ax = Axis(fig[1, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted,\;wt%)", yreversed=true,
                             xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
@@ -310,8 +327,7 @@
             end
 
             if f
-                cut = length(sfmap.FeR)>1
-                um, tz, lm = copy(cut ? sfmap.fum[:,:,1,:] : sfmap.fum), copy(cut ? sfmap.ftz[:,:,1,:] : sfmap.ftz), copy(cut ? sfmap.flm[:,:,1,:] : sfmap.flm)
+                um, tz, lm = copy(f_at_Rv(sfmap.FeR, Rval, sfmap.fum)), copy(f_at_Rv(sfmap.FeR, Rval, sfmap.ftz)), copy(f_at_Rv(sfmap.FeR, Rval, sfmap.flm))
                 um[um.==0.0] .= NaN; tz[tz.==0.0] .= NaN; lm[lm.==0.0] .= NaN
                 fcrange = (-16., -1.)
                 ipp = s ? 4 : 0
@@ -335,7 +351,8 @@
                 hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, FMQ ? (lm[:,:,1].-sfmap.FMQlm[:,:])' : lm[:,:,1]'; colormap=:vik100, interpolate=interp, nan_color=:grey); Colorbar(fig[3, 2+ipp], hm)
                 ax = Axis(fig[3, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched,\;log_{10})", yreversed=true,
                             xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
-                hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, FMQ ? (lm[:,:,2].-sfmap.FMQlm[:,:])' : lm[:,:,2]'; colormap=:vik100, interpolate=interp, nan_color=:grey); Colorbar(fig[3, 4+ipp], hm)
+                hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, FMQ ? (lm[:,:,2].-sfmap.FMQlm[:,:])' : lm[:,:,2]'; colormap=:vik100, interpolate=interp, nan_color=:grey, label="Fe³⁺/Feᵀ = $Rval"); Colorbar(fig[3, 4+ipp], hm)
+                axislegend(ax, position=:rb, labelsize=20, labelfont=:bold)
             end
         end
         display(fig)
@@ -1814,9 +1831,8 @@
 
     function sᴴ²ᴼ_fO₂_assembler!(smap, fmap, out_s, out_fO2, ΔFMQ, n, nR; s=true, fO2=true)
         (!s && !fO2) && return
-        ns = Int(n/nR)
         Threads.@threads for i in 1:n
-            if (s&&i<=ns) # sᴴ²ᴼ
+            if (s) # sᴴ²ᴼ
                 H₂O = 0.0
                 # Depleted (Harzburgite)
                 for j in eachindex(out_s[i].SS_vec)
@@ -1825,9 +1841,9 @@
                 end; smap[i, 1] = sum(H₂O)
                 # Enriched (Basalt)
                 H₂O = 0.0
-                for j in eachindex(out_s[i+ns].SS_vec)
-                    ("H2O" in out_s[i+ns].SS_vec[j].emNames) && continue
-                    H₂O += sum(out_s[i+ns].SS_vec[j].Comp[end-1])
+                for j in eachindex(out_s[i+n].SS_vec)
+                    ("H2O" in out_s[i+n].SS_vec[j].emNames) && continue
+                    H₂O += sum(out_s[i+n].SS_vec[j].Comp[end-1])
                 end; smap[i, 2] = sum(H₂O)
             end
             if fO2
@@ -1836,20 +1852,16 @@
                 (i <= n/nR) && (ΔFMQ[i] = out_fO2[i].fO2 - out_fO2[i].dQFM) # Depleted (Harzburgite) FMQ surface point
             end
         end
-        fmap[fmap.>=-1e-10] .= 0.0
+        (out_fO2!=0.0) && (fmap[fmap.>=-1e-10] .= 0.0)
     end
 
-    function mesh_vectorization!(P, T, Rdom, nP, nT, nR, Pv, Tv, Rvec, sPv, sTv, Xv, sXv; single=false)
+    function mesh_vectorization!(P, T, Rdom, nP, nT, nR, Pv, Tv, Rvec; single=false)
         if nR>1
-            nPnT, nPnTnR = nP*nT, nP*nT*nR
             vP, vT, vR = repeat(repeat(P, outer=nT), nR), repeat(repeat(T, inner=nP), nR), repeat(Rdom, inner=nP*nT)
-            svP, svT = repeat(P, outer=nT), repeat(T, inner=nP)
             Pv .= single ? vP : vcat(vP, vP); Tv .= single ? vT : vcat(vT, vT); Rvec .= vR
-            sPv .= vcat(svP, svP); sTv .= vcat(svT, svT); sXv .= vcat(Xv[1:nPnT], Xv[nPnTnR+1:nPnTnR+nPnT])
         else
             vP, vT = repeat(P, outer=nT), repeat(T, inner=nP)
             Pv .= single ? vP : vcat(vP, vP); Tv .= single ? vT : vcat(vT, vT);
-            sPv .= Pv; sTv .= Tv
         end
     end
 
@@ -1905,15 +1917,18 @@
                 println(io, nP, " ", nT, "\n");
                 println(io, sfmap.Pum[1], " ", sfmap.Pum[end], " ", sfmap.Tum[1], " ", sfmap.Tum[end])
                 println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
-                println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end], "\n")
+                println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end])
+                println(io, sfmap.FeR[1], " ", sfmap.FeR[end], "\n")
                 # Data
-                for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
-                    pmap .= n>4 ? sfmap.slm[:,:,slot] : n>2 ? sfmap.stz[:,:,slot] : sfmap.sum[:,:,slot]
-                    for i in 1:nP
-                        for j in 1:nT
-                            print(io, pmap[i,j], " ")
+                for r in 1:nR
+                    for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
+                        pmap .= n>4 ? sfmap.slm[:,:,r,slot] : n>2 ? sfmap.stz[:,:,r,slot] : sfmap.sum[:,:,r,slot]
+                        for i in 1:nP
+                            for j in 1:nT
+                                print(io, pmap[i,j], " ")
+                            end; println(io, "")
                         end; println(io, "")
-                    end; println(io, "")
+                    end
                 end
             end
         end
@@ -1925,7 +1940,7 @@
                 println(io, sfmap.Pum[1], " ", sfmap.Pum[end], " ", sfmap.Tum[1], " ", sfmap.Tum[end])
                 println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
                 println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end])
-                println(io, sfmap.FeR[1], " ", sfmap.FeR[end], " ", sfmap.FeR[1], " ", sfmap.FeR[end], "\n")
+                println(io, sfmap.FeR[1], " ", sfmap.FeR[end], "\n")
                 # Data
                 for r in 1:nR
                     for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
