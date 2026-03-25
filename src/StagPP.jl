@@ -14,6 +14,12 @@ module StagPP
     const ocD2toD3 = 244.45 # Conversion factor of surface budgets from 2D to 3D
     const rootdir = @__DIR__
     const savedir = joinpath(rootdir, "../", "+op"); !isdir(savedir) && mkdir(savedir)
+    # Molar masses (g/mol)
+    const mm = Dict(
+            "SiO2" => 60.08, "Al2O3" => 101.96, "CaO" => 56.08, "MgO" => 40.30, "FeO" => 71.85, "Fe2O3" => 159.69,
+            "K2O" => 94.2, "Na2O" => 61.98, "TiO2" => 79.88, "O" => 16.0, "Cr2O3" => 151.99, "MnO" => 70.937,
+            "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
+            )
 
     # === Structures
         include("struct.jl")
@@ -37,7 +43,7 @@ module StagPP
     # Misc export
     export SM_fO2_Oex_solution_space, Hirschmann_fO2_to_R
     # Plot exports
-    export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, 
+    export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, ta_series_vs_field, 
             mantle_water, mantle_water_at_t, plot_sf, minmap, 
             snapshot, IOplot, omplot, H2O_memory_time, H2O_memory_time_multiple, H2O_PCA,
     # Auxilliaries

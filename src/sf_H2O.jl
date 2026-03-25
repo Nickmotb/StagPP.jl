@@ -378,18 +378,11 @@
 
         - wt::Bool \t\t-->\t Indicates if the input composition is in weight percent (wt%) [default: false (molar fraction)]
     """
-    function oxidize_bulk(X, Xox, Rv; wt_in=false, wt_out=false, frac=false, rmH2O=false, FeFormat="Fe_O", dict=false)
+    function oxidize_bulk(X, Xox, Rv; wt_in=false, wt_out=false, frac=false, rmH2O=false, FeFormat="Fe_O", dict=false, onlyvals=false)
 
         # 2FeO + O -> Fe₂O₃
         # R = Fe³/∑Fe
         # Incoming composition oxide list must be with FeO + extra O
-
-        # Molar masses (g/mol)
-        mm = Dict(
-            "SiO2" => 60.08, "Al2O3" => 101.96, "CaO" => 56.08, "MgO" => 40.30, "FeO" => 71.85, "Fe2O3" => 159.69,
-            "K2O" => 94.2, "Na2O" => 61.98, "TiO2" => 79.88, "O" => 16.0, "Cr2O3" => 151.99, "MnO" => 70.937,
-            "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
-        )
 
         (Rv<0.0) && (FeFormat="Fe_O")
 
@@ -418,13 +411,13 @@
 
         # Normalize
         n = sum(values(Xc)); [Xc[k] = v/n for (k,v) in Xc]
-        !frac && (Xc[k]*=1e2 for (k,_) in Xc)
+        !frac && ([Xc[k]*=1e2 for (k,_) in Xc])
 
         # Return
         ss = split(FeFormat, "_"); replace!(Xoxc, "FeO"=>ss[1], (("O" in Xoxc) ? "O" : "Fe2O3")=>ss[2])
         if !dict
             X_out = [Xc[ox] for ox in Xoxc]
-            return X_out, Xoxc
+            onlyvals ? (return X_out) : (return X_out, Xoxc)
         else
             dict_out = Dict{String, Float64}(); [dict_out[ox] = Xc[ox] for ox in Xoxc]
             return dict_out
@@ -432,13 +425,6 @@
     end
 
     function oxidize_bulk(Xdict, Rv; wt_in=false, wt_out=false, frac=false, rmH2O=false, FeFormat="Fe_O", dict=false)
-
-        # Molar masses (g/mol)
-        mm = Dict(
-            "SiO2" => 60.08, "Al2O3" => 101.96, "CaO" => 56.08, "MgO" => 40.30, "FeO" => 71.85, "Fe2O3" => 159.69,
-            "K2O" => 94.2, "Na2O" => 61.98, "TiO2" => 79.88, "O" => 16.0, "Cr2O3" => 151.99, "MnO" => 70.937,
-            "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
-        )
 
         (Rv<0.0) && (FeFormat="Fe_O")
 
@@ -471,7 +457,7 @@
 
         # Normalize
         n = sum(values(Xc)); [Xc[k] = v/n for (k,v) in Xc]
-        !frac && (Xc[k]*=1e2 for (k,_) in Xc)
+        !frac && ([Xc[k]*=1e2 for (k,_) in Xc])
 
         # Return
         ss = split(FeFormat, "_"); replace!(Xoxc, "FeO"=>ss[1], (("O" in Xoxc) ? "O" : "Fe2O3")=>ss[2])
@@ -1997,31 +1983,16 @@
 # ============================
 
     function X_Xox_to_full_list(X, Xox; wt_in=false, wt_out=false)
-        # Molar masses (g/mol)
-        mm = Dict(
-            "SiO2" => 60.08, "Al2O3" => 101.96, "CaO" => 56.08, "MgO" => 40.30, "FeO" => 71.85, "Fe2O3" => 159.69,
-            "K2O" => 94.2, "Na2O" => 61.98, "TiO2" => 79.88, "O" => 16.0, "Cr2O3" => 151.99, "MnO" => 70.937,
-            "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
-        )
 
-        Xox_out = copy(Xox)
-        X_out = copy(X)
+        Xox_out = copy(Xox); X_out = copy(X); n = sum(X_out)
 
         # Create dictionary of composition
-        Xccc = wt_in ? X_out ./ [mm[ox] for ox in Xox_out] : X_out
-        Xcc = copy(Xccc); Xcc ./= sum(Xccc)
-        Xc = Dict{String,Float64}()
-        for (i, ox) in enumerate(Xox_out)
-            Xc[ox] = Xcc[i]
-        end
+        X_out .= wt_in ? X_out./[mm[ox] for ox in Xox_out]./n : X_out./n
+        Xc = Dict{String,Float64}(); [Xc[ox] = X_out[i] for (i,ox) in enumerate(Xox_out)]
 
         # Check all oxides are there, if not add them as 0.0
         required_oxides = ["FeO", "Fe2O3", "SiO2", "Al2O3", "TiO2", "CaO", "MgO", "Na2O", "K2O", "Fe", "O", "H2O"]
-        for ox in required_oxides
-            if !haskey(Xc, ox)
-                Xc[ox] = 0.0
-            end
-        end
+        [Xc[ox] = 0.0 for ox in filter(ox -> !(ox ∈ Xox_out), required_oxides)]
 
         # Restructure composition if needed
         if (Xc["Fe"]==0) && (Xc["O"]==0) # FeO + Fe₂O₃ entering

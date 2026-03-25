@@ -140,7 +140,7 @@ CTF = Dict(
             - mov_avg_window::Int64 \t-->\t Moving average window [default: 0 (automatic)]
 
 """
-function time_vs_field(Dblock, field::String; fsize=(800, 600), subsample=0, color=:blue, xlabelsize=25, ylabelsize=25, xgrid=true, ygrid=true,
+function time_vs_field(Dblock, field::String; fsize=(800, 600), subsample=0, color=:blue, xlabelsize=25, ylabelsize=25, xgrid=false, ygrid=false,
                             xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15, yreversed=false, 
                             mov_avg=false, mov_avg_window=0, savein="", tstart=nothing, tend=nothing,
                             scatter=true,
@@ -149,7 +149,7 @@ function time_vs_field(Dblock, field::String; fsize=(800, 600), subsample=0, col
                             line=true,
                                 linewidth=2.5, 
                                 linestyle=:solid,
-                            fig = nothing, fpos = (1,1), disp=true, logscale=false,
+                            fig = nothing, fpos = (1,1), disp=true, logscale=false, leg=true, yrange=nothing,
                             )
     
     if Dblock isa Vector{DataBlock}
@@ -163,7 +163,7 @@ function time_vs_field(Dblock, field::String; fsize=(800, 600), subsample=0, col
                                 linewidth=linewidth, 
                                 linestyle=linestyle,
                             fig = fig, fpos = fpos, disp=disp,
-                            logscale=logscale,
+                            logscale=logscale, leg=leg, yrange=yrange,
                             clrsmap = :vik100)
         return
     end
@@ -222,6 +222,7 @@ function time_vs_field(Dblock, field::String; fsize=(800, 600), subsample=0, col
     tstartidx = findfirst(xvec .>= tstart); (isnothing(tstartidx)) && error("tstart=$tstart beyond data range")
     tendidx   = findlast(xvec .<= tend); (isnothing(tendidx)) && error("tend=$tend beyond data range")
     localmin, localmax = minimum(yvec[tstartidx:tendidx]), maximum(yvec[tstartidx:tendidx])
+    !isnothing(yrange) && (localmin=yrange[1]; localmax=yrange[2])
     Δ = 0.2(localmax - localmin)
     second_axis!(fig, fpos, xvec, yvec, field, ylabelsize, yticklabelsize, ylabelpadding, yreversed, true, (tstart, tend), (localmin-Δ, localmax+Δ))
     xlims!(ax, tstart, tend)
@@ -240,7 +241,7 @@ function time_vs_field_multiple(Dblock, field::String; fsize=(800, 600), subsamp
                                 linewidth=2.5, 
                                 linestyle=:solid,
                             fig = nothing, fpos = (1,1), disp=true,
-                            clrsmap = :vik100, logscale=false,
+                            clrsmap = :vik100, logscale=false, leg=true, yrange=nothing,
                             )
 
     # field to use
@@ -312,10 +313,11 @@ function time_vs_field_multiple(Dblock, field::String; fsize=(800, 600), subsamp
 
     isnothing(tstart) && (tstart = ts)
     isnothing(tend) && (tend     = te)
+    !isnothing(yrange) && (localmin=yrange[1]; localmax=yrange[2])
     Δ = 0.05(localmax - localmin)
     !logscale && (yreversed ? ylims!(ax, localmax+Δ, localmin-Δ) : ylims!(ax, localmin-Δ, localmax+Δ))
     xlims!(ax, tstart, tend)
-    axislegend(ax; position = :lt, unique=true)
+    leg && axislegend(ax; position = :lt, unique=true, framevisible=true)
     disp && display(fig)
     (savein != "") && save(savein*".png", fig)
 end
@@ -838,6 +840,86 @@ function ta_field_vs_field_multiple(Dblocks, fieldx::String, fieldy::String; fsi
     (savein != "") && save(savein*".png", fig)
 end
 
+function ta_series_vs_field(Dblocks, fieldx::String; fsize=(800, 600), xlabelsize=25, ylabelsize=25,
+                            xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
+                            mov_avg=false, mov_avg_window=0,subsample_size=1000, color=:blue, tstart=nothing, tend=nothing,
+                            scatter=true,
+                                markersize=10,
+                                strokewidth=1.0,
+                                marker=:circle,
+                            line=true,
+                                linewidth=2.5,
+                                linestyle=:solid,
+                            fig=nothing, fpos=(1,1), disp=true, savein="",
+                            setlabs=nothing,)
+
+    # Field to use
+    fieldx2use = replace(fieldx, "_lm"=>"", "_tz"=>"", "_um"=>"", "_crust"=>"", "_norm"=>"")
+
+    # Field in plates.dat flag
+    in_plates1 = ((fieldx2use=="Mob") || (fieldx2use=="Vsurf")) && !contains(fieldx, "_lm") && !contains(fieldx, "_tz") && !contains(fieldx, "_um") && !contains(fieldx, "_crust")
+    in_time1  = (fieldx2use in Dblocks[1].timeheader) && !contains(fieldx, "_lm") && !contains(fieldx, "_tz") && !contains(fieldx, "_um") && !contains(fieldx, "_crust")
+    in_rprof1 = (fieldx2use in Dblocks[1].rprofheader) && !in_time1 && !in_plates1
+    @assert in_plates1 || in_time1 || in_rprof1 "Field $fieldx2use not found in any header"
+
+    # Data
+    tax = 1:length(Dblocks)
+    tay = zeros(Float64, length(Dblocks))
+
+    # Set up normalization if wanted
+    normy = contains(fieldx,"_norm")
+    normy && (basey = 0.0)
+    
+    for (b, blck) in enumerate(Dblocks)
+
+        # Get encoding
+        idxT, idxR, idxP = data_encoding(blck.timeheader, blck.rprofheader, blck.platesheader)
+
+        # Find radial phase boundaries
+        pv_ring, wad_ol, lith_ol = idx_ph_transitions(blck; timeidx=1)
+        rprof_rangex = if contains(fieldx, "_lm")
+            1:pv_ring
+        elseif contains(fieldx, "_tz")
+            pv_ring+1:wad_ol
+        elseif contains(fieldx, "_um")
+            wad_ol+1:lith_ol
+        elseif contains(fieldx, "_crust")
+            lith_ol+1:size(blck.rprofdata, 1)
+        else
+            1:size(blck.rprofdata, 1)
+        end
+
+        # Time window
+        time1 = in_plates1 ? blck.platesdata[:, idxP["time"]] : in_rprof1 ? blck.rproftime : blck.timedata[:, idxT["time"]]
+        isnothing(tstart) && (tstart = first(time1))
+        isnothing(tend) && (tend = last(time1))
+        tstartidx1 = findfirst(time1 .>= tstart); (isnothing(tstartidx1)) && error("tstart=$tstart beyond data range")
+        tendidx1   = findlast(time1 .<= tend); (isnothing(tendidx1)) && error("tend=$tend beyond data range")
+
+        # Vectors
+        yvec = in_plates1 ? blck.platesdata[:, idxP[fieldx2use]] : in_rprof1 ? vec(mean(blck.rprofdata[rprof_rangex, :, idxR[fieldx2use]], dims=1)) : blck.timedata[:, idxT[fieldx2use]]
+
+        # OM
+        (fieldx == "SurfOceanMass3D") && (yvec ./= om)
+
+        # Time-average
+        time1 = vcat(diff(time1), 0.0)[tstartidx1:tendidx1]
+        tay[b] = sum(yvec[tstartidx1:tendidx1].*time1 ./ sum(time1))
+
+        # Normalized
+        normy && (b==1) && (basey = tay[b])
+    end
+
+    # Plot
+    isnothing(fig) && (fig = Figure(size = fsize))
+    ax = Axis(fig[fpos[1], fpos[2]], ylabel = in_rprof1 ? LRN[fieldx] : LTN[fieldx], xticks=(tax, [blck.metadata.name for blck in Dblocks]),
+                xlabelsize=xlabelsize, ylabelsize=ylabelsize, xticklabelsize=xticklabelsize, yticklabelsize=yticklabelsize, xticksize=xticksize, yticksize=yticksize, xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding)
+    scatter && scatter!(ax, tax, tay, color=color, markersize=markersize, marker=marker, alpha = mov_avg ? 0.3 : 1.0)
+    line && lines!(ax, tax, tay, color=color, linewidth=linewidth, linestyle=linestyle, alpha = mov_avg ? 0.3 : 1.0)
+    disp && display(fig)
+
+end
+
 """
     Plot the evolution of a radial profile field over time.
     
@@ -891,6 +973,29 @@ function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap
     xlims!(ax, tstart, tend)
     disp && display(fig)
     (savein != "") && save(savein*".png", fig)
+
+end
+
+function map_series(Dblocks::DataBlock, Dblocks2::DataBlock, field::String, name1::String, name2::String; fsize=(900, 600), cmap=:vik100, colorrange=(nothing, nothing),
+                    fig=nothing, fpos=(1,1), disp=true, savein="", interpolate=false, tstart=nothing, tend=nothing)
+
+    # Get encoding
+    idxT, idxR, idxP = data_encoding(Dblock.timeheader, Dblock.rprofheader, Dblock.platesheader)
+    @assert haskey(idxR, field) "Field $field not found in rprof header"
+
+    # Vectors
+    n1, n2 = length(Dblocks), length(Dblocks2)
+    v1, v2 = 1:n1, 1:n2
+    tmp1, tmp2 = [0.0, 0.0], [0.0, 0.0]
+    [(tmp1[1] = max(tmp1[1], first(blck.rproftime)); tmp1[2] = min(tmp1[2], last(blck.rproftime))) for blck in Dblocks]
+    [(tmp2[1] = max(tmp2[1], first(blck.rproftime)); tmp2[2] = min(tmp2[2], last(blck.rproftime))) for blck in Dblocks2]
+    isnothing(tstart) && (tstart = max(tmp1[1], tmp2[1]))
+    isnothing(tend) && (tend = min(tmp1[2], tmp2[2]))
+
+    # Construct heatmap
+    isnothing(fig) && (fig = Figure(size = fsize))
+    ax = Axis(fig[fpos[1], fpos[2]], xlabel = name1, ylabel = name2, xlabelsize=xlabelsize, ylabelsize=ylabelsize, xticklabelsize=12, yticklabelsize=12, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
+                title=title, titlesize=20, titlegap=14, xticklabelrotation=pi/3.5, xticks=(v1, [blck.metadata.name for blck in Dblocks]), yticks=(v2, [blck.metadata.name for blck in Dblocks2]))
 
 end
 

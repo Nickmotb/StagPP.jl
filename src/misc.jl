@@ -143,3 +143,87 @@ function Hirschmann_fO2_to_R(; RF=0.02, fO2range=(-25., -2), P=3.5, T=1400., FMQ
 
 end
 
+# Model:
+# Solution space is [P-T-TOₑₓ] -> looking to find ∂Oₑₓ/∂Mmelt
+
+# Inputs:
+# - Parent source bulk composition [Xs] -> defined as Xs(p) = p*XB + (1-p)*XH
+# - Local parcel [P] and [T]
+# - Total oxygen budget [TOₑₓ] collected from solid (and molten if present) tracer
+
+# Tools:
+# - Hirschmann 2022 melt mapping from XFe₂O₃ (Oₑₓ) ↔ fO₂
+# - Stixrude and Bertelloni 2024 (MAGEMin) solid mapping from XFe₂O₃ (Oₑₓ) ↔ fO₂
+# - Stagno and Frost 2010 parameterization of melt EDDOG2 buffer fO₂ ↔ XCO₂
+@inline move05(x) = 0.5(x[1:end-1] .+ x[2:end])
+function partition_Oₑₓ(P::K, T::K; p::K=0.1, ϕ::K=0.01, Rs::K=0.02, Rf::K=0.0, nr=50, niter=100) where {K <: Real}
+
+    # Hirschmann 2022 parameters
+    a=0.1917; b=-1.961; c=4158.1; ΔCₚ=33.25; T₀=1673.15; y1=-520.46; y2=-185.37; y3=494.39; y4=1838.34; y5=2888.48; y6=3473.68; y7=-4473.6; y8=-1245.09; y9=-1156.86
+
+    # Solid / Molten tracer mass [kg]
+    Ms = 1.0e+17
+    Mf=ϕ*Ms; Ms-=Mf
+
+    # IDV = ∫ΔVdP for melts
+    IDV = solve_∫ΔVdP([P-0.05P, P, P+0.05P],[T-0.05T, T, T+0.05T])[2,2,1]
+
+    # Endmember bulks
+    XH  = @SVector [0.4343, 0.4593, 0.0834, 0.0090, 0.0100, 0.0001, 0.0030, 0.0]
+    XB  = @SVector [0.5042, 0.0977, 0.0710, 0.1254, 0.1680, 0.0223, 0.0007, 0.0]
+    Xox = ["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "Fe2O3"]
+    X   = Vector(p.*XB .+ (1-p).*XH)
+    
+    # Compose composition dictionaries
+    Xs = oxidize_bulk(X, Xox, Rs, FeFormat="FeO_O", dict=true, wt_out=true, frac=true); 
+    Xm = oxidize_bulk(Vector(XB), Xox, Rf, FeFormat="FeO_O", dict=true, wt_out=true, frac=true);
+
+    # Compute total oxygen budget
+    TOₑₓ = Xs["O"]*Ms + Xm["O"]*Mf # kg
+    sfOₑₓ = [0.99TOₑₓ, 0.01TOₑₓ]
+
+    # Generate solid fO₂ space
+    Rlist = LinRange(0.0001, 0.3, nr)
+    Xlist = Vector{Vector{Float64}}(); [push!(Xlist, oxidize_bulk(X, Xox, Rlist[i], wt_out=true, frac=true, FeFormat="FeO_O", onlyvals=true)) for i in 1:nr]
+    sOₑₓlist = [Xlist[i][end] for i in 1:nr] # mass fraction Oₑₓ in solid
+    # -- Minimizer call
+        data    = Initialize_MAGEMin("sb24", verbose=false);
+        out = multi_point_minimization(10P*ones(nr), k2c(T)*ones(nr), data, X=Xlist, Xoxides=Xox, name_solvus=true, sys_in="wt")
+        Finalize_MAGEMin(data);
+    # -- Create interpolation object
+        sfO2 = interpolate((sOₑₓlist,), [out[i].fO2 for i in eachindex(out)], Gridded(Linear()))
+
+    # Newton solver
+    residual = zeros(5, niter); residual[1,:].*=NaN
+    for iter = 1:niter
+        sOₑₓ = sfOₑₓ[1]/Ms
+        residual[4,iter] = sfO2(sOₑₓ)
+        residual[5,iter] = Hirsch(P, T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y2, y3, y4, y5, y6, y7, y8, y9, IDV)
+        residual[1,iter] = residual[5,iter] - residual[4,iter]
+        sfOₑₓ[1]-=1e-3TOₑₓ; sfOₑₓ[2]+=1e-3TOₑₓ
+        residual[2,iter] = sfOₑₓ[1]; residual[3,iter] = sfOₑₓ[2]
+    end
+    idx = argmin(filter(x -> !isnan(x), abs.(residual[1,:])))
+    println("residual = $(round(abs(residual[1,idx]), digits=3)) | fO₂ solid = $(round(residual[4,idx], digits=3)) | fO₂ melt = $(round(residual[5,idx], digits=3)) [Oxygen budget partitioning → solid=$(round(residual[2,idx]/TOₑₓ, digits=3))TOₑₓ, melt=$(round(residual[3,idx]/TOₑₓ, digits=3))TOₑₓ]")
+
+    plt, ax = plot(residual[1,:])
+    lines!(ax, [0, niter], [0, 0], color=:red)
+    display(plt)
+    
+end
+
+function Hirsch(P, T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y2, y3, y4, y5, y6, y7, y8, y9, IDV)
+    # Extract melt fOₑₓ
+    mfOₑₓ = (TOₑₓ-sOₑₓ*Ms)/Mf
+    # Work on dummy copy while passing the mfOₑₓ
+    X = copy(Xm); X["O"] = mfOₑₓ; [X[k]/=mm[k] for k in keys(X)]
+    # Retrace mfOₑₓ → XOₑₓ
+    n=sum(values(X)); [X[k]/=n for k in keys(X)]; XFe₂O₃ = X["O"] # 1 mol of [Fe₂O₃] every 1 mol of [Oₑₓ]
+    if XFe₂O₃>=0.5X["FeO"] # Too much oxygen!! Above hard-limit.
+        return NaN
+    else
+        # Compute mfO2
+        return (log10(XFe₂O₃/(X["FeO"]-2XFe₂O₃)) - b - c/T + (ΔCₚ/R/log(10) * (1 - T₀/T - log(T/T₀))) + IDV/(1e-3R)/T/log(10) 
+                            - (1/T)*(y1*X["SiO2"] + y2*0.0 + y3*X["MgO"] + y4*X["CaO"] + y5*X["Na2O"] + y6*0.0 + y7*0.0 + y8*X["SiO2"]*X["Al2O3"] + y9*X["SiO2"]*X["MgO"]))/a
+    end
+end
