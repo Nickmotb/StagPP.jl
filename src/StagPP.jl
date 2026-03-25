@@ -3,7 +3,10 @@ module StagPP
     # Dependencies
     using Mmap, Parsers, Interpolations, ForwardDiff, LinearAlgebra, StaticArrays, LightXML
     using Statistics, EasyFit, LsqFit, StatsBase, MultivariateStats, MAGEMin_C, ColorSchemes
-    using CairoMakie, GLMakie, DelimitedFiles, Printf, NumericalIntegration
+    using GLMakie, DelimitedFiles, Printf, NumericalIntegration
+
+    # === Structures
+    include("struct.jl")
 
     # Constants
     const R = 8.31446261815324 # J mol⁻¹ K⁻¹
@@ -15,14 +18,10 @@ module StagPP
     const rootdir = @__DIR__
     const savedir = joinpath(rootdir, "../", "+op"); !isdir(savedir) && mkdir(savedir)
     # Molar masses (g/mol)
-    const mm = Dict(
-            "SiO2" => 60.08, "Al2O3" => 101.96, "CaO" => 56.08, "MgO" => 40.30, "FeO" => 71.85, "Fe2O3" => 159.69,
-            "K2O" => 94.2, "Na2O" => 61.98, "TiO2" => 79.88, "O" => 16.0, "Cr2O3" => 151.99, "MnO" => 70.937,
-            "H2O" => 18.015, "CO2" => 44.01, "S" => 32.06, "P2O5" => 141.9445, "Fe" => 55.845
-            )
+    const mm = Cbulk(60.08, 101.96, 71.85, 55.85, 56.08, 101.96, 61.98, 151.99, 159.69, 16.0, 79.88, 94.2, 18.015)
+    const Cbulk_iterator = String.(fieldnames(Cbulk))
+    
 
-    # === Structures
-        include("struct.jl")
     # === Backend
         include("backend.jl")
     # === Checks
@@ -41,7 +40,7 @@ module StagPP
     # Function export
     export load_sim, load_local, data_encoding, solve_sH2O_fO2, min_sᴴ²ᴼ_assembler, solve_point
     # Misc export
-    export SM_fO2_Oex_solution_space, Hirschmann_fO2_to_R
+    export partition_Oₑₓ
     # Plot exports
     export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, ta_series_vs_field, 
             mantle_water, mantle_water_at_t, plot_sf, minmap, 

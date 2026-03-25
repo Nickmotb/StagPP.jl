@@ -360,117 +360,6 @@
     end
 
     """
-        Adjust bulk composition for a given oxidation state (R = Fe³⁺/∑Fe) by adding O accordingly. (used for SB24 database)
-
-        \t Basic usage: \t oxidize_bulk(X::Vector{Float64}, Xox::Vector{String}, R::Float64; wt=false)
-
-        Required arguments:
-
-        • X::Vector{Float64} \t-->\t Bulk composition vector (either in wt% or mol%)
-
-        • Xox::Vector{String} \t-->\t Corresponding oxide names for the bulk composition vector
-
-        • R::Float64 \t\t-->\t Desired oxidation state defined as R = Fe³⁺/∑Fe
-
-        Optional arguments:
-
-        - onlyvals::Bool \t\t-->\t If true, returns only the adjusted composition vector without oxide names [default: false]
-
-        - wt::Bool \t\t-->\t Indicates if the input composition is in weight percent (wt%) [default: false (molar fraction)]
-    """
-    function oxidize_bulk(X, Xox, Rv; wt_in=false, wt_out=false, frac=false, rmH2O=false, FeFormat="Fe_O", dict=false, onlyvals=false)
-
-        # 2FeO + O -> Fe₂O₃
-        # R = Fe³/∑Fe
-        # Incoming composition oxide list must be with FeO + extra O
-
-        (Rv<0.0) && (FeFormat="Fe_O")
-
-        # Filter H2O
-        rmH2O ? (Xoxc=filter(x->(x!="H2O"), Xox)) : (Xoxc=copy(Xox))
-
-        # Process to FeO + Fe₂O₃
-        Xc = X_Xox_to_full_list(X, Xoxc; wt_in=wt_in, wt_out=false)
-        if Rv>=0.0
-            nFe² = Xc["FeO"]
-            nFe³ = (Rv*nFe²)/(1 - Rv)
-            nFe² = nFe² - nFe³
-            nO³ = 1.5nFe³
-            Xc["FeO"] = nFe²; Xc["Fe2O3"] = nO³
-        end
-        
-        (FeFormat=="Fe_O") && FeO_Fe2O3_to_Fe_O!(Xc)
-        (FeFormat=="FeO_O") && (Xc["O"]=Xc["Fe2O3"]; Xc["Fe2O3"]=0.0)
-        # (FeFormat=="FeO_Fe2O3") && nothing
-
-        # Rv negative -> amount to remove in mols to the O pool
-        (Rv<0.0) && (Xc["O"] -= min(abs(Rv), Xc["O"]))
-
-        # Retrace to wt% if required
-        wt_out && ([Xc[k]*=mm[k] for (k,_) in Xc])
-
-        # Normalize
-        n = sum(values(Xc)); [Xc[k] = v/n for (k,v) in Xc]
-        !frac && ([Xc[k]*=1e2 for (k,_) in Xc])
-
-        # Return
-        ss = split(FeFormat, "_"); replace!(Xoxc, "FeO"=>ss[1], (("O" in Xoxc) ? "O" : "Fe2O3")=>ss[2])
-        if !dict
-            X_out = [Xc[ox] for ox in Xoxc]
-            onlyvals ? (return X_out) : (return X_out, Xoxc)
-        else
-            dict_out = Dict{String, Float64}(); [dict_out[ox] = Xc[ox] for ox in Xoxc]
-            return dict_out
-        end
-    end
-
-    function oxidize_bulk(Xdict, Rv; wt_in=false, wt_out=false, frac=false, rmH2O=false, FeFormat="Fe_O", dict=false)
-
-        (Rv<0.0) && (FeFormat="Fe_O")
-
-        X = collect(values(Xdict)); Xox = collect(keys(Xdict))
-
-        # Filter H2O
-        rmH2O ? (Xoxc=filter(x->(x!="H2O"), Xox)) : (Xoxc=copy(Xox))
-
-        # Process to FeO + Fe₂O₃
-        Xc = X_Xox_to_full_list(X, Xoxc; wt_in=wt_in, wt_out=false)
-
-        # Calculate extra oxygen given R = Fe³⁺/Fe
-        if Rv>=0.0
-            nFe² = Xc["FeO"]
-            nFe³ = (Rv*nFe²)/(1 - Rv)
-            nFe² = nFe² - nFe³
-            nO³ = 1.5nFe³
-            Xc["FeO"] = nFe²; Xc["Fe2O3"] = nO³
-        end
-        
-        (FeFormat=="Fe_O") && FeO_Fe2O3_to_Fe_O!(Xc)
-        (FeFormat=="FeO_O") && (Xc["O"]=Xc["Fe2O3"]; Xc["Fe2O3"]=0.0)
-        # (FeFormat=="FeO_Fe2O3") && nothing
-
-        # Rv negative -> amount to remove in mols to the O pool
-        (Rv<0.0) && (Xc["O"] -= min(abs(Rv), Xc["O"]))
-
-        # Retrace to wt% if required
-        wt_out && ([Xc[k]*=mm[k] for (k,_) in Xc])
-
-        # Normalize
-        n = sum(values(Xc)); [Xc[k] = v/n for (k,v) in Xc]
-        !frac && ([Xc[k]*=1e2 for (k,_) in Xc])
-
-        # Return
-        ss = split(FeFormat, "_"); replace!(Xoxc, "FeO"=>ss[1], (("O" in Xoxc) ? "O" : "Fe2O3")=>ss[2])
-        if !dict
-            X_out = [Xc[ox] for ox in Xoxc]
-            return X_out, Xoxc
-        else
-            dict_out = Dict{String, Float64}(); [dict_out[ox] = Xc[ox] for ox in Xoxc]
-            return dict_out
-        end
-    end
-
-    """
         Plot the mantle water content profile at a given time.
         
         \t Basic usage: \t mantle_water(Dblock::DataBlock, time::Float64; kwargs...)
@@ -1982,42 +1871,95 @@
 # ======= Compositions =======
 # ============================
 
-    function X_Xox_to_full_list(X, Xox; wt_in=false, wt_out=false)
+    """
+        Adjust bulk composition for a given oxidation state (R = Fe³⁺/∑Fe) by adding O accordingly. (used for SB24 database)
 
-        Xox_out = copy(Xox); X_out = copy(X); n = sum(X_out)
+        \t Basic usage: \t oxidize_bulk(X::Vector{Float64}, Xox::Vector{String}, R::Float64; wt=false)
 
-        # Create dictionary of composition
-        X_out .= wt_in ? X_out./[mm[ox] for ox in Xox_out]./n : X_out./n
-        Xc = Dict{String,Float64}(); [Xc[ox] = X_out[i] for (i,ox) in enumerate(Xox_out)]
+        Required arguments:
 
-        # Check all oxides are there, if not add them as 0.0
-        required_oxides = ["FeO", "Fe2O3", "SiO2", "Al2O3", "TiO2", "CaO", "MgO", "Na2O", "K2O", "Fe", "O", "H2O"]
-        [Xc[ox] = 0.0 for ox in filter(ox -> !(ox ∈ Xox_out), required_oxides)]
+        • X::Vector{Float64} \t-->\t Bulk composition vector (either in wt% or mol%)
 
-        # Restructure composition if needed
-        if (Xc["Fe"]==0) && (Xc["O"]==0) # FeO + Fe₂O₃ entering
-            # Nothing
-        elseif (Xc["Fe2O3"]==0) && (Xc["FeO"]==0) # Fe + O entering
-            Xc["FeO"] = Xc["O"] - Xc["Fe"]
-            Xc["Fe2O3"] = 2/3 * (Xc["O"] - Xc["Fe"])
-            Xc["Fe"] = 0.0; Xc["O"] = 0.0
-        elseif (Xc["Fe2O3"]==0) && (Xc["Fe"]==0) # FeO + O entering with no ferric iron
-            Xc["Fe2O3"] = Xc["O"]
-            Xc["O"] = 0.0
-        else
-            error("Fe | FeO not found in oxide list. Either provide the composition list as Fe and O, or FeO and O")
+        • Xox::Vector{String} \t-->\t Corresponding oxide names for the bulk composition vector
+
+        • R::Float64 \t\t-->\t Desired oxidation state defined as R = Fe³⁺/∑Fe
+
+        Optional arguments:
+
+        - onlyvals::Bool \t\t-->\t If true, returns only the adjusted composition vector without oxide names [default: false]
+
+        - wt::Bool \t\t-->\t Indicates if the input composition is in weight percent (wt%) [default: false (molar fraction)]
+    """
+    function oxidize_bulk(X, Xox, Rv, Xdummy; wt_in=false, wt_out=false, frac=false, FeFormat="Fe_O", onlyvals=false)
+        
+        # R = Fe³/∑Fe | If negative, this removes R mol units from the bulk composition (makes the system reduced)
+        (Rv<0.0) && (FeFormat="Fe_O")
+
+        # Assign passed bulk to memory array
+        Xdummy.X .= Vector{Float64}(X)
+
+        # Create window variables + and compute value sum
+        @views begin
+            Xd = Xdummy.X; Xoxd = Xdummy.Xox; mmd = Xdummy.mm
+        end; n=sum(Xd);
+
+        # Ensure passed in composition is unoxidized
+        ("Fe2O3" ∈ Xoxd)    && @assert Xd[Xoxd.=="Fe2O3"][1]==0.0               "Please pass in an unoxidized composition. (XFe2O3 = 0.0)"
+        ("Fe"    ∈ Xoxd)    && @assert Xd[Xoxd.=="O"][1]==Xd[Xoxd.=="Fe"][1]    "Please pass in an unoxidized composition. (XFe = XO)"
+        ("O"    ∈ Xoxd)     && @assert Xd[Xoxd.=="O"][1]==0.0                   "Please pass in an unoxidized composition. (XO = 0.0)"
+
+        # Convert from mass fraction → molar fraction if required and normalize
+        wt_in && (Xd./=mmd)  
+        n=sum(Xd); Xd./=n
+        
+        # Process to unoxidized FeO + Fe₂O₃
+        if ("Fe"∈Xoxd) && ("O"∈Xoxd) # Fe + O entering
+            idxF, idxO = findfirst(Xoxd.=="Fe"), findfirst(Xoxd.=="O")
+            Xd[idxO] = 0.0; Xoxd[idxF] = "FeO"; Xoxd[idxO] = "Fe2O3"
+        elseif ("Fe2O3"∈Xoxd) && ("FeO"∈Xoxd) # FeO + Fe₂O₃ entering
+            idxF, idxO = findfirst(Xoxd.=="FeO"), findfirst(Xoxd.=="Fe2O3")
+        elseif ("FeO"∈Xoxd) && ("O"∈Xoxd) # FeO + O entering with no ferric iron
+            idxF, idxO = findfirst(Xoxd.=="FeO"), findfirst(Xoxd.=="O")
+            Xoxd[idxO] = "Fe2O3"
         end
 
-        # Normalize
-        Xc = Dict(k => v/sum(values(Xc)) for (k,v) in Xc)
+        # Oxidize bulk
+        if Rv>=0.0
+            nFe² = Xd[idxF]
+            nFe³ = (Rv*nFe²)/(1 - Rv)
+            nFe² = nFe² - nFe³
+            nO³ = 1.5nFe³
+            Xd[idxF] = nFe²; Xd[idxO] = nO³
+        end
+        
+        # Refactor to desired Fe format
+        XFeO, XFe2O3 = Xd[idxF], Xd[idxO]
+        if FeFormat=="Fe_O"
+            Xd[idxF] = XFeO + 2XFe2O3; Xd[idxO] = XFeO + 3XFe2O3
+            Xoxd[idxF] = "Fe"; Xoxd[idxO] = "O"
+        elseif FeFormat=="FeO_O"
+            Xd[idxO] = XFe2O3; Xoxd[idxO] = "O"
+        end
 
-        # Retrace to wt if needed
-        return wt_out ? Dict(k => v*mm[k] for (k,v) in Xc) : Xc
+        # Rv negative -> amount to remove in mols to the O pool
+        (Rv<0.0) && (Xd[idxO] -= min(abs(Rv), Xd[idxO]))
+
+        wt_out && (Xd.*=mmd) # Convert from molar fraction → mass fraction if required
+        n=sum(Xd); Xd./=n    # Normalize
+        !frac && (Xd.*=1e2)  # Convert to % if desired
+
+        # Generate CBulk structure
+        sym = Symbol.(Xoxd)
+        return Cbulk((; zip(sym, Xd)...))
+        
     end
 
-    function FeO_Fe2O3_to_Fe_O!(Xc)
-        Xc["Fe"] = Xc["FeO"] + 2Xc["Fe2O3"]; Xc["O"] = Xc["FeO"] + 3Xc["Fe2O3"]
-        Xc["FeO"] = 0.0; Xc["Fe2O3"] = 0.0
+    @views function get_Xoxmm(Xox)
+        mmarray = zeros(length(Xox))
+        for f in eachindex(Xox)
+            mmarray[f] = getfield(mm, Symbol(Xox[f]))
+        end
+        return mmarray
     end
 
     # Solves the ∫(ΔV/RT)dP part of the Sun and Yao (2024) fO₂ model -> using Deng et al (2020) from ab-initio molecular dynamic fits
