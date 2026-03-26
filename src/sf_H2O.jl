@@ -34,9 +34,9 @@
     function solve_sH2O_fO2(nP::Int64, nT::Int64;
                             s=true, fO2=true, DBswitchP=7.0, plt=false, DHMS=true,
                             # Xox=["SiO2", "Al2O3", "CaO", "MgO", "FeO", "K2O", "Na2O", "TiO2", "Cr2O3", "O", "H2O"],
-                            Xox_in=["SiO2", "MgO", "FeO", "Fe2O3", "CaO", "Al2O3", "Na2O", "Cr2O3", "H2O"],
-                            XH=[43.43, 45.93, 8.34, 0.0, 0.9, 1.0, 0.01, 0.3, 10.0], # From stxirtude & Bertelloni 2024
-                            XB=[50.42, 9.77, 7.1, 0.0, 12.54, 16.8, 2.23, 0.07, 10.0], # From stxirtude & Bertelloni 2024
+                            Xox=["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "H2O"],
+                            XH=[43.43, 45.93, 8.34, 0.9, 1.0, 0.01, 0.3, 10.0], # From stxirtude & Bertelloni 2024
+                            XB=[50.42, 9.77, 7.1, 12.54, 16.8, 2.23, 0.07, 10.0], # From stxirtude & Bertelloni 2024
                             Prange=(1e-4, 135.0), Trange=(500.0, 4000.0), verbose=true,
                             cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"],
                             test_path=false, sys_in="mol", unoxidized=false, melt_ints=true,
@@ -48,29 +48,23 @@
             verbose && println("Nothing to compute. Exiting...")
             return
         end
-        @assert length(Xox_in) == length(XB) "Length of Xox and XB must match."
-        @assert length(Xox_in) == length(XH) "Length of Xox and XH must match."
+        @assert length(Xox) == length(XB) "Length of Xox and XB must match."
+        @assert length(Xox) == length(XH) "Length of Xox and XH must match."
         # (nR>1) && (s=false; fO2=true; println("Large fO₂ block run called. Disabling sᴴ²ᴼ computations."))
 
         # Oxidizing routine 
-        function assignR_to_Xv!(Xv, Xox, Rv; rmH2O=true)
-            new_Xox = fill("", length(Xox))
-            cap = nPnTnR
+        function assignR_to_Xv!(Xv, Xox, Xdummy, Rv, cap)
             for i in 1:cap
-                if i!=cap
-                    Xv[i], _ = oxidize_bulk(Xv[i], Xox, Rv[i]; wt_in=(sys_in=="wt"), wt_out=false, rmH2O=rmH2O, FeFormat="Fe_O");
-                    Xv[i+cap], _ = oxidize_bulk(Xv[i+cap], Xox, Rv[i]; wt_in=(sys_in=="wt"), wt_out=false, rmH2O=rmH2O, FeFormat="Fe_O");
-                else
-                    Xv[i], _ = oxidize_bulk(Xv[i], Xox, Rv[i]; wt_in=(sys_in=="wt"), wt_out=false, rmH2O=rmH2O, FeFormat="Fe_O");
-                    Xv[i+cap], new_Xox = oxidize_bulk(Xv[i+cap], Xox, Rv[i]; wt_in=(sys_in=="wt"), wt_out=false, rmH2O=rmH2O, FeFormat="Fe_O");
-                end
+                Xv[i] = oxidize_bulk(Xv[i], Rv[i], Xdummy; wt_in=(sys_in=="wt"), wt_out=false, FeFormat="FeO_O", vector=true, Xox=Xox);
+                Xv[i+cap] = oxidize_bulk(Xv[i+cap], Rv[i], Xdummy; wt_in=(sys_in=="wt"), wt_out=false, FeFormat="FeO_O", vector=true, Xox=Xox);
             end
-            return new_Xox
         end
-        @inline reset_Xv() = vcat(map(Vector, eachrow(repeat(XH', outer=nPnTnR))), map(Vector, eachrow(repeat(XB', outer=nPnTnR))))
 
         # Vetorization size
         nPnT, nPnTnR = nP*nT, nP*nT*nR
+
+        # Change in oxide list to Stx24
+            Xox24 = ["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "O"]
 
         # Memory allocations
         # --- Axis Vectors
@@ -78,10 +72,19 @@
             Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(700., Trange[2], nT)
             Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(700., Trange[2], nT)
             Rdom = nR>1 ? LinRange(Rrange[1], Rrange[2], nR) : Rv
-        # --- Others
             Pv, Tv, Rvec = zeros(Float64, 2nPnTnR), zeros(Float64, 2nPnTnR), (nR>1) ? zeros(Float64, nPnTnR) : Rv.*ones(Float64, nPnTnR);
-            Xv = reset_Xv()
+        # --- Composition
+            Xv = Vector{Vector{Float64}}(undef, 2nPnTnR)
+            for i in 1:nPnTnR
+                Xv[i] = XH; Xv[i+nPnTnR] = XB
+            end
+            Xdummy = (X=Vector{Float64}(zeros(length(Xox24))), Xox=Vector{String}(Xox24), mm=get_Xoxmm(Xox24)) # Dummy for Stx24 oxidizing calls
             tnP, tnP05 = Int64(ceil(1.1max(nP, nT))), Int64(ceil(0.5max(nP, nT)))
+        # --- Window variables
+            Pv_nPnT = @view Pv[1:nPnT]
+            Tv_nPnT = @view Tv[1:nPnT]
+            Pv_2nPnT = @view Pv[1:2nPnT]
+            Tv_2nPnT = @view Tv[1:2nPnT]
         # --- Maps
             if s
                 um, tz, lm = zeros(Float64, nPnTnR, 2), zeros(Float64, nPnTnR, 2), zeros(Float64, nPnTnR, 2)  # later reshaped as 'T, P, reshape(um, nP, :)'
@@ -117,17 +120,17 @@
                 verbose && println("Calculating upper mantle sᴴ²ᴼ...")
                 data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
                 # rm_list = remove_phases(phase_out, "um")
-                outHB   = multi_point_minimization(10Pv[1:2nPnT], Tv[1:2nPnT].-273.15, data, X=vcat(Xv[1:nPnT], Xv[nPnTnR+1:nPnTnR+nPnT]), Xoxides=Xox_in, name_solvus=true, B=ones(length(Pv[1:2nPnT])), progressbar=verbose, sys_in=sys_in) # kbar and K
+                outHB   = multi_point_minimization(10Pv_2nPnT, Tv_2nPnT.-273.15, data, X=vcat(Xv[1:nPnT], Xv[nPnTnR+1:nPnTnR+nPnT]), Xoxides=Xox, name_solvus=true, B=ones(2nPnT), progressbar=verbose, sys_in=sys_in) # kbar and K
                 Finalize_MAGEMin(data);
                 # duplicate to fit size
                 outHB = vcat(repeat(outHB[1:nPnT], nR), repeat(outHB[nPnT+1:2nPnT], nR))
             else; outHB = 0.0; end
-        # Call UM through SB24 to get fO₂
+        # Call UM through SB24 to get fO₂0
             if fO2
                 verbose && println("Calculating upper mantle fO₂...")
                 data    = Initialize_MAGEMin("sb24", verbose=false);
-                !unoxidized && (Xox=assignR_to_Xv!(Xv, Xox_in, Rvec))  # Oxidize bulk for UM fO₂ calculations
-                out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox, name_solvus=true, progressbar=verbose, sys_in=sys_in)
+                !unoxidized && (assignR_to_Xv!(Xv, Xox, Xdummy, Rvec, nPnTnR))  # Oxidize bulk for UM fO₂ calculations
+                out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox24, name_solvus=true, progressbar=verbose, sys_in=sys_in)
                 Finalize_MAGEMin(data);
             else; out_fO2 = 0.0; end
         # Assemble
@@ -146,22 +149,19 @@
         # ===== Transizion Zone =====
         # ===========================
 
-        # Reset composition array for oxidation
-            Xv .= reset_Xv()
         # Transition zone mesh vectorization
             mesh_vectorization!(Ptz, Ttz, Rdom, nP, nT, nR, Pv, Tv, Rvec)
         # Minimizer call + assembly
             if s || fO2
                 verbose && println("Calculating transition zone fO₂ | sᴴ²ᴼ...")
                 data    = Initialize_MAGEMin("sb24", verbose=false);
-                !unoxidized && (Xox=assignR_to_Xv!(Xv, Xox_in, Rvec))  # Oxidize bulk for TZ fO₂ calculations
-                out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
+                out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox24, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
                 Finalize_MAGEMin(data);
             end; 
         # DHMS
             if s
                 DHMS && verbose && println("Exploring DHMS paths...")
-                ppaths, paths, _  =  DHMS ? path_solve(XH, Xox_in, phase_out, (@view Pv[1:nPnT]), (@view Tv[1:nPnT]), DBswitchP, (@view out_fO2[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0, 0.0)
+                ppaths, paths, _  =  DHMS ? path_solve(XH, Xox_in, phase_out, Pv_nPnT, Tv_nPnT, DBswitchP, (@view out_fO2[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0, 0.0)
         # Assemble  
                 ∫sᴴ²ᴼ!(tz, (@view Pv[1:nPnTnR]), (@view Tv[1:nPnTnR]), min_s, out_fO2, DHMS, ppaths, paths, nPnTnR)
                 tz = cat(reshape(tz[:,1], nP, nT, nR), reshape(tz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
@@ -177,8 +177,6 @@
         # ====== Lower Mantle =======
         # ===========================
 
-        # Reset composition array for oxidation
-            Xv .= reset_Xv()
         # Lower mantle mesh vectorization
             mesh_vectorization!(Plm, Tlm, Rdom, nP, nT, nR, Pv, Tv, Rvec)
 
@@ -186,8 +184,7 @@
             if s || fO2
                 verbose && println("Calculating lower mantle sᴴ²ᴼ...")
                 data    = Initialize_MAGEMin("sb24", verbose=false);
-                !unoxidized && (Xox = assignR_to_Xv!(Xv, Xox_in, Rvec)) # Oxidize bulk for LM fO₂ calculations
-                out_fO2   .= multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
+                out_fO2   .= multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox24, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
                 Finalize_MAGEMin(data);
             end
             if s
@@ -1890,13 +1887,19 @@
 
         - wt::Bool \t\t-->\t Indicates if the input composition is in weight percent (wt%) [default: false (molar fraction)]
     """
-    function oxidize_bulk(X, Xox, Rv, Xdummy; wt_in=false, wt_out=false, frac=false, FeFormat="Fe_O", onlyvals=false)
+    function oxidize_bulk(X, Rv, Xdummy; wt_in=false, wt_out=false, frac=false, FeFormat="Fe_O", SymXox=nothing, vector=false, Xox=nothing)
         
         # R = Fe³/∑Fe | If negative, this removes R mol units from the bulk composition (makes the system reduced)
         (Rv<0.0) && (FeFormat="Fe_O")
 
-        # Assign passed bulk to memory array
-        Xdummy.X .= Vector{Float64}(X)
+        # Assign passed bulk to memory array (Correct from different Oxide list if needed)
+        if !isnothing(Xox)
+            for (i, ox) in enumerate(Xdummy.Xox)      
+                Xdummy.X[i] = (ox=="O" || ox=="Fe2O3") ? 0.0 : X[Xox.==ox][1]
+            end
+        else
+            Xdummy.X = Vector{Float64}(X)
+        end
 
         # Create window variables + and compute value sum
         @views begin
@@ -1906,7 +1909,7 @@
         # Ensure passed in composition is unoxidized
         ("Fe2O3" ∈ Xoxd)    && @assert Xd[Xoxd.=="Fe2O3"][1]==0.0               "Please pass in an unoxidized composition. (XFe2O3 = 0.0)"
         ("Fe"    ∈ Xoxd)    && @assert Xd[Xoxd.=="O"][1]==Xd[Xoxd.=="Fe"][1]    "Please pass in an unoxidized composition. (XFe = XO)"
-        ("O"    ∈ Xoxd)     && @assert Xd[Xoxd.=="O"][1]==0.0                   "Please pass in an unoxidized composition. (XO = 0.0)"
+        ("O"     ∈ Xoxd)     && @assert Xd[Xoxd.=="O"][1]==0.0                  "Please pass in an unoxidized composition. (XO = 0.0)"
 
         # Convert from mass fraction → molar fraction if required and normalize
         wt_in && (Xd./=mmd)  
@@ -1948,9 +1951,13 @@
         n=sum(Xd); Xd./=n    # Normalize
         !frac && (Xd.*=1e2)  # Convert to % if desired
 
-        # Generate CBulk structure
-        sym = Symbol.(Xoxd)
-        return Cbulk((; zip(sym, Xd)...))
+        # Generate output
+        if !vector
+            isnothing(SymXox) && (SymXox = Symbol.(Xoxd))
+            return Cbulk((; zip(SymXox, Xd)...))
+        else
+            return copy(Xd)
+        end
         
     end
 

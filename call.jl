@@ -1,4 +1,4 @@
-using StagPP, GLMakie
+using StagPP, GLMakie, MAGEMin_C
 
 load_sims = false
 # Sims
@@ -48,11 +48,24 @@ load_sims = false
         tot = [tot1, tot2, tot3, tot4, tot5, y20];
         no = [y20, noR, noK, noKR]
     end
-p = 3.0
-t = 1600.
-p = 0.2
-ϕ=0.05
-TOex=7e-4
-verbose=false
 
-@btime partition_Oₑₓ($p, $t, p=$p, ϕ=$ϕ, TOex=$TOex, verbose=$verbose)
+P = 3.0
+T = 1600.
+p = 0.2
+ϕ=0.08
+TOex=7e-4
+Rf=0.02
+Rs=0.0
+niter=100
+nr = 50
+
+# partition_Oₑₓ(P, T, p=p, ϕ=ϕ, TOex=TOex, verbose=true, nr=20, data=data)
+
+nP  = 30; Pr  = LinRange(1.0, 10.0, nP)
+nT  = 30; Tr  = LinRange(900., 2200., nT)
+nϕ  = 30; ϕr  = LinRange(1e-2, 0.2, nϕ)
+nTO = 30; TOr = LinRange(7e-5, 3e-4, nTO)
+
+data    = Initialize_MAGEMin("sb24", verbose=false);
+mapϕ, mapTO = P_T_ϕ_TOₑₓ_Rspace(Pr, Tr, ϕr, TOr, data, nres=80)
+Finalize_MAGEMin(data)

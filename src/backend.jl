@@ -636,5 +636,15 @@ end
         return xHD, yHD
     end
 
+    function vecmat_to_XYZV(iv, jv, kv, M)
+        ni, nj, nk = length(iv), length(jv), length(kv)
+        mat = zeros(ni*nj*nk,4)
+        mat[:,1] .= repeat(repeat(iv, outer=nj), nk)
+        mat[:,2] .= repeat(repeat(jv, inner=ni), nk)
+        mat[:,3] .= repeat(kv, inner=ni*nj)
+        mat[:,4] = vec(M)
+        return mat
+    end
+
     @inline c2k(T) = T+273.15
     @inline k2c(T) = T-273.15

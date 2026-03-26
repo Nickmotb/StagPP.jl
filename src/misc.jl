@@ -17,7 +17,7 @@ end
 # - Hirschmann 2022 melt mapping from XFe₂O₃ (Oₑₓ) ↔ fO₂
 # - Stixrude and Bertelloni 2024 (MAGEMin) solid mapping from XFe₂O₃ (Oₑₓ) ↔ fO₂
 # - Stagno and Frost 2010 parameterization of melt EDDOG2 buffer fO₂ ↔ XCO₂
-function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0.0, nr=50, niter=100, verbose=false, TOex=nothing) where {K <: Real}
+function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0.0, nr=50, niter=100, verbose=false, TOex=nothing, data=nothing, respace=(false, 20)) where {K <: Real}
 
     # Hirschmann 2022 parameters
     a=0.1917; b=-1.961; c=4158.1; ΔCₚ=33.25; T₀=1673.15; y1=-520.46; y2=-185.37; y3=494.39; y4=1838.34; y5=2888.48; y6=3473.68; y7=-4473.6; y8=-1245.09; y9=-1156.86
@@ -29,20 +29,25 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
     # IDV = ∫ΔVdP for melts
     IDV = solve_∫ΔVdP([P-0.05P, P, P+0.05P],[T-0.05T, T, T+0.05T])[2,2,1]
 
+    # Flag whether to manage MAGEMin initialisation and finalization
+    flag = isnothing(data)
+
     # Endmember bulks
-    XH  = @SVector [0.4343, 0.4593, 0.0834, 0.0090, 0.0100, 0.0001, 0.0030, 0.0]
-    XB  = @SVector [0.5042, 0.0977, 0.0710, 0.1254, 0.1680, 0.0223, 0.0007, 0.0]
-    Xox = @SVector ["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "O"]
+    XH      = @SVector [0.4343, 0.4593, 0.0834, 0.0090, 0.0100, 0.0001, 0.0030, 0.0]
+    XB      = @SVector [0.5042, 0.0977, 0.0710, 0.1254, 0.1680, 0.0223, 0.0007, 0.0]
+    Xox     = @SVector ["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "O"]
+    SymXox  = Tuple(Symbol.(Xox))
+    mmXox   = [getfield(mm, f) for f in SymXox]
     X   = p*XB + (1-p)*XH
     
     # Allocate iterative memory and create bulk structures
     dummyarray = zeros(length(X)) # for Hirschmann calls
     Xdummy = (X=Vector{Float64}(X), Xox=Vector{String}(Xox), mm=get_Xoxmm(Xox)) # For oxidizing calls
     if isnothing(TOex)
-        Xs = oxidize_bulk(X, Xox, Rs, Xdummy, FeFormat="FeO_O", wt_out=true, frac=true); 
-        Xmo = oxidize_bulk(XB, Xox, Rf, Xdummy, FeFormat="FeO_O", wt_out=true, frac=true);
+        Xs = oxidize_bulk(X, Rs, Xdummy, FeFormat="FeO_O", wt_out=true, frac=true, SymXox=SymXox); 
+        Xmo = oxidize_bulk(XB, Rf, Xdummy, FeFormat="FeO_O", wt_out=true, frac=true, SymXox=SymXox);
     end
-    Xm = oxidize_bulk(XB, Xox, 0.0, Xdummy, FeFormat="FeO_O", wt_out=true, frac=true);
+    Xm = oxidize_bulk(XB, 0.0, Xdummy, FeFormat="FeO_O", wt_out=true, frac=true);
 
     # Compute total oxygen budget
     TOₑₓ = isnothing(TOex) ? (Xs.O*Ms + Xmo.O*Mf) : TOex*Ms # kg
@@ -54,78 +59,157 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
 
     # Generate solid fO₂ space
     Rlist = LinRange(0.00001, 0.5, nr)
-    Xlist = Vector{Vector{Float64}}(); 
+    Xlist = Vector{Vector{Float64}}(undef, nr); 
+    sOₑₓlist = zeros(nr)
     for i in 1:nr
-        Xl = oxidize_bulk(X, Xox, Rlist[i], Xdummy, wt_out=true, frac=true, FeFormat="FeO_O", onlyvals=true)
-        push!(Xlist, [getfield(Xl, Symbol(f)) for f in Xox])
+        Xl = oxidize_bulk(X, Rlist[i], Xdummy, wt_out=true, frac=true, FeFormat="FeO_O", SymXox=SymXox)
+        Xlist[i] = [getfield(Xl, f) for f in SymXox]
+        sOₑₓlist[i] = Xl.O
     end
-    sOₑₓlist = [Xlist[i][end] for i in 1:nr] # mass fraction Oₑₓ in solid
     # -- Minimizer call
-        data    = Initialize_MAGEMin("sb24", verbose=false);
+        flag && (data = Initialize_MAGEMin("sb24", verbose=false))
         out = multi_point_minimization(10P*ones(nr), k2c(T)*ones(nr), data, X=Xlist, Xoxides=Vector{String}(Xox), name_solvus=true, sys_in="wt", progressbar=false)
-        Finalize_MAGEMin(data);
+        flag && Finalize_MAGEMin(data);
     # -- Create interpolation object
-        # fO2 = [out[i].fO2 for i in eachindex(out)]
         sfO2 = extrapolate(interpolate((sOₑₓlist,), [out[i].fO2 for i in eachindex(out)], Gridded(Linear())), Line())
 
-    # Generate melt fO₂ space
-    mfO2_sOₑₓlist = LinRange(0.005TOₑₓ/Ms, 0.995TOₑₓ/Ms, nr)
-    # Bisection solver
-    minsOₑₓ, maxsOₑₓ, residual, sharedfO2, sOₑₓ, etol, iter = 0.005TOₑₓ/Ms, 0.995TOₑₓ/Ms, 0.0, 0.0, 0.0, 1e-5, 0
-    for it = 1:niter
-        iter += 1
-        sOₑₓ = 0.5(maxsOₑₓ+minsOₑₓ)
-        residual = ΔR(sfO2, P, T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y2, y3, y4, y5, y6, y7, y8, y9, IDV, Xox, dummyarray)
-        if (abs(residual)<=etol)
-            sharedfO2 = Hirsch(P, T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y2, y3, y4, y5, y6, y7, y8, y9, IDV, Xox, dummyarray)
-            break
+    if !respace[1]
+        # Bisection solver
+        minsOₑₓ, maxsOₑₓ, residual, sharedfO2, sOₑₓ, etol, iter = 0.005TOₑₓ/Ms, 0.995TOₑₓ/Ms, 0.0, 0.0, 0.0, 1e-5, 0
+        for it = 1:niter
+            iter += 1
+            sOₑₓ = 0.5(maxsOₑₓ+minsOₑₓ)
+            residual = ΔR(sfO2, T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummyarray, mmXox)
+            if (abs(residual)<=etol)
+                sharedfO2 = Hirsch(T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummyarray, mmXox)
+                break
+            end
+            if residual>0.0
+                maxsOₑₓ = sOₑₓ
+            elseif isnan(residual) || residual<0.0
+                minsOₑₓ = sOₑₓ
+            end
         end
-        if residual>0.0
-            maxsOₑₓ = sOₑₓ
-        elseif isnan(residual) || residual<0.0
-            minsOₑₓ = sOₑₓ
+
+        # eq_XCO2(sharedfO2, P, T)
+        # fO2 ↔ XCO₂ ↔ reduced/oxidized carbon mass as x × TOₑₓ
+
+        if verbose
+            println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | Rs=$(Rs) | Rf=$(Rf) | Source mix = $p) ----")
+            println("Shared fO₂ = $sharedfO2 |  residual = $(abs(residual))")
+            println("Total Oₑₓ budget = $TOₑₓ kg ($(1e2TOₑₓ/Ms)% of solid tracer mass)")
+            println("TOₑₓ partitioning → [$(round(1e2(sOₑₓ*Ms/TOₑₓ), digits=4))% solid, $(round(1e2(TOₑₓ-sOₑₓ*Ms)/TOₑₓ, digits=4))% melt]")
+            println("Converged in $iter iterations.")
         end
-    end
 
-    if verbose
-        println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | Rs=$(Rs) | Rf=$(Rf) | Source mix = $p) ----")
-        println("Shared fO₂ = $sharedfO2 |  residual = $(abs(residual))")
-        println("Total Oₑₓ budget = $TOₑₓ kg ($(1e2TOₑₓ/Ms)% of solid tracer mass)")
-        println("TOₑₓ partitioning → [$(round(1e2(sOₑₓ*Ms/TOₑₓ), digits=4))% solid, $(round(1e2(TOₑₓ-sOₑₓ*Ms)/TOₑₓ, digits=4))% melt]")
-        println("Converged in $iter iterations.")
-    end
+        return 1e2sOₑₓ*Ms/TOₑₓ
 
-    return 
+    else
+
+        # Export 1D sensitivity to P | T | ϕ | TOₑₓ
+        v = zeros(respace[2])
+        sOr = LinRange(0.005, 0.995, respace[2])
+        for i in 1:respace[2]
+            v[i] = ΔR(sfO2, T, Xm, TOₑₓ*sOr[i]/Ms, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummyarray, mmXox)
+        end     
+        return v
+
+    end
 
 end
 
-function Hirsch(P, T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y2, y3, y4, y5, y6, y7, y8, y9, IDV, Xox, dummy)
+function Hirsch(T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, mmXox)
     # Checks
-    @assert ("O"∈Xox && "FeO"∈Xox) "This function requires FeO + O format!"
+    @assert (:O∈SymXox && :FeO∈SymXox) "This function requires FeO + O format!"
     # Extract melt fOₑₓ
     mfOₑₓ = (TOₑₓ-sOₑₓ*Ms)/Mf
     # Fill dummy with current composition
-    dummy .= [getfield(Xm, Symbol(f)) for f in Xox]
+    dummy .= [getfield(Xm, f) for f in SymXox]
     # Oxidize
-    idxO = findfirst(Xox.=="O"); dummy[idxO] = mfOₑₓ
+    idxO = findfirst(SymXox.==:O); dummy[idxO] = mfOₑₓ
     # mass fraction → molar fraction conversion
-    for ox in eachindex(Xox)
-        dummy[ox]/=getfield(mm, Symbol(Xox[ox]))
-    end
+    dummy./=mmXox
     # Normalize
     dummy./=sum(dummy)
-    Xl = Cbulk((; zip(Symbol.(Xox), dummy)...))
-    
+    # Construct bulk and assess hardlimit
+    Xl = Cbulk((; zip(SymXox, dummy)...))
     (Xl.O>=0.5Xl.FeO) && (return NaN) # Too much oxygen!! Above hard-limit.
     
     # Compute mfO2
-    _ln10 = 1/log(10)
-    mfO2 = (log10(Xl.O/(Xl.FeO-2Xl.O)) - b - c/T + (ΔCₚ/R*_ln10 * (1 - T₀/T - log(T/T₀))) + IDV/(1e-3R)/T*_ln10 
-                        - (1/T)*(y1*Xl.SiO2 + y3*Xl.MgO + y4*Xl.CaO + y5*Xl.Na2O + y8*Xl.SiO2*Xl.Al2O3 + y9*Xl.SiO2*Xl.MgO))/a
+    _ln10, _T = 1/log(10), 1/T
+    mfO2 = (log10(Xl.O/(Xl.FeO-2Xl.O)) - b - c*_T + (ΔCₚ/R*_ln10 * (1 - T₀*_T - log(T/T₀))) + IDV/(1e-3R)*_T*_ln10 
+                        - _T*(y1*Xl.SiO2 + y3*Xl.MgO + y4*Xl.CaO + y5*Xl.Na2O + y8*Xl.SiO2*Xl.Al2O3 + y9*Xl.SiO2*Xl.MgO))/a
     return mfO2
 end
 
-function ΔR(sfO2, P, T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y2, y3, y4, y5, y6, y7, y8, y9, IDV, Xox, dummyarray)
-    return sfO2(sOₑₓ) - Hirsch(P, T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y2, y3, y4, y5, y6, y7, y8, y9, IDV, Xox, dummyarray)
+function ΔR(sfO2, T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, mmXox)
+    return sfO2(sOₑₓ) - Hirsch(T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, mmXox)
+end
 
+function P_T_ϕ_TOₑₓ_Sspace(Pr::K, Tr::K, ϕr::K, TOr::K, data; cutϕ::Float64=-1.0, cutTO::Float64=-1.0, p::Float64=0.2, niter::Int64=100, nr::Int64=50) where {K}
+    # Resolutions
+    nP, nT, nϕ, nTO = length(Pr), length(Tr), length(ϕr), length(TOr)
+    iϕ05, iTO05 = Int(floor(0.5nϕ)), Int(floor(0.5nTO))
+    # Correct cut values
+    cutϕ = (cutϕ==-1) ? ϕr[iϕ05] : min(max(cutϕ, first(ϕr)), last(ϕr))
+    cutTO = (cutTO==-1) ? TOr[iTO05] : min(max(cutTO, first(TOr)), last(TOr))
+    # Construct map
+    mapϕ, mapTO, nmax = zeros(nP, nT, nϕ), zeros(nP, nT, nTO), max(nϕ, nTO)
+    for n in 1:nmax
+        println("n = $n / $nmax")
+        for ip in 1:nP
+            for it in 1:nT
+                (n<=nϕ)  && (mapϕ[ip, it, n]  = partition_Oₑₓ(Pr[ip], Tr[it]; p=p, ϕ=ϕr[n], Rs=0.0, Rf=0.0, nr=nr, niter=niter, verbose=false, TOex=cutTO, data=data))
+                (n<=nTO) && (mapTO[ip, it, n] = partition_Oₑₓ(Pr[ip], Tr[it]; p=p, ϕ=cutϕ, Rs=0.0, Rf=0.0, nr=nr, niter=niter, verbose=false, TOex=TOr[n], data=data))
+            end
+        end
+    end
+    fig = Figure(size=(1200, 700))
+    ax = Axis3(fig[1,1], xlabel="Pressure [GPa]", ylabel="Temperature [K]", zlabel="ϕ [%]")
+    ax2 = Axis3(fig[1,2], xlabel="Pressure [GPa]", ylabel="Temperature [K]", zlabel="TOₑₓ [wt% Mₜ]")
+    for i in 1:max(nϕ, nTO)
+        (i<=nϕ) && surface!(ax, Pr, Tr, ϕr[i]*ones(nP,nT), color=1.0.-mapϕ[:,:,i], colormap=:vik100)
+        (i<=nTO) && surface!(ax2, Pr, Tr, TOr[i]*ones(nP,nT), color=1.0.-mapTO[:,:,i], colormap=:vik100)
+        (i==1) && Colorbar(fig[2,1:2], colorrange=(0.0, 100.0), colormap=:vik100, label=L"TO_{ex}\;in\;melt\;\mathrm{[\%]}", labelsize=20, vertical=false)
+    end
+    display(fig)
+    return mapϕ, mapTO
+end
+
+function P_T_ϕ_TOₑₓ_Rspace(Pr::K, Tr::K, ϕr::K, TOr::K, data; p::Float64=0.2, nres=20) where {K}
+    # Resolutions
+    nP, nT, nϕ, nTO = length(Pr), length(Tr), length(ϕr), length(TOr)
+    defP, defT, defϕ, defTO = 3.0, 1600., 0.02, 3e-4
+    # Construct map
+    mapP = zeros(nP, nres); mapT = zeros(nP, nres)
+    mapϕ = zeros(nP, nres); mapTO = zeros(nP, nres)
+    nmax = max(nP, nT, nϕ, nTO)
+    sOr = LinRange(0.005, 0.995, nres)
+    for n in 1:nmax
+        println("n = $n / $nmax")
+        (n<=nϕ)  && (mapϕ[n, :]  .= partition_Oₑₓ(defP, defT; p=p, ϕ=ϕr[n], verbose=false, TOex=defTO, data=data, respace=(true, nres)))
+        (n<=nTO) && (mapTO[n, :] .= partition_Oₑₓ(defP, defT; p=p, ϕ=defϕ, verbose=false, TOex=TOr[n], data=data, respace=(true, nres)))
+        (n<=nP) && (mapP[n, :] .= partition_Oₑₓ(Pr[n], defT; p=p, ϕ=defϕ, verbose=false, TOex=defTO, data=data, respace=(true, nres)))
+        (n<=nT) && (mapT[n, :] .= partition_Oₑₓ(defP, Tr[n]; p=p, ϕ=defϕ, verbose=false, TOex=defTO, data=data, respace=(true, nres)))
+    end
+    # Set asbolutes
+    mapP.=abs.(mapP)
+    mapT.=abs.(mapT)
+    mapϕ.=abs.(mapϕ)
+    mapTO.=abs.(mapTO)
+
+    fig = Figure(size=(1200, 700))
+    ax = Axis3(fig[1,1], xlabel="Pressure [GPa]", ylabel="sOₑₓ [%TOₑₓ]", zlabel="ΔR")
+        surface!(ax, Pr, sOr, mapP, colormap=:Purples, alpha=1.0)
+        wireframe!(ax, Pr, sOr, mapP, color=:black)
+    ax = Axis3(fig[1,2], xlabel="Temperature [GPa]", ylabel="sOₑₓ [%TOₑₓ]", zlabel="ΔR")
+        surface!(ax, Tr, sOr, mapT, colormap=:Purples, alpha=1.0)
+        wireframe!(ax, Tr, sOr, mapT, color=:black)
+    ax = Axis3(fig[2,1], xlabel="ϕ [%]", ylabel="sOₑₓ [%TOₑₓ]", zlabel="ΔR")
+        surface!(ax, ϕr, sOr, mapϕ, colormap=:Purples, alpha=1.0)
+        wireframe!(ax, ϕr, sOr, mapϕ, color=:black)
+    ax = Axis3(fig[2,2], xlabel="TOₑₓ [% of Mₜ]", ylabel="sOₑₓ [%TOₑₓ]", zlabel="ΔR")
+        surface!(ax, 1e2TOr, sOr, mapTO, colormap=:Purples, alpha=1.0)
+        wireframe!(ax, 1e2TOr, sOr, mapTO, color=:black)
+    display(fig)
 end

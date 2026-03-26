@@ -156,24 +156,26 @@ struct Cbulk
     H2O     :: Float64
 end
 
-Cbulk(kwargs::NamedTuple) = Cbulk(; kwargs...)
+# =============================
+# ======== Constructors =======
+# =============================
 
+Cbulk(kwargs::NamedTuple) = Cbulk(; kwargs...)
 function Cbulk(;
-    SiO2 = 0e0,
-    MgO = 0e0,
-    FeO = 0e0,
-    Fe = 0e0,
-    CaO = 0e0,
-    Al2O3 = 0e0,
-    Na2O = 0e0,
-    Cr2O3 = 0e0,
-    Fe2O3 = 0e0,
-    O = 0e0,
-    TiO2 = 0e0,
-    K2O = 0e0,
-    H2O = 0e0,
+    SiO2    = 0e0,
+    MgO     = 0e0,
+    FeO     = 0e0,
+    Fe      = 0e0,
+    CaO     = 0e0,
+    Al2O3   = 0e0,
+    Na2O    = 0e0,
+    Cr2O3   = 0e0,
+    Fe2O3   = 0e0,
+    O       = 0e0,
+    TiO2    = 0e0,
+    K2O     = 0e0,
+    H2O     = 0e0,
     kwargs...
 )
-
     Cbulk(SiO2, MgO, FeO, Fe, CaO, Al2O3, Na2O, Cr2O3, Fe2O3, O, TiO2, K2O, H2O)
 end
