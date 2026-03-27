@@ -100,10 +100,10 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
         ∂Sᵢ = interpolate((sample_sOlist05,), ∂S∂sOₑₓ(sampled_sfO2, sample_sOlist), Gridded(Linear()))
 
     # Compute Jacobian variables
-    Φ = evΦ(TOₑₓ, Mf, mm.O)
-    s = sum(molXB)
-    Ys1 = y1*molXB[1] + y3*molXB[2] + y4*molXB[4] + y5*molXB[6]
-    Ys2 = molXB[1]*(y8*molXB[5] + y9*molXB[2])
+    Φ = evΦ(TOₑₓ, Mf, mm.O)                                         # Proportion of TOₑₓ → normalized XOₑₓ component
+    s = sum(molXB)                                                  # Sum of non-normalized molar components
+    Ys1 = y1*molXB[1] + y3*molXB[2] + y4*molXB[4] + y5*molXB[6]     # Sum of linear parameterized molar components
+    Ys2 = molXB[1]*(y8*molXB[5] + y9*molXB[2])                      # Sum of non-linear parameterized molar components
     _ln10 = 1/log(10)
 
     if !respace[1]
@@ -119,18 +119,19 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
             Fx = [sfO2(sOₑₓ) - Hirsch(T, Xm, sOₑₓ, TOₑₓ, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, mmXox, idxO)
                  sfO2(sOₑₓ) - cOₑₓ_to_fO2(cOₑₓ, Pin, Tin, TOₑₓ, Mf)]
 
-            siv = LinRange(0.005, 0.95, 100)
-            civ = LinRange(0.005, 0.3, 100)
-            mat = zeros(100, 4)
+            siv = LinRange(0.01, 0.90, 100)
+            mat = zeros(100, 2)
             for si in 1:100
                 # Commodity variables
-                γ = evγ(sOₑₓ, cOₑₓ, Φ); θ2 = evθ(γ, s)^2; α = evα(γ, θ); μ = evμ(α, s)
+                γ = evγ(siv[si], cOₑₓ, Φ); θ = evθ(γ, s); α = evα(γ, θ); μ = evμ(α, s); θ2 = θ^2
                 # Compute partial derivatives
                 mat[si, 2] = ∂M∂xOₑₓ(siv[si], Φ, γ, s, Ys1, Ys2, α, θ2, μ, _ln10, a, molXB[3], T)
-                mat[si, 1] = Hirsch(T, Xm, siv[si], TOₑₓ, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, mmXox, idxO)
+                mat[si, 1] = Hirsch(T, Xm, siv[si], TOₑₓ, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummyarray, mmXox, idxO)
             end
+            γ = evγ(sOₑₓ, cOₑₓ, Φ); θ = evθ(γ, s); α = evα(γ, θ); μ = evμ(α, s); θ2 = θ^2
             ∂S = ∂Sᵢ(sOₑₓ)
             ∂C = ∂C∂cOₑₓ(cOₑₓ, Φ, s, _ln10)
+            ∂M∂sOₑₓ = ∂M∂xOₑₓ(sOₑₓ, Φ, γ, s, Ys1, Ys2, α, θ2, μ, _ln10, a, molXB[3], T)
             ∂M∂cOₑₓ = ∂M∂xOₑₓ(cOₑₓ, Φ, γ, s, Ys1, Ys2, α, θ2, μ, _ln10, a, molXB[3], T)
             # Jacobian inverse
             J⁻¹ = J + inv([(∂S-∂M∂sOₑₓ) ∂M∂cOₑₓ; ∂S         ∂C])
@@ -139,8 +140,6 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
 
 
         end
-
-
 
         # Bisection solver
         # minsOₑₓ, maxsOₑₓ, residual, sharedfO2, sOₑₓ, etol, iter = 0.005TOₑₓ/Ms, 0.995TOₑₓ/Ms, 0.0, 0.0, 0.0, 1e-5, 0
@@ -292,4 +291,4 @@ end
 # Partial derivatives
 ∂S∂sOₑₓ(sfO2, sOlist) = @views diff(sfO2)./diff(sOlist)
 ∂C∂cOₑₓ(cOₑₓ, Φ, s, _ln10) = (1/cOₑₓ - Φ/(s+ Φ*cOₑₓ))*_ln10
-∂M∂xOₑₓ(xOₑₓ, Φ, γ, s, Ys1, Ys2, α, θ2, μ, _ln10, a, XFeO, T) = (Φ*xOₑₓ*s)/θ2 * ( (Ys1*μ + 2Ys2)/(T*μ^3) - (1/α + 2/(XFeO-2α))/a*_ln10) 
+∂M∂xOₑₓ(xOₑₓ, Φ, γ, s, Ys1, Ys2, α, θ2, μ, _ln10, a, XFeO, T) = Φ*((Ys1*μ + 2Ys2)/(T*μ^3) - s/a/θ2*_ln10*(1/α + 1/(XFeO-2α)))

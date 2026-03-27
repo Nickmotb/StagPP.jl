@@ -59,6 +59,8 @@ Rs=0.02
 niter=100
 nr = 50
 verbose = true
+Ctot = 0.01
+
 
 # partition_Oₑₓ(P, T, p=p, ϕ=ϕ, TOex=TOex, verbose=true, nr=20, data=data)
 
