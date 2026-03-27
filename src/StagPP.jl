@@ -18,7 +18,7 @@ module StagPP
     const rootdir = @__DIR__
     const savedir = joinpath(rootdir, "../", "+op"); !isdir(savedir) && mkdir(savedir)
     # Molar masses (g/mol)
-    const mm = Cbulk(60.08, 101.96, 71.85, 55.85, 56.08, 101.96, 61.98, 151.99, 159.69, 16.0, 79.88, 94.2, 18.015)
+    const mm = Cbulk(60.08, 101.96, 71.85, 55.85, 56.08, 101.96, 61.98, 151.99, 159.69, 16.0, 79.88, 94.2, 18.015, 44.009, 12.011)
     const Cbulk_iterator = String.(fieldnames(Cbulk))
     
 

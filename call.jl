@@ -54,18 +54,24 @@ T = 1600.
 p = 0.2
 ϕ=0.08
 TOex=7e-4
-Rf=0.02
-Rs=0.0
+Rf=0.0
+Rs=0.02
 niter=100
 nr = 50
+verbose = true
 
 # partition_Oₑₓ(P, T, p=p, ϕ=ϕ, TOex=TOex, verbose=true, nr=20, data=data)
 
-nP  = 30; Pr  = LinRange(1.0, 10.0, nP)
-nT  = 30; Tr  = LinRange(900., 2200., nT)
-nϕ  = 30; ϕr  = LinRange(1e-2, 0.2, nϕ)
-nTO = 30; TOr = LinRange(7e-5, 3e-4, nTO)
+nP  = 15; Pr  = LinRange(1.0, 10.0, nP)
+nT  = 15; Tr  = LinRange(900., 2200., nT)
+nϕ  = 15; ϕr  = LinRange(1e-2, 0.2, nϕ)
+nTO = 15; TOr = LinRange(7e-5, 3e-4, nTO)
 
 data    = Initialize_MAGEMin("sb24", verbose=false);
 mapϕ, mapTO = P_T_ϕ_TOₑₓ_Rspace(Pr, Tr, ϕr, TOr, data, nres=80)
 Finalize_MAGEMin(data)
+
+
+x = SA[1,2]
+
+foo(x) = x .+ 2 .*x

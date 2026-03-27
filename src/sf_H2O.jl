@@ -1887,18 +1887,18 @@
 
         - wt::Bool \t\t-->\t Indicates if the input composition is in weight percent (wt%) [default: false (molar fraction)]
     """
-    function oxidize_bulk(X, Rv, Xdummy; wt_in=false, wt_out=false, frac=false, FeFormat="Fe_O", SymXox=nothing, vector=false, Xox=nothing)
+    function oxidize_bulk(X, Rv, Xdummy; wt_in=false, wt_out=false, frac=false, FeFormat="Fe_O", SymXox=nothing, vector=false, oldXox=nothing)
         
         # R = Fe³/∑Fe | If negative, this removes R mol units from the bulk composition (makes the system reduced)
         (Rv<0.0) && (FeFormat="Fe_O")
 
         # Assign passed bulk to memory array (Correct from different Oxide list if needed)
-        if !isnothing(Xox)
+        if !isnothing(oldXox)
             for (i, ox) in enumerate(Xdummy.Xox)      
-                Xdummy.X[i] = (ox=="O" || ox=="Fe2O3") ? 0.0 : X[Xox.==ox][1]
+                Xdummy.X[i] = (ox=="O" || ox=="Fe2O3") ? 0.0 : X[oldXox.==ox][1]
             end
         else
-            Xdummy.X = Vector{Float64}(X)
+            Xdummy.X .= Vector{Float64}(X)
         end
 
         # Create window variables + and compute value sum

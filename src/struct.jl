@@ -154,6 +154,8 @@ struct Cbulk
     TiO2    :: Float64
     K2O     :: Float64
     H2O     :: Float64
+    CO2     :: Float64
+    C       :: Float64
 end
 
 # =============================
@@ -175,7 +177,9 @@ function Cbulk(;
     TiO2    = 0e0,
     K2O     = 0e0,
     H2O     = 0e0,
+    CO2     = 0e0,
+    C       = 0e0,
     kwargs...
 )
-    Cbulk(SiO2, MgO, FeO, Fe, CaO, Al2O3, Na2O, Cr2O3, Fe2O3, O, TiO2, K2O, H2O)
+    Cbulk(SiO2, MgO, FeO, Fe, CaO, Al2O3, Na2O, Cr2O3, Fe2O3, O, TiO2, K2O, H2O, CO2, C)
 end
