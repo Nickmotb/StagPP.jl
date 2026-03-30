@@ -49,20 +49,20 @@ load_sims = false
         no = [y20, noR, noK, noKR]
     end
 
-P = 2.0
-T = 1500.
-p = 0.2
-ϕ=0.04
-TOex=7e-4
-Rf=0.0
-Rs=0.02
+P = 3.0
+T = 1600.
+p = 0.0
+ϕ = 0.04
 niter=100
 nr = 50
 verbose = true
-Ctot = 0.01
+Ctot = 1e-3
+iXCO₂=0.1
+Rs = 0.05
+Rf = 0.00
 
 # data    = Initialize_MAGEMin("sb24", verbose=false);
-partition_Oₑₓ(P, T, p=p, ϕ=ϕ, TOex=TOex, verbose=true, nr=20, data=data)
+partition_Oₑₓ(P, T, p=p, ϕ=ϕ, Rs=Rs, Rf=Rf, verbose=true, nr=20, iXCO₂=iXCO₂, data=data, plotevo=true, Ctot=Ctot)
 # Finalize_MAGEMin(data)
 
 # nP  = 15; Pr  = LinRange(1.0, 10.0, nP)
