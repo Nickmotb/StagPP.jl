@@ -1,19 +1,20 @@
 # Stagno and Frost XCO2 equilibrium (2 Oex per 1 CO₂) | cOₑₓ in mass fraction of TOₑₓ
-function cOₑₓ_to_fO2(cOₑₓ, Pin, Tin, TOₑₓ, Mf)
+function cOₑₓ_to_fO2(cOₑₓ, Pin, Tin, s, Φ; giveXCO₂=false)
     # Checks
     @assert cOₑₓ>=0.0 "Mass of carbon being oxidized for XCO₂ call must be positive! (Don't call when reducing)"
     # Mass of Oₑₓ used for oxidation as mass fraction of molten tracer
-    XOₑₓ = (cOₑₓ*TOₑₓ/Mf)
-    # Unoxidized molar sums
-    s = Xm.SiO2/mm.SiO2 + Xm.MgO/mm.MgO + Xm.FeO/mm.FeO + Xm.CaO/mm.CaO + Xm.Al2O3/mm.Al2O3 + Xm.Na2O/mm.Na2O + Xm.Cr2O3/mm.Cr2O3
+    XOₑₓ = Φ*cOₑₓ
     # Convert Oₑₓ to molar fraction, and assess amount of XCO₂ in mols [0.5XCO₂ for each XOₑₓ]
-    mmO = XOₑₓ/mm.O
-    XCO₂ = 0.5(mmO)/(s+mmO)
+    XCO₂ = 0.5XOₑₓ/(s+XOₑₓ)
     # Limit to rexplored ranges
     P = Pin >= 11. ? 11. : Pin
     T = Tin >= c2k(1600.) ? c2k(1600.) : Tin
     # Compute logfO₂
-    return 5.44 - 21380/T + 0.078(1e5P-1)/T + log10(XCO₂) - 8
+    if giveXCO₂
+        return XCO₂
+    else
+        return 5.44 - 21380/T + 0.078(1e5P-1)/T + log10(XCO₂)
+    end
 end
 
 # Model:
@@ -45,10 +46,10 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
     # Solid / Molten tracer mass [kg]
     Ms = 1.0e+17
     Mf=ϕ*Ms; Ms-=Mf; Mc=Ctot*Ms
-    molMf = sum(1e3Mf.*XB./mmXox) # Mf in mols
+    # molMf = sum(1e3Mf.*XB./mmXox) # Mf in mols
 
     # Mols of available carbon
-    molCav = 1e3Mc/mm.C
+    # molCav = 1e3Mc/mm.C
 
     # IDV = ∫ΔVdP for melts
     IDV = solve_∫ΔVdP([P-0.05P, P, P+0.05P],[T-0.05T, T, T+0.05T])[2,2,1]
@@ -62,7 +63,7 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
     # Allocate iterative memory and create bulk structures
     J           = @SMatrix zeros(2,2)   # Jacobian
     sol         = @SVector zeros(2)     # Solution Vector
-    dummyarray  = zeros(length(X))      # for Hirschmann calls
+    dummy       = zeros(length(XB))   # for Hirschmann calls
     Xdummy      = (X=Vector{Float64}(X), Xox=Vector{String}(Xox), mm=get_Xoxmm(Xox)) # For oxidizing calls
     if isnothing(TOex)
         Xs = oxidize_bulk(X, Rs, Xdummy, FeFormat="FeO_O", wt_out=true, frac=true, SymXox=SymXox); 
@@ -76,6 +77,7 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
         println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | Rs=$(Rs) | Rf=$(Rf) | Source mix = $p) ----")
         println("Total Oₑₓ budget = 0.0 kg")
         println("TOₑₓ partitioning → [0.0% solid, 0.0% melt]")
+        return
     end
 
     # Generate solid fO₂ space
@@ -93,83 +95,73 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
         flag && Finalize_MAGEMin(data);
     # -- Create interpolation object
         sfO2 = extrapolate(interpolate((sOₑₓlist.*Ms./TOₑₓ,), [out[i].fO2 for i in eachindex(out)], Gridded(Linear())), Line())
-        sample_sOlist = LinRange(0.005, 0.995, 250)
+        sample_sOlist = LinRange(1e-7, 0.995, 250)
         sample_sOlist05 = 0.5(sample_sOlist[1:end-1] + sample_sOlist[2:end])
         sampled_sfO2 = sfO2(sample_sOlist)
     # -- Solid partial derivative
-        ∂Sᵢ = interpolate((sample_sOlist05,), ∂S∂sOₑₓ(sampled_sfO2, sample_sOlist), Gridded(Linear()))
+        ∂Sᵢ = extrapolate(interpolate((sample_sOlist05,), ∂S∂sOₑₓ(sampled_sfO2, sample_sOlist), Gridded(Linear())), Line())
 
     # Compute Jacobian variables
-    Φ = evΦ(TOₑₓ, Mf, mm.O)                                         # Proportion of TOₑₓ → normalized XOₑₓ component
-    s = sum(molXB)                                                  # Sum of non-normalized molar components
-    Ys1 = y1*molXB[1] + y3*molXB[2] + y4*molXB[4] + y5*molXB[6]     # Sum of linear parameterized molar components
-    Ys2 = molXB[1]*(y8*molXB[5] + y9*molXB[2])                      # Sum of non-linear parameterized molar components
-    _ln10 = 1/log(10)
+    Φ = evΦ(TOₑₓ, Mf, mm.O)                                          # Proportion of TOₑₓ → normalized XOₑₓ component
+    s = sum(molXB)                                                   # Sum of non-normalized molar components
+    _ln10, _T = 1/log(10), 1/T                                       
+    Ys1 = (y1*molXB[1] + y3*molXB[2] + y4*molXB[4] + y5*molXB[6])*_T  # Sum of linear parameterized molar components
+    Ys2 = molXB[1]*(y8*molXB[5] + y9*molXB[2])*_T                     # Sum of non-linear parameterized molar components
 
     if !respace[1]
-
         # Newton Solver
-        minsOₑₓ, maxsOₑₓ =  0.005, 0.995
-        mincOₑₓ, maxcOₑₓ = 1e-5, 0.5 #(2molCav*mm.O)/TOₑₓ
+        minsOₑₓ, maxsOₑₓ =  1e-7, 0.99
+        mincOₑₓ, maxcOₑₓ = 1e-7, 0.99 #(2molCav*mm.O)/TOₑₓ
         x = sol + [0.7(minsOₑₓ+maxsOₑₓ), 0.1(mincOₑₓ+maxcOₑₓ)]
-        residual, etol, iter, damp = 0.0, 1e-5, 0, 0.01
-        for it in 1:niter
-            # Evaluate current stage
-            sOₑₓ, cOₑₓ = x
-            Fx = [sfO2(sOₑₓ) - Hirsch(T, Xm, sOₑₓ, TOₑₓ, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, mmXox, idxO)
-                 sfO2(sOₑₓ) - cOₑₓ_to_fO2(cOₑₓ, Pin, Tin, TOₑₓ, Mf)]
-
-            siv = LinRange(0.01, 0.90, 100)
-            mat = zeros(100, 2)
-            for si in 1:100
-                # Commodity variables
-                γ = evγ(siv[si], cOₑₓ, Φ); θ = evθ(γ, s); α = evα(γ, θ); μ = evμ(α, s); θ2 = θ^2
-                # Compute partial derivatives
-                mat[si, 2] = ∂M∂xOₑₓ(siv[si], Φ, γ, s, Ys1, Ys2, α, θ2, μ, _ln10, a, molXB[3], T)
-                mat[si, 1] = Hirsch(T, Xm, siv[si], TOₑₓ, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummyarray, mmXox, idxO)
+        etol, damp = 1e-1, 1.0
+        XCO₂ = 0.0
+        mat = zeros(niter, 2)
+            for it in 1:niter
+                # Evaluate current stage
+                sOₑₓ, cOₑₓ = x
+                # Reset dummy
+                dummy .= molXB
+                # Compute residual
+                Fx = Rx(sfO2, P, T, sOₑₓ, cOₑₓ, TOₑₓ, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ, XCO₂)
+                # Exit if below tolerance
+                if sum(abs.(Fx))<=etol
+                    if verbose
+                        println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | Rs=$(Rs) | Rf=$(Rf) | Source mix = $p) ----")
+                        println("Shared fO₂ = $(sfO2(sOₑₓ)) |  residual = $(sum(abs.(Fx)))")
+                        println("Total Oₑₓ budget = $TOₑₓ kg ($(1e2TOₑₓ/Ms)% of solid tracer mass)")
+                        println("TOₑₓ partitioning → [$(round(1e2x[1], digits=4))% solid, $(round(1e2(1 - x[1] - x[2]), digits=4))% melt], $(round(1e2x[2], digits=4))% used to oxidize C → CO₂")
+                        println("Melt XCO₂ = $(cOₑₓ_to_fO2(cOₑₓ, P, T, s, Φ, giveXCO₂=true))")
+                        println("Converged in $it iterations.")
+                    end
+                    break
+                end
+                mat[it,:] .= Fx;
+                # Partial derivatives
+                α = evα(sOₑₓ, cOₑₓ, Φ); θ = evθ(α, s); θ² = θ^2
+                ∂S = ∂Sᵢ(sOₑₓ)
+                ∂C = ∂C∂cOₑₓ(cOₑₓ, Φ, s, _ln10)
+                ∂M∂iOₑₓ = ∂M∂xOₑₓ(Φ, Ys1, Ys2, α, θ, θ², _ln10, a, molXB[3])
+                # Jacobian inverse
+                J⁻¹ = J + inv([(∂S-∂M∂iOₑₓ) -∂M∂iOₑₓ; ∂S         -∂C])
+                x = x - J⁻¹*Fx*damp
+                # Clamp
+                x = SA[ min(max(x[1], minsOₑₓ), maxsOₑₓ), min(max(x[2], mincOₑₓ), maxcOₑₓ)]
+                # Output if not converged
+                if verbose && it==niter
+                    println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | Rs=$(Rs) | Rf=$(Rf) | Source mix = $p) ----")
+                    println("Shared fO₂ = $(sfO2(sOₑₓ)) |  residual = $(sum(abs.(Fx)))")
+                    println("Total Oₑₓ budget = $TOₑₓ kg ($(1e2TOₑₓ/Ms)% of solid tracer mass)")
+                    println("TOₑₓ partitioning → [$(round(1e2x[1], digits=4))% solid, $(round(1e2(1 - x[1] - x[2]), digits=4))% melt], $(round(1e2x[2], digits=4))% used to oxidize C → CO₂")
+                    println("Melt XCO₂ = $(cOₑₓ_to_fO2(cOₑₓ, P, T, s, Φ, giveXCO₂=true)))")
+                    println("Did not converge in $it iterations.")
+                end
             end
-            γ = evγ(sOₑₓ, cOₑₓ, Φ); θ = evθ(γ, s); α = evα(γ, θ); μ = evμ(α, s); θ2 = θ^2
-            ∂S = ∂Sᵢ(sOₑₓ)
-            ∂C = ∂C∂cOₑₓ(cOₑₓ, Φ, s, _ln10)
-            ∂M∂sOₑₓ = ∂M∂xOₑₓ(sOₑₓ, Φ, γ, s, Ys1, Ys2, α, θ2, μ, _ln10, a, molXB[3], T)
-            ∂M∂cOₑₓ = ∂M∂xOₑₓ(cOₑₓ, Φ, γ, s, Ys1, Ys2, α, θ2, μ, _ln10, a, molXB[3], T)
-            # Jacobian inverse
-            J⁻¹ = J + inv([(∂S-∂M∂sOₑₓ) ∂M∂cOₑₓ; ∂S         ∂C])
-            # Compute Step
-            x = sol - J⁻¹*Fx*damp
+        mOₑₓ = 1 - x[1] - x[2]
+        fig = Figure(size=(1000, 700))
+        ax = Axis(fig[1,1]); plot!(ax, 1:niter, mat[:,1]); plot!(ax, 1:niter, mat[:,2], color=:red)
+        display(fig)
 
-
-        end
-
-        # Bisection solver
-        # minsOₑₓ, maxsOₑₓ, residual, sharedfO2, sOₑₓ, etol, iter = 0.005TOₑₓ/Ms, 0.995TOₑₓ/Ms, 0.0, 0.0, 0.0, 1e-5, 0
-        # for it = 1:niter
-        #     iter += 1
-        #     sOₑₓ = 0.5(maxsOₑₓ+minsOₑₓ)
-        #     residual = ΔR(sfO2, T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummyarray, mmXox)
-        #     if (abs(residual)<=etol)
-        #         sharedfO2 = Hirsch(T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummyarray, mmXox)
-        #         break
-        #     end
-        #     if residual>0.0
-        #         maxsOₑₓ = sOₑₓ
-        #     elseif isnan(residual) || residual<0.0
-        #         minsOₑₓ = sOₑₓ
-        #     end
-        # end
-
-        # eq_XCO2(sharedfO2, P, T)
-        # fO2 ↔ XCO₂ ↔ reduced/oxidized carbon mass as x × TOₑₓ
-
-        if verbose
-            println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | Rs=$(Rs) | Rf=$(Rf) | Source mix = $p) ----")
-            println("Shared fO₂ = $sharedfO2 |  residual = $(abs(residual))")
-            println("Total Oₑₓ budget = $TOₑₓ kg ($(1e2TOₑₓ/Ms)% of solid tracer mass)")
-            println("TOₑₓ partitioning → [$(round(1e2(sOₑₓ*Ms/TOₑₓ), digits=4))% solid, $(round(1e2(TOₑₓ-sOₑₓ*Ms)/TOₑₓ, digits=4))% melt]")
-            println("Converged in $iter iterations.")
-        end
-
-        return 1e2sOₑₓ*Ms/TOₑₓ
+        return x[1], mOₑₓ, x[2] 
 
     else
 
@@ -185,32 +177,33 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
 
 end
 
-function Hirsch(T, Xm, sOₑₓ, TOₑₓ, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, mmXox, idxO)
+function Hirsch(T, sOₑₓ, cOₑₓ, TOₑₓ, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ)
     # Checks
     @assert (:O∈SymXox && :FeO∈SymXox) "This function requires FeO + O format!"
     # Extract melt fOₑₓ
-    mfOₑₓ = (1-sOₑₓ-cOₑₓ)*TOₑₓ/Mf
-    # Fill dummy with current composition
-    dummy .= XB
+    mfOₑₓ = Φ*(1-sOₑₓ-cOₑₓ)
     # Oxidize
     dummy[idxO] = mfOₑₓ
-    # mass fraction → molar fraction conversion
-    dummy./=mmXox
     # Normalize
-    dummy./=sum(dummy)
+    dummy./=(s+mfOₑₓ)
     # Construct bulk and assess hardlimit
     Xl = Cbulk((; zip(SymXox, dummy)...))
-    (Xl.O>=0.5Xl.FeO) && (return NaN) # Too much oxygen!! Above hard-limit.
-    
+    (Xl.O>=0.5Xl.FeO || Xl.O == 0.0) && (return -Inf) # Too much oxygen!! Above hard-limit.
     # Compute mfO2
-    _ln10, _T = 1/log(10), 1/T
     mfO2 = (log10(Xl.O/(Xl.FeO-2Xl.O)) - b - c*_T + (ΔCₚ/R*_ln10 * (1 - T₀*_T - log(T/T₀))) + IDV/(1e-3R)*_T*_ln10 
                         - _T*(y1*Xl.SiO2 + y3*Xl.MgO + y4*Xl.CaO + y5*Xl.Na2O + y8*Xl.SiO2*Xl.Al2O3 + y9*Xl.SiO2*Xl.MgO))/a
     return mfO2
 end
 
-function ΔR(sfO2, T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, mmXox)
-    return sfO2(sOₑₓ) - Hirsch(T, Xm, sOₑₓ, TOₑₓ, Ms, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, mmXox)
+function Rx(sfO2, P, T, sOₑₓ, cOₑₓ, TOₑₓ, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ, XCO₂)
+    Rₛ = sfO2(sOₑₓ)
+    return SA[Rₛ - Hirsch(T, sOₑₓ, cOₑₓ, TOₑₓ, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ)
+              Rₛ - cOₑₓ_to_fO2(cOₑₓ, P, T, s, Φ)]
+end
+
+function Rx1D(sfO2, T, sOₑₓ, cOₑₓ, TOₑₓ, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s)
+    Rₛ = sfO2(sOₑₓ)
+    return Rₛ - Hirsch(T, sOₑₓ, cOₑₓ, TOₑₓ, Mf, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s)
 end
 
 function P_T_ϕ_TOₑₓ_Sspace(Pr::K, Tr::K, ϕr::K, TOr::K, data; cutϕ::Float64=-1.0, cutTO::Float64=-1.0, p::Float64=0.2, niter::Int64=100, nr::Int64=50) where {K}
@@ -282,13 +275,12 @@ function P_T_ϕ_TOₑₓ_Rspace(Pr::K, Tr::K, ϕr::K, TOr::K, data; p::Float64=0
 end
 
 # Variables
-@inline evΦ(TOₑₓ, Mf, mmO) = TOₑₓ/Mf/mmO
-@inline evγ(sOₑₓ, cOₑₓ, Φ) = Φ*(1 - sOₑₓ - cOₑₓ)
-@inline evθ(γ, s) = s + γ
-@inline evα(γ, θ) = γ/θ
-@inline evμ(α, s) = s - α
+@inline evΦ(TOₑₓ, Mf, mmO) = TOₑₓ/Mf/mmO            # Conversion factor
+@inline evα(sOₑₓ, cOₑₓ, Φ) = Φ*(1 - sOₑₓ - cOₑₓ)    # mass fraction of TOₑₓ → non-normalized XFe₂O₃
+@inline evθ(α, s) = s - α                           # 
+@inline evαₙ(α, θ) = α/θ
 
 # Partial derivatives
 ∂S∂sOₑₓ(sfO2, sOlist) = @views diff(sfO2)./diff(sOlist)
-∂C∂cOₑₓ(cOₑₓ, Φ, s, _ln10) = (1/cOₑₓ - Φ/(s+ Φ*cOₑₓ))*_ln10
-∂M∂xOₑₓ(xOₑₓ, Φ, γ, s, Ys1, Ys2, α, θ2, μ, _ln10, a, XFeO, T) = Φ*((Ys1*μ + 2Ys2)/(T*μ^3) - s/a/θ2*_ln10*(1/α + 1/(XFeO-2α)))
+∂C∂cOₑₓ(cOₑₓ, Φ, s, _ln10) = s*_ln10/(cOₑₓ*(s + Φ*cOₑₓ))
+∂M∂xOₑₓ(Φ, Ys1, Ys2, α, θ, θ², _ln10, a, XFeO) = Φ/θ²/a*(Ys1 + 2Ys2/θ - _ln10*(θ²/α + 2(θ+α)/(XFeO - 2α)))
