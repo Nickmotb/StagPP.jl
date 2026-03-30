@@ -96,10 +96,9 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
     # sOₑₓ and mOₑₓ caps
     maxsOₑₓ = min((0.5molX[3]*mm.O)/(sum(X) + 0.5molX[3]*mm.O)*(Mf/TOₑₓ), 1.0)
     maxmOₑₓ = min((0.5molXB[3]*mm.O)/(sum(XB) + 0.5molXB[3]*mm.O)*(Mf/TOₑₓ), 1.0)
-    maxXCO₂ = min(1.0, iXCO₂+molCav/molMf)
 
     # === Generate solid fO₂ space
-        Rlist = LinRange(0.00001, 0.05, nr)
+        Rlist = LinRange(0.00001, 0.15, nr)
         Xlist = Vector{Vector{Float64}}(undef, nr); 
         sOₑₓlist = zeros(nr)
         for i in 1:nr
@@ -123,7 +122,7 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
         # Newton Solver
         minsOₑₓ =  1e-7
         minmOₑₓ = 1e-7
-        minXCO₂ = 1e-9
+        minXCO₂ = 1e-7; maxXCO₂ = max(min(1.0, iXCO₂+molCav/molMf), minXCO₂)
         x = sol + [0.7(minsOₑₓ+maxsOₑₓ), 0.1(minmOₑₓ+maxmOₑₓ), 1e-4]
         etol, damp = 1e-2, 0.25
         plotevo && (mat = zeros(niter, 3, 3))
@@ -138,7 +137,7 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
             # Compute residual
             Fx = Rx(sfO2, P, T, sOₑₓ, mOₑₓ, XCO₂, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ, sw, Φₘ, cα, molXB)
             # Exit if below tolerance
-            aR = (x[3]==1.0 || x[3]==0.0) ? max(abs(Fx[1]), abs(Fx[3])) : maximum(abs.(Fx))
+            aR = (x[3]==maxXCO₂ || x[3]==minXCO₂) ? max(abs(Fx[1]), abs(Fx[3])) : maximum(abs.(Fx))
             if aR<=etol
                 if verbose
                     if verb_flag==-1
@@ -148,7 +147,7 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
                     end
                     println("Shared fO₂ = $(sfO2(sOₑₓ)) |  residual = $aR")
                     println("Total Oₑₓ budget = $(round(TOₑₓ, digits=4)) kg ($(round((1e2TOₑₓ/Ms), digits=4))% of solid tracer mass)")
-                    println("TOₑₓ partitioning → [$(round(1e2x[1], digits=4))% solid, $(round(1e2x[2], digits=4))% melt], $(round(1e2(1 - x[1] - x[2]), digits=4))% stored as melt CO₂")
+                    println("TOₑₓ partitioning → [$(round(1e2x[1], digits=4))% solid, $(round(1e2x[2], digits=4))% melt] stored as Fe₂O₃, $(round(1e2(1 - x[1] - x[2]), digits=4))% stored as melt CO₂")
                     println("Melt XCO₂ = $(x[3])")
                     println("Converged in $it iterations.")
                 end
@@ -183,7 +182,7 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
                 end
                 println("Shared fO₂ = $(sfO2(sOₑₓ)) |  residual = $aR")
                 println("Total Oₑₓ budget = $(round(TOₑₓ, digits=4)) kg ($(round((1e2TOₑₓ/Ms), digits=4))% of solid tracer mass)")
-                println("TOₑₓ partitioning → [$(round(1e2x[1], digits=4))% solid, $(round(1e2x[2], digits=4))% melt], $(round(1e2(1 - x[1] - x[2]), digits=4))% stored as melt CO₂")
+                println("TOₑₓ partitioning → [$(round(1e2x[1], digits=4))% solid, $(round(1e2x[2], digits=4))% melt] stored as Fe₂O₃, $(round(1e2(1 - x[1] - x[2]), digits=4))% stored as melt CO₂")
                 println("Melt XCO₂ = $(x[3])")
                 println("Did not converge in $it iterations.")
             end
@@ -196,7 +195,7 @@ function partition_Oₑₓ(P::K, T::K; p::K=0.2, ϕ::K=0.01, Rs::K=0.02, Rf::K=0
             ax = Axis(fig[1,1], ylabel="Residual", xlabel="Iterations", xgridvisible=false, ygridvisible=false); 
             scatterlines!(ax, 1:iend, mat[1:iend,1,1],label="Solid ↔ melt fO₂ equilibrium (eq. 1)",marker=:rect,strokewidth=1.1)
             scatterlines!(ax, 1:iend, mat[1:iend,2,1], color=:red,label="Solid ↔ EDDOG fO₂ equilibrium (eq. 2)",marker=:rect,strokewidth=1.1)
-            scatterlines!(ax, 1:iend, mat[1:iend,3,1], color=:green,label="Mass conservations (eq. 3)",marker=:rect,strokewidth=1.1)
+            scatterlines!(ax, 1:iend, mat[1:iend,3,1], color=:green,label="Mass conservation (eq. 3)",marker=:rect,strokewidth=1.1)
             axislegend(ax, position=:rt)
             ax = Axis(fig[1,2], ylabel="fO2", xlabel="Iterations", xgridvisible=false, ygridvisible=false); 
             scatterlines!(ax, 1:iend, mat[1:iend,1,2],label="Solid",marker=:rect,strokewidth=1.1)
@@ -262,7 +261,7 @@ function XCO₂_to_fO2(XCO₂, P, T)
     # P = Pin >= 11. ? 11. : Pin
     # T = Tin >= c2k(1600.) ? c2k(1600.) : Tin
     # Compute logfO₂
-    return 5.44 - 21380/T + 0.078(1e5P-1)/T + log10(XCO₂) - 13
+    return 5.44 - 21380/T + 0.078(1e5P-1)/T + log10(XCO₂) - 15
 end
 
 function Rx(sfO2, P, T, sOₑₓ, mOₑₓ, XCO₂, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ, sw, Φₘ, cα, molXB)
