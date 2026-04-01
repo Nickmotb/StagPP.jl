@@ -50,15 +50,15 @@ load_sims = false
     end
 
 P = 1.0
-T = 1500.
+T = 1200.
 p = 0.2             
-ϕ = 0.04
-TOex = 0.1
+ϕ = 0.02
+TOex = 0.045
 TC = 0.3
 
-data    = Initialize_MAGEMin("sb24", verbose=false);
-s, m , c = partition_Oₑₓ(P, T, p, ϕ, TOex, TC, verbose=true, plotevo=true)
-Finalize_MAGEMin(data)
+# data    = Initialize_MAGEMin("sb24", verbose=false);
+s, m , c = partition_Oₑₓ(P, T, p, ϕ, TOex, TC, verbose=true, plotevo=true, data=data)
+# Finalize_MAGEMin(data)
 
 # nP  = 15; Pr  = LinRange(1.0, 10.0, nP)
 # nT  = 15; Tr  = LinRange(900., 2200., nT)
