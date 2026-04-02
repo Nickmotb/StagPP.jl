@@ -20,11 +20,11 @@
 #
 # Equations:
 # (1) Equilibrium constraint    :  solid fO₂(P,T,sOₑₓ) = melt fO₂(P,T,mOₑₓ)
-# (2) Equilibrium constraint    :  solid fO₂(P,T,sOₑₓ) = EDDOG fO₂(P,T,XCO₂) <-- Maybe exclude residual if XCO₂<0.0 or XCO₂>1.0
-# (3a) Mass conservation         :  1 = sOₑₓ + mfOₑₓ + Oₑₓ_in_CO₂(XCO₂)  →  1 = sOₑₓ + mfOₑₓ + Φ*cα/(sw+cα)
+# (2) Equilibrium constraint    :  melt fO₂(P,T,mOₑₓ) = EDDOG fO₂(P,T,XCO₂) <-- Maybe exclude residual if XCO₂<0.0 or XCO₂>1.0
+# (3) Mass conservation         :  1 = sOₑₓ + mfOₑₓ + Φ*XCO₂/(1-XCO₂)
 #
 # Jacobian : [∂(1)∂sOₑₓ ∂(1)∂mOₑₓ ∂(1)∂XCO₂         [∂S∂sOₑₓ     -∂M∂mOₑₓ        0
-#             ∂(2)∂sOₑₓ ∂(2)∂mOₑₓ ∂(2)∂XCO₂    =     ∂S∂sOₑₓ        0       -∂C∂XCO₂
+#             ∂(2)∂sOₑₓ ∂(2)∂mOₑₓ ∂(2)∂XCO₂    =        0         ∂M∂mOₑₓ       -∂C∂XCO₂
 #             ∂(3)∂sOₑₓ ∂(3)∂mOₑₓ ∂(3)∂XCO₂]           -1           -1      -∂(Φ*XCO₂/(1-XCO₂))∂XCO₂]
 #
 # Variable extentions:
@@ -37,8 +37,8 @@
 # - Hirschmann 2022 melt mapping from XFe₂O₃ (Oₑₓ) ↔ fO₂
 # - Stixrude and Bertelloni 2024 (MAGEMin) solid mapping from XFe₂O₃ (Oₑₓ) ↔ fO₂
 # - Stagno and Frost 2010 parameterization of melt EDDOG2 buffer fO₂ ↔ XCO₂
-function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, Rf::K=-1.0, nr=50, niter=100, 
-                        verbose=false, data=nothing, respace=(false, 20), plotevo=false) where {K <: Real}
+function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, Rf::K=-1.0, nr=25, niter=100, 
+                        verbose=false, data=nothing, respace=(false, 20), plotevo=false, damp=0.25) where {K <: Real}
 
     # Endmember bulks
     XH      = @SVector [0.4347, 0.4597, 0.0835, 0.0090, 0.0100, 0.0001, 0.0030, 0.0] # mass fraction
@@ -102,6 +102,10 @@ function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, 
     Ys1         = (y1*molXB[1] + y3*molXB[2] + y4*molXB[4] + y5*molXB[6])*_T    # Sum of linear parameterized molar components
     Ys2         = molXB[1]*(y8*molXB[5] + y9*molXB[2])*_T                       # Sum of non-linear parameterized molar components
 
+    # -- Solver boundary margin and XCO₂ sharpness parameter
+    lowclip   = 1e-9
+    sharpness = 1.0
+
     # === Generate solid fO₂ space
         Rlist = LinRange(0.00001, 0.20, nr)
         Xlist = Vector{Vector{Float64}}(undef, nr); 
@@ -119,8 +123,8 @@ function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, 
             out = multi_point_minimization(10P*ones(nr), k2c(T)*ones(nr), data, X=Xlist, Xoxides=Vector{String}(Xox), name_solvus=true, sys_in="wt", progressbar=false)
             flag && Finalize_MAGEMin(data);
         # -- Create interpolation object
-            sfO2 = extrapolate(interpolate((sOₑₓlist.*Ms./TOₑₓ,), [out[i].fO2 for i in eachindex(out)], Gridded(Linear())), Line())
-            sample_sOlist = LinRange(1e-9, maxsOₑₓ, 100)
+            sfO2 = extrapolate(interpolate((sOₑₓlist.*Ms./TOₑₓ,), [out[i].fO2 for i in eachindex(out)], Gridded(Linear())), Flat())
+            sample_sOlist = LinRange(0.8lowclip, 1.2maxsOₑₓ, 100)
             sample_sOlist05 = 0.5(sample_sOlist[1:end-1] + sample_sOlist[2:end])
             sampled_sfO2 = sfO2(sample_sOlist)
         # -- Solid partial derivative
@@ -128,19 +132,17 @@ function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, 
 
     if !respace[1]
         
-        # -- Barrier margin
-            lowclip = 1e-9
         # -- Compute independent boundaries
             maxmOₑₓ_uncapped  = (0.5molXB[3]*mm.O)/(sum(XB) + 0.5molXB[3]*mm.O)*(Mf/TOₑₓ)
             maxmOₑₓ, maxXCO₂  = min(maxmOₑₓ_uncapped, 1.0), max(min(1.0, maxXCO₂_raw), 0.0)
         # -- Initialise (static)solution vector
-            y = sol + ([x_to_y(0.3maxsOₑₓ, lowclip, maxsOₑₓ), x_to_y(0.01maxmOₑₓ, lowclip, maxmOₑₓ), x_to_y(0.01maxXCO₂, lowclip, maxXCO₂)])
-        # -- Define convergence tolerance (ϵ), correction dampening factor (damp), and maximum remaining residual (aR)
-            ϵ, damp = 1e-2, 0.2        
+            y = sol + [x_to_y(0.3maxsOₑₓ, lowclip, maxsOₑₓ), x_to_y(0.01maxmOₑₓ, lowclip, maxmOₑₓ), x_to_y(0.6maxXCO₂, lowclip, maxXCO₂)] #, x_to_y(lowclip, lowclip, maxmg)])
+        # -- Define convergence tolerance (ϵ)
+            ϵ = 1e-2        
         # -- Wrap parameters and call solver
             params = (; verb_flag, P, T, ϕ, Rs, Rf, TOex, TOₑₓ, p, TC, Φ, s, Φₘ,
                             T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, molXB,
-                                Ys1, Ys2, plotevo, verbose, lowclip, Mt)
+                                Ys1, Ys2, plotevo, verbose, lowclip, Mt, sharpness)
             sOₑₓ, mOₑₓ, XCO₂, converged, mat = constrained_smOₑₓ_XCO₂_solver(y, maxsOₑₓ, maxmOₑₓ, maxXCO₂, sfO2, ∂Sᵢ, ϵ, damp, niter; params...)
         # -- Plot evolution if requested
             if plotevo
@@ -176,13 +178,13 @@ function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, 
                 # Mark ceilings
                 scatterlines!(ax, [1, iend], [maxsOₑₓ, maxsOₑₓ], alpha=0.3, color=solidclr,marker=:rect,strokewidth=1.1); text!(ax, 0.1iend, 1.02maxsOₑₓ, text="Solid Fe³⁺ cap = $(round(maxsOₑₓ, digits=3))"*(maxsOₑₓ_uncapped>1.0 ? " ($(round(maxsOₑₓ_uncapped, digits=3)))" : ""), fontsize=12, font=:italic, color=solidclr)
                 scatterlines!(ax, [1, iend], [maxmOₑₓ, maxmOₑₓ], alpha=0.3, color=meltclr,marker=:rect,strokewidth=1.1); text!(ax, 0.4iend, 1.02maxmOₑₓ, text="Melt Fe³⁺ cap = $(round(maxmOₑₓ, digits=3))"*(maxmOₑₓ_uncapped>1.0 ? " ($(round(maxmOₑₓ_uncapped, digits=3)))" : ""), fontsize=12, font=:italic, color=meltclr)
-                ax2 = Axis(fig[1:2,2], ylabel=L"XCO_2", yaxisposition=:right, ylabelcolor=co2clr, ytickcolor=co2clr, yticklabelcolor=co2clr, xgridvisible=false, ygridvisible=false, yscale=log10); hidespines!(ax2, :l, :t, :b, :r); hidexdecorations!(ax2)
+                ax2 = Axis(fig[1:2,2], ylabel=L"XCO_2", yaxisposition=:right, ylabelcolor=co2clr, ytickcolor=co2clr, yticklabelcolor=co2clr, xgridvisible=false, ygridvisible=false); hidespines!(ax2, :l, :t, :b, :r); hidexdecorations!(ax2)
                     lines!(ax2, 1:iend, mat[1:iend,3,3], color=co2clr,label="In melt CO₂ ($(round(1 - x[1] - x[2], digits=3)) TOₑₓ)",linewidth=2.0)
                     scatterlines!(ax2, [1, iend], [maxXCO₂, maxXCO₂], alpha=0.3, color=co2clr,marker=:rect,strokewidth=1.1); text!(ax2, 0.7iend, 1.1maxXCO₂, text="Carbon limited XCO₂ = $(round(maxXCO₂, digits=3))", fontsize=12, font=:italic, color=co2clr)
                 # Limits
                     ul = max(maxsOₑₓ, maxmOₑₓ, maxXCO₂)
                     ylims!(ax, 0.0, 1.3ul); 
-                    ylims!(ax2, 1e-5, 10ul);
+                    ylims!(ax2, 0.0, 1.3ul);
                 display(fig)
             end
         # Return partitioning
@@ -290,39 +292,52 @@ function Hirsch(T, mOₑₓ, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV,
     return mfO2
 end
 
-# Stagno and Frost XCO2 equilibrium (2 Oex per 1 CO₂) | cOₑₓ in mass fraction of TOₑₓ
-function XCO₂_to_fO2(XCO₂, Pin, Tin)
+# Modified from Stagno and Frost XCO2 equilibrium (2 Oex per 1 CO₂) | cOₑₓ in mass fraction of TOₑₓ
+function XCO₂_to_fO2(XCO₂, Pin, Tin, sharpness, clim)
     # Checks
     @assert XCO₂>=0.0 "XCO₂ cannot be zero."
     # Limit to rexplored ranges
     P = Pin > 11. ? 11. : Pin < 2.5 ? 2.5 : Pin
     T = Tin >= c2k(1600.) ? c2k(1600.) : Tin < c2k(1100.) ? c2k(1100.) : Tin
     # Compute logfO₂
-    return 5.44 - 21380/T + 0.078(1e5P-1)/T + log10(XCO₂) - 12
+    return 5.44 - 21380/T + 0.078(1e4P-1)/T + log10(XCO₂/(sharpness*(clim-XCO₂)))
 end
 
-function Rx(sfO2, P, T, sOₑₓ, mOₑₓ, XCO₂, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ, Φₘ, molXB, D)
-    Rₛ = sfO2(sOₑₓ)
-    if D==:D3
-        return SA[Rₛ - Hirsch(T, mOₑₓ, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
-                Rₛ - XCO₂_to_fO2(XCO₂, P, T)
-                1 - sOₑₓ - mOₑₓ - Φ*XCO₂/(1-XCO₂)]
-    elseif D==:D2
-        return SA[Rₛ - Hirsch(T, mOₑₓ, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
-                1 - sOₑₓ - mOₑₓ - Φ*XCO₂/(1-XCO₂)]
-    end
+# From Ariskin and Barmina 1999
+function magnetite_buffer_fO2(T, logfO2)
+    # Ariskin and Barmina 1999 parameters
+    # b0 = -0.6232; b1=0.6826; b2=4.0438; b3=0.8251; c=0.0159; d1=8.3626; d2=35.9674; d3=10.7347
+    a=20964.7; b=0.6159; c=-8.8187; d1=-10.1838; d2=32.7525; d3=-14.2506
+    # Parameterized melt composition
+    SiO2=0.5109/mm.SiO2; TiO2=0.0207/mm.TiO2; Al2O3=0.1534/mm.Al2O3/2
+    FeO=0.1330/mm.FeO; MgO=0.0617/mm.MgO; CaO=0.0896/mm.CaO; Na2O= 0.0199/mm.Na2O/2
+    K2O=0.0109/mm.K2O/2
+    # Normalize
+    s = SiO2 + TiO2 + Al2O3 + FeO + MgO + CaO + Na2O + K2O
+    SiO2/=s; TiO2/=s; Al2O3/=s; FeO/=s; MgO/=s; CaO/=s; Na2O/=s; K2O/=s
+    # Compute logfO₂
+    return exp(a/T + b*logfO2 + c +d1*Na2O + d2*K2O)
 end
 
-function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{3,Float64},             # Initial transformed solution vector
-                                       slim :: K, mlim :: K, clim :: K,        # Limits for smOₑₓ, mOₑₓ and XCO₂
-                                       sfO2, ∂Sᵢ,                              # Solid fO₂ and numerical derivative (MAGEMin)
-                                       ϵ    :: K, damp :: K, niter :: Int64;   # Solver tolerance, dampening factor, and maximum iterations
+function Rx(sfO2, P, T, sOₑₓ, mOₑₓ, XCO₂, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ, Φₘ, molXB, sharpness, clim)
+    fₛ = sfO2(sOₑₓ)
+    fₗ = Hirsch(T, mOₑₓ, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
+    # D = magnetite_buffer_fO2(T, fₗ)
+    return SA[  fₛ - fₗ
+                fₛ - XCO₂_to_fO2(XCO₂, P, T, sharpness, clim)
+                1 - sOₑₓ - mOₑₓ - Φ*XCO₂/(1-XCO₂)]
+end
+
+function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{3,Float64},                  # Initial transformed solution vector
+                                       slim :: K, mlim :: K, clim :: K, # Limits for smOₑₓ, mOₑₓ and XCO₂
+                                       sfO2, ∂Sᵢ,                                   # Solid fO₂ and numerical derivative (MAGEMin)
+                                       ϵ    :: K, damp :: K, niter :: Int64;        # Solver tolerance, dampening factor, and maximum iterations
                                        # Verbose parameters
                                        verb_flag::Int64,P::K,T::K,ϕ::K,Rs::K,Rf::K,
                                        TOex::K,TOₑₓ::K,p::K,TC::K,Mt::K,
                                        # Pre-computed parameters
                                        s::K,Φ::K,Φₘ::K,T₀::K,ΔCₚ::K,a::K,b::K,c::K,y1::K,y3::K,lowclip::K,
-                                       y4::K,y5::K,y8::K,y9::K,IDV::K,_ln10::K,_T::K,Ys1::K,Ys2::K,
+                                       y4::K,y5::K,y8::K,y9::K,IDV::K,_ln10::K,_T::K,Ys1::K,Ys2::K,sharpness::K,
                                        idxO::Int64, plotevo::Bool,SymXox::SVector{N, Symbol},verbose::Bool,
                                        dummy::Vector{Float64}, molXB::SVector{N, Float64}) where{K<:AbstractFloat, N}
     
@@ -330,41 +345,42 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{3,Float64},        
     mat = zeros(niter, 3, 3) # [Residuals, fO₂, Partitioning]
 
     # y margins
-    state = 0
+    y_lows = x_to_y(lowclip, lowclip, slim)
+    y_highs = x_to_y(slim-lowclip, lowclip, slim)
+    y_lowm = x_to_y(lowclip, lowclip, mlim)
+    y_highm = x_to_y(mlim-lowclip, lowclip, mlim)
     y_lowc = x_to_y(lowclip, lowclip, clim)
-    y_highc = x_to_y(clim, lowclip, clim)
+    y_highc = x_to_y(clim-lowclip, lowclip, clim)
 
     # Converged flag
     converged = false
 
-    D       = :D3                 # Start as a 3D solver
-    SM3     = @SMatrix zeros(3,3) # Static Matrix 3 × 3
-    SM2     = @SMatrix zeros(2,2) # Static Matrix 3 × 3
+    SM     = @SMatrix zeros(3,3) # Static Matrix 3 × 3
     for it in 1:niter
         # Evaluate current stage
         y₁, y₂, y₃ = y
         # Transform back to original variables
         sOₑₓ, mOₑₓ, XCO₂ = y_to_x(y₁, lowclip, slim), y_to_x(y₂, lowclip, mlim), y_to_x(y₃, lowclip, clim)
-        print("Iteration $it: sOₑₓ = $(round(sOₑₓ, digits=4)) ($(round(slim, digits=4))), mOₑₓ = $(round(mOₑₓ, digits=4)) ($(round(mlim, digits=4))), XCO₂ = $(round(XCO₂, digits=4)) ($(round(clim, digits=4)))")
         # Iteration variables
         α   = evα(mOₑₓ, Φₘ)
         θₘ  = evθₘ(α, s)
         # Compute residual
-        Fx = Rx(sfO2, P, T, sOₑₓ, mOₑₓ, XCO₂, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ, Φₘ, molXB, D)
-        D==:D3 && println("   (R₁=$(round(Fx[1], digits=5)), R₂=$(round(Fx[2], digits=5)), R₃=$(round(Fx[3], digits=5)))")
-        D==:D2 && println("   (R₁=$(round(Fx[1], digits=5)), R₃=$(round(Fx[2], digits=5)))")
+        Fx = Rx(sfO2, P, T, sOₑₓ, mOₑₓ, XCO₂, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ, Φₘ, molXB, sharpness, clim)
+        print("Iteration $it: sOₑₓ = $(round(sOₑₓ, digits=6)) ($(round(slim, digits=4))), mOₑₓ = $(round(mOₑₓ, digits=6)) ($(round(mlim, digits=4)))")
+        println("   (R₁=$(round(Fx[1], digits=5)), R₂=$(round(Fx[2], digits=5)), R₃=$(round(Fx[3], digits=5)))")
         aR = maximum(abs.(Fx))
         # Store values for plotting
         if plotevo
-            D==:D3 ? (mat[it,:,1] .= Fx) : (mat[it,1,1] = Fx[1]; mat[it,2,1] = 0.0; mat[it,3,1] = Fx[2])
+            mat[it,:,1] .= Fx
             mat[it,1,2]  = sfO2(sOₑₓ)
             mat[it,2,2]  = Hirsch(T, mOₑₓ, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
-            mat[it,3,2]  = XCO₂_to_fO2(XCO₂, P, T)
+            mat[it,3,2]  = XCO₂_to_fO2(XCO₂, P, T, sharpness, clim)
             mat[it,:,3] .= [sOₑₓ, mOₑₓ, XCO₂]
         end
         # Check convergence
         if aR<=ϵ
             converged = true
+            println(""); println("")
             if verbose
                 if verb_flag==-1
                     println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | Rs=$(Rs) | Rf=$(Rf) | Mix=$p | TCarbon=$TC) ----")
@@ -382,32 +398,24 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{3,Float64},        
         # Partial derivatives
         ∂S = ∂Sᵢ(sOₑₓ)
         ∂M = ∂M∂mOₑₓ(Φₘ, Ys1, Ys2, α, θₘ, _ln10, a, molXB[3])
-        ∂C = ∂C∂XCO₂(XCO₂, _ln10)
+        ∂C = ∂C∂XCO₂(XCO₂, _ln10, sharpness, clim)
         ∂3 = ∂3∂XCO₂(Φ, XCO₂)
         # Jacobian inverse (Chain rule)
-        if D==:D3
-            ∂x∂y₁, ∂x∂y₂, ∂x∂y₃ = ∂x∂y(y₁, lowclip, slim), ∂x∂y(y₂, lowclip, mlim), ∂x∂y(y₃, lowclip, clim)
-            J⁻¹  = SM3 + inv([ ∂S*∂x∂y₁ -∂M*∂x∂y₂ 0.0; ∂S*∂x∂y₁ 0.0 -∂C*∂x∂y₃; -∂x∂y₁ -∂x∂y₂ -∂3*∂x∂y₃]) # J = ∂Rᵢ∂yᵢ =  ∂Rᵢ∂xᵢ * ∂xᵢ∂yᵢ
-        elseif D==:D2
-            ∂x∂y₁, ∂x∂y₂ = ∂x∂y(y₁, lowclip, slim), ∂x∂y(y₂, lowclip, mlim)
-            J⁻¹  = SM2 + inv([ ∂S*∂x∂y₁ -∂M*∂x∂y₂; -∂x∂y₁ -∂x∂y₂]) # J = ∂Rᵢ∂yᵢ =  ∂Rᵢ∂xᵢ * ∂xᵢ∂yᵢ
-        end
+        ∂x∂y₁, ∂x∂y₂, ∂x∂y₃ = ∂x∂y(y₁, lowclip, slim), ∂x∂y(y₂, lowclip, mlim), ∂x∂y(y₃, lowclip, clim)
+        J⁻¹  = SM + inv([   ∂S*∂x∂y₁   -∂M*∂x∂y₂     0.0
+                            ∂S*∂x∂y₁      0.0     -∂C*∂x∂y₃
+                            -∂x∂y₁       -∂x∂y₂   -∂3*∂x∂y₃  ]) # J = ∂Rᵢ∂yᵢ =  ∂Rᵢ∂xᵢ * ∂xᵢ∂yᵢ
         # Newton step
-        dn = J⁻¹*Fx*damp
-        # Adaptive step
-        if D==:D3
-            # α = 1.0
-            (y[3]-dn[3]<=y_lowc)  && (y = y + [y[1], y[2], y_lowc];  D=:D2; state=-1; println("Switched to 2D solver at it=$it"); continue)
-            (y[3]-dn[3]>=y_highc) && (y = y + [y[1], y[2], y_highc]; D=:D2; state=1;  println("Switched to 2D solver at it=$it"); continue)
-        end
+        dn = J⁻¹*Fx*damp; α = 1.0
+        # Adaptive stepping
+        (y[1]-dn[1]<=y_lows)  && (α = min(α, 0.5*(y[1]-y_lows)/dn[1]))
+        (y[1]-dn[1]>=y_highs) && (α = min(α, 0.5*(y[1]-y_highs)/dn[1]))
+        (y[2]-dn[2]<=y_lowm)  && (α = min(α, 0.5*(y[2]-y_lowm)/dn[2]))
+        (y[2]-dn[2]>=y_highm) && (α = min(α, 0.5*(y[2]-y_highm)/dn[2]))
+        (y[3]-dn[3]<=y_lowc)  && (α = min(α, 0.5*(y[3]-y_lowc)/dn[3]))
+        (y[3]-dn[3]>=y_highc) && (α = min(α, 0.5*(y[3]-y_highc)/dn[3]))
         # Take step
-        D==:D3 ? (y = y - dn) : (y = y - [dn[1], dn[2], 0.0])
-        # Check whether to release XCO₂ constraint
-        if D==:D2
-            sOₑₓ, mOₑₓ, XCO₂ = y_to_x(y₁, lowclip, slim), y_to_x(y₂, lowclip, mlim), y_to_x(y₃, lowclip, clim)
-            Fx = Rx(sfO2, P, T, sOₑₓ, mOₑₓ, state==1 ? y_highc : y_lowc, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ, Φₘ, molXB, D)
-            (Fx[2] <= 0.0) && (D=:D3; println("Releasing XCO₂ constraint at it=$it"); continue)
-        end
+        y = y - α*dn
 
         # Output if not converged
         if verbose && it==niter
@@ -420,7 +428,7 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{3,Float64},        
             println("Total Oₑₓ budget = $(round((1e2TOₑₓ/Mt), digits=4))% of total mass")
             println("TOₑₓ partitioning → [$(round(1e2sOₑₓ, digits=4))% solid, $(round(1e2mOₑₓ, digits=4))% melt] stored as Fe₂O₃, $(round(1e2(1 - sOₑₓ - mOₑₓ), digits=4))% stored as melt CO₂")
             println("Melt XCO₂ = $(XCO₂)")
-            println("Converged in $it iterations.")
+            println("Did not converged in $it iterations.")
         end
     end
 
@@ -440,6 +448,7 @@ end
 @inline evθₘ(α, s)       = s - α                 # Molar normalization factor
 # Partial derivatives
 @inline ∂S∂sOₑₓ(sfO2, sOlist)                        = @views diff(sfO2)./diff(sOlist)
-@inline ∂C∂XCO₂(XCO₂, _ln10)                         = _ln10 / XCO₂
+@inline ∂C∂XCO₂(XCO₂, _ln10, sharpness, maxV)        = _ln10*(1/XCO₂ + sharpness/(maxV-XCO₂))
 @inline ∂M∂mOₑₓ(Φₘ, Ys1, Ys2, α, θₘ, _ln10, a, XFeO) = -Φₘ/a * ( θₘ^(-2)*(Ys1 + 2Ys2/θₘ) - _ln10*(1/α + 2/(XFeO - 2α)))
 @inline ∂3∂XCO₂(Φ, XCO₂)                             = Φ*(1/(1-XCO₂)^2)
+@inline ∂4∂mOₑₓ(TOₑₓ, D, ∂M, b)                      = TOₑₓ*D*(b*∂M + 1)
