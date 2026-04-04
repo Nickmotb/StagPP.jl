@@ -49,19 +49,21 @@ load_sims = false
         no = [y20, noR, noK, noKR]
     end
 
-P = 2.0
-T = 1300.
-p = 0.2             
-ϕ = 0.01
-TOex = 0.01
-TC = 0.01
-damp = 0.25
-niter=100
+P = 10.0
+T = 2000.
+p = 0.0             
+ϕ = 0.05
+TOex = 0.05
+TC = 0.1
+damp = 0.017
+niter=1000
 
 # Dump oxygen in oxidizing C → CaCO₃?
 
 # data    = Initialize_MAGEMin("sb24", verbose=false);
-partition_Oₑₓ(P, T, p, ϕ, TOex, TC, verbose=true, plotevo=true, data=data, damp=damp, niter=niter)
+conv, mat = partition_Oₑₓ(P, T, p, ϕ, TOex, TC, verbose=true, plotevo=true, data=data, damp=damp, niter=niter);
+println("Done.")
+# P_T_ϕ_TOₑₓ_TC_topoplogy(data, "ϕ_TO", ns=7)
 # Finalize_MAGEMin(data)
 
 # nP  = 15; Pr  = LinRange(1.0, 10.0, nP)
