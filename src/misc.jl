@@ -40,7 +40,7 @@
 # - Stixrude and Bertelloni 2024 (MAGEMin) solid mapping from XFe₂O₃ (Oₑₓ) ↔ fO₂
 # - Stagno and Frost 2010 parameterization of melt EDDOG2 buffer fO₂ ↔ XCO₂
 function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, Rf::K=-1.0, nr=25, niter=100, 
-                        verbose=false, data=nothing, Rspace=false, plotevo=false, damp=0.25) where {K <: Real}
+                        verbose=false, data=nothing, Rspace=false, plotevo=false, damp=0.25, debugging=false) where {K <: Real}
 
     # Endmember bulks
     XH      = @SVector [0.4347, 0.4597, 0.0835, 0.0090, 0.0100, 0.0001, 0.0030, 0.0] # mass fraction
@@ -143,8 +143,8 @@ function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, 
     ϵ = 1e-2          
     # -- Wrap parameters and call solver
     params = (; verb_flag, P, T, ϕ, Rs, Rf, TOex, TOₑₓ, p, TC, Φ, s, Φₘ,
-    T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, molXB,
-    Ys1, Ys2, plotevo, verbose, lowclip, Mt, sharpness)
+                    T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, molXB,
+                        Ys1, Ys2, plotevo, verbose, lowclip, Mt, sharpness, debugging)
     converged, mat, itout = constrained_smOₑₓ_XCO₂_solver(y, maxsOₑₓ, maxmOₑₓ, maxXCO₂, maxfₑₓ, sfO2, sfO2⁻¹, ∂Sᵢ, ϵ, damp, niter; params...)
     # -- Plot evolution if requested
     if plotevo
@@ -339,7 +339,7 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{4,Float64},        
                                        # Pre-computed parameters
                                        s::K,Φ::K,Φₘ::K,T₀::K,ΔCₚ::K,a::K,b::K,c::K,y1::K,y3::K,lowclip::K,
                                        y4::K,y5::K,y8::K,y9::K,IDV::K,_ln10::K,_T::K,Ys1::K,Ys2::K,sharpness::K,
-                                       idxO::Int64, plotevo::Bool,SymXox::SVector{N, Symbol},verbose::Bool,
+                                       idxO::Int64, plotevo::Bool,SymXox::SVector{N, Symbol},verbose::Bool,debugging::Bool,
                                        dummy::Vector{Float64}, molXB::SVector{N, Float64}) where{K<:AbstractFloat, N}
     
     # Residual - fO₂ - Partitioning matrix for plotting
@@ -379,9 +379,6 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{4,Float64},        
         θₘ  = evθₘ(α, s)
         # Compute residual
         Fx, fₛ, fₗ, fᵪ = Rx(sfO2, P, T, sOₑₓ, mOₑₓ, XCO₂, fₑₓ, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ, Φₘ, molXB, sharpness, clim, Dsat)
-        # @printf "Iteration %d: sOₑₓ = %.4f (%.4f), mOₑₓ = %.4f (%.4f), XCO₂ = %.4f (%.4f), fₑₓ = %.4f (%.4f)" it sOₑₓ slim mOₑₓ mlim XCO₂ clim fₑₓ fₑₓlim
-        # @printf "\t(R₁=%.4f, R₂=%.4f, R₃=%.4f)" Fx[1] Fx[2] Fx[3]
-        # @printf "  (sfO₂=%.4f, mfO₂=%f, cfO₂=%.4f)\n" fₛ fₗ fᵪ
         # Store values
         Dsat ? (mat[it,:,1] .= [Fx[1], Fx[2], Fx[3], 0.0]) : (mat[it,:,1] .= Fx)
         mat[it,1,2]  = sfO2(sOₑₓ)
@@ -413,7 +410,12 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{4,Float64},        
         ∂M  = ∂M∂mOₑₓ(Φₘ, Ys1, Ys2, α, θₘ, _ln10, a, molXB[3])
         ∂C  = ∂C∂XCO₂(XCO₂, _ln10, sharpness, clim)
         ∂3  = ∂3∂XCO₂(Φ, XCO₂)
-        # @printf "\t(∂S=%.4f, ∂M=%f, ∂C=%.4f, ∂3=%.4f)" ∂S ∂M ∂C ∂3
+        if debugging
+            @printf "Iteration %d: sOₑₓ = %.4f (%.4f), mOₑₓ = %.4f (%.4f), XCO₂ = %.4f (%.4f), fₑₓ = %.4f (%.4f)\n" it sOₑₓ slim mOₑₓ mlim XCO₂ clim fₑₓ fₑₓlim
+            @printf "\t(R₁=%.4f, R₂=%.4f, R₃=%.4f)" Fx[1] Fx[2] Fx[3]
+            @printf "  (sfO₂=%.4f, mfO₂=%f, cfO₂=%.4f)\n" fₛ fₗ fᵪ
+            @printf "\t(∂S=%.4f, ∂M=%f, ∂C=%.4f, ∂3=%.4f)\n\n" ∂S ∂M ∂C ∂3
+        end
         # Jacobian inverse (Chain rule)
         ∂x∂y₁, ∂x∂y₂, ∂x∂y₃, ∂x∂y₄ = ∂x∂y(y₁, lowclip, slim), ∂x∂y(y₂, lowclip, mlim), ∂x∂y(y₃, lowclip, clim), ∂x∂y(y₄, lowclip, fₑₓlim)
         # @printf "  (∂x∂y₁=%.4f, ∂x∂y₂=%f, ∂x∂y₃=%.4f, ∂x∂y₄=%.4f)\n" ∂x∂y₁ ∂x∂y₂ ∂x∂y₃ ∂x∂y₄
