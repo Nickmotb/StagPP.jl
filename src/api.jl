@@ -144,12 +144,12 @@ function time_vs_field(Dblock, field::String; fsize=(800, 600), subsample=0, col
                             xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15, yreversed=false, 
                             mov_avg=false, mov_avg_window=0, savein="", tstart=nothing, tend=nothing,
                             scatter=true,
-                                markersize=10, 
+                                markersize=7, 
                                 marker=:circle,
                             line=true,
-                                linewidth=2.5, 
+                                linewidth=1.7, 
                                 linestyle=:solid,
-                            fig = nothing, fpos = (1,1), disp=true, logscale=false, leg=true, yrange=nothing,
+                            fig = nothing, fpos = (1,1), disp=true, logscale=false, leg=true, yrange=nothing, framevisible=true
                             )
     
     if Dblock isa Vector{DataBlock}
@@ -163,7 +163,7 @@ function time_vs_field(Dblock, field::String; fsize=(800, 600), subsample=0, col
                                 linewidth=linewidth, 
                                 linestyle=linestyle,
                             fig = fig, fpos = fpos, disp=disp,
-                            logscale=logscale, leg=leg, yrange=yrange,
+                            logscale=logscale, leg=leg, yrange=yrange, framevisible=framevisible,
                             clrsmap = :vik100)
         return
     end
@@ -241,7 +241,7 @@ function time_vs_field_multiple(Dblock, field::String; fsize=(800, 600), subsamp
                                 linewidth=2.5, 
                                 linestyle=:solid,
                             fig = nothing, fpos = (1,1), disp=true,
-                            clrsmap = :vik100, logscale=false, leg=true, yrange=nothing,
+                            clrsmap = :vik100, logscale=false, leg=true, yrange=nothing, framevisible=true,
                             )
 
     # field to use
@@ -317,7 +317,7 @@ function time_vs_field_multiple(Dblock, field::String; fsize=(800, 600), subsamp
     Δ = 0.05(localmax - localmin)
     !logscale && (yreversed ? ylims!(ax, localmax+Δ, localmin-Δ) : ylims!(ax, localmin-Δ, localmax+Δ))
     xlims!(ax, tstart, tend)
-    leg && axislegend(ax; position = :lt, unique=true, framevisible=true)
+    leg && axislegend(ax; position = :lt, unique=true, framevisible=framevisible)
     disp && display(fig)
     (savein != "") && save(savein*".png", fig)
 end
@@ -958,8 +958,8 @@ function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap
     end
 
     # Automatic colorrange if not given
-    isnothing(colorrange[1]) && (colorrange = (minimum(yp), colorrange[2]))
-    isnothing(colorrange[2]) && (colorrange = (colorrange[1], maximum(yp)))
+    isnothing(colorrange[1]) && (colorrange = (minimum(filter(x->!isnan(x), yp)), colorrange[2]))
+    isnothing(colorrange[2]) && (colorrange = (colorrange[1], maximum(filter(x->!isnan(x), yp))))
 
     # Plot
     isnothing(fig) && (fig = Figure(size = fsize))
@@ -973,6 +973,112 @@ function rprof_vs_field(Dblock::DataBlock, field::String; fsize=(900, 600), cmap
     xlims!(ax, tstart, tend)
     disp && display(fig)
     (savein != "") && save(savein*".png", fig)
+
+end
+
+function rprof_series(Dblocks, field::String, tslice; fsize=(900, 600), logscale=false, marker=:rect, markersize=7, scatter=true, line=true, linewidth=1.7,
+                            fig=nothing, fpos=(1,1), disp=true, savein="", xlabelsize=25, ylabelsize=25, title="")
+
+    # Series check
+    @assert (Dblocks isa DataBlock || Dblocks isa Vector{DataBlock}) "Wrong argument"
+    series = Dblocks isa DataBlock ? false : true
+
+    # Field in plates.dat flag
+    in_rprof = series ? (field in Dblocks[1].rprofheader) : (field in Dblocks.rprofheader)
+    @assert in_rprof "Field $field not found in any header"
+    @assert (tslice isa Vector{Float64}) && !series "multiple times is allowed only for a single datablock."
+
+    # Plot
+    isnothing(fig) && (fig = Figure(size = fsize))
+    ax = Axis(fig[fpos[1], fpos[2]], ylabel = LRN[field], xscale = logscale ? log10 : identity)
+    
+    if series
+        cmap = cpalette(:vik100, length(Dblocks))
+        n = length(Dblocks)
+        for (b, blck) in enumerate(Dblocks)
+
+            # Get encoding
+            idxT, idxR, idxP = data_encoding(blck.timeheader, blck.rprofheader, blck.platesheader)
+
+            # get timeidx
+            idx = findfirst(blck.rproftime.>=tslice)
+            (isnothing(idx) && b<n) && continue
+            (isnothing(idx) && b==n) && continue
+
+            # Vectors
+            if idx==1
+                xvec = blck.rprofdata[:, idx, idxR[field]]
+            else
+                # Compute linear interpolation factor
+                ∂t = (blck.rproftime[idx] - blck.rproftime[idx-1])
+                p  = (blck.rproftime[idx] - tslice)/∂t
+                xvec = (1-p)*blck.rprofdata[:, idx, idxR[field]] + p*blck.rprofdata[:, idx-1, idxR[field]]
+            end
+
+            # Find radial phase boundaries
+            pv_ring, wad_ol, lith_ol = idx_ph_transitions(blck; timeidx=idx)
+
+            # Plot
+            scatter && scatter!(ax, xvec, blck.rprofdata[:,1,1], markersize=markersize, marker=marker, color=cmap[b], label=blck.metadata.name)
+            line && lines!(ax, xvec, blck.rprofdata[:,1,1], linewidth=linewidth, color=cmap[b])
+
+        end
+        axislegend(ax, unique=true, position=:rt)   
+
+    else
+
+         # Get encoding
+        idxT, idxR, idxP = data_encoding(Dblocks.timeheader, Dblocks.rprofheader, Dblocks.platesheader)
+
+        if length(tslice)>1
+            nt = length(tslice)
+            cmap = cpalette(:vik100, nt)
+            alpha = LinRange(0.7, 1.0, nt)
+            for t in 1:nt
+                # get timeidx
+                idx = findfirst(Dblocks.rproftime.>=tslice[t])
+
+                # Vectors
+                if idx==1
+                    xvec = Dblocks.rprofdata[:, idx, idxR[field]]
+                else
+                    # Compute linear interpolation factor
+                    ∂t = (Dblocks.rproftime[idx] - Dblocks.rproftime[idx-1])
+                    p  = (Dblocks.rproftime[idx] - tslice[t])/∂t
+                    xvec = (1-p)*Dblocks.rprofdata[:, idx, idxR[field]] + p*Dblocks.rprofdata[:, idx-1, idxR[field]]
+                end
+
+                # Find radial phase boundaries
+                pv_ring, wad_ol, lith_ol = idx_ph_transitions(Dblocks; timeidx=1)
+
+                # Plot
+                scatter && scatter!(ax, xvec, Dblocks.rprofdata[:,1,1], color=cmap[end-t+1], markersize=markersize, marker=marker, alpha=alpha[t])
+                line && lines!(ax, xvec, Dblocks.rprofdata[:,1,1], color=cmap[end-t+1], linewidth=linewidth, alpha=alpha[t])
+            end
+        else
+            # get timeidx
+            idx = findfirst(Dblocks.rproftime.>=tslice)
+
+            # Vectors
+            if idx==1
+                xvec = Dblocks.rprofdata[:, idx, idxR[field]]
+            else
+                # Compute linear interpolation factor
+                ∂t = (Dblocks.rproftime[idx] - Dblocks.rproftime[idx-1])
+                p  = (Dblocks.rproftime[idx] - tslice)/∂t
+                xvec = (1-p)*Dblocks.rprofdata[:, idx, idxR[field]] + p*Dblocks.rprofdata[:, idx-1, idxR[field]]
+            end
+
+            # Find radial phase boundaries
+            pv_ring, wad_ol, lith_ol = idx_ph_transitions(Dblocks; timeidx=idx)
+
+            # Plot
+            scatter && scatter!(ax, xvec, Dblocks.rprofdata[:,1,1], markersize=markersize, marker=marker)
+            line && lines!(ax, xvec, Dblocks.rprofdata[:,1,1], linewidth=linewidth)
+        end
+    end
+
+    disp && display(fig) 
 
 end
 
@@ -1020,10 +1126,10 @@ end
         - disp::Bool \t\t\t-->\t Display the figure [default: true]
         - savein::String \t\t-->\t Path to save the figure (PNG) [default: ""]
 """
-function H2O_memory_time(Dblock; tstart=0.1, tend=nothing, fig=nothing, fpos=(1,1), fsize=(800,500), disp=true, savein="", legend=true, xlabvis=true, ylabvis=true)
+function H2O_memory_time(Dblock; tstart=0.1, tend=nothing, fig=nothing, fpos=(1,1), fsize=(800,500), disp=true, savein="", legend=true, xlabvis=true, ylabvis=true, laglim=2.0)
 
     if typeof(Dblock) == Vector{DataBlock}
-        H2O_memory_time_multiple(Dblock; tstart=tstart, tend=tend, fig=fig, fpos=fpos, fsize=fsize, disp=disp, savein=savein)
+        H2O_memory_time_multiple(Dblock; tstart=tstart, tend=tend, fig=fig, fpos=fpos, fsize=fsize, disp=disp, savein=savein, laglim=laglim)
         return
     end
 
@@ -1068,7 +1174,7 @@ function H2O_memory_time(Dblock; tstart=0.1, tend=nothing, fig=nothing, fpos=(1,
     end
 
     # Autocorrelation
-    time_lags = LinRange(1, 1000, 50)./1e3 # Myr -> Gyr
+    time_lags = LinRange(1, 1e3laglim, 50)./1e3 # Myr -> Gyr
     dt_lags = round.(Int, time_lags ./ step(tvec))
     cutidx = findfirst(dt_lags .> length(tvec))
     isnothing(cutidx) ? (cutidx = length(dt_lags)) : (cutidx = max(cutidx-2, 1))
@@ -1119,7 +1225,7 @@ function H2O_memory_time(Dblock; tstart=0.1, tend=nothing, fig=nothing, fpos=(1,
     (savein != "") && save(savein*".png", fig)
 end
 
-function H2O_memory_time_multiple(Dblock; tstart=0.1, tend=nothing, fig=nothing, fpos=(1,1), fsize=(800,500), disp=true, savein="")
+function H2O_memory_time_multiple(Dblock; tstart=0.1, tend=nothing, fig=nothing, fpos=(1,1), fsize=(800,500), disp=true, savein="", laglim=4.5)
 
     # Checks and indexing setup
     for blck in Dblock
@@ -1166,7 +1272,7 @@ function H2O_memory_time_multiple(Dblock; tstart=0.1, tend=nothing, fig=nothing,
         end
 
         # Autocorrelation
-        time_lags = LinRange(1, 1000, 50)./1e3 # Myr -> Gyr
+        time_lags = LinRange(1, 1e3laglim, 50)./1e3 # Myr -> Gyr
         dt_lags = round.(Int, time_lags ./ step(tvec))
         cutidx = findfirst(dt_lags .> length(tvec))
         isnothing(cutidx) ? (cutidx = length(dt_lags)) : (cutidx = max(cutidx-2, 1))

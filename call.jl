@@ -49,26 +49,43 @@ load_sims = false
         no = [y20, noR, noK, noKR]
     end
 
-P = 2.0
-T = 800.
-p = 0.0             
-ϕ = 0.08
-TOex = 0.165
-TC = 0.1
-damp = 0.02
-niter=2000
+# fig = Figure(size=(1600, 800))
+# lbsz = 20
+# time_vs_field(y, "Wsol_um", line=true, fig=fig, fpos=(1,1), framevisible=false, linewidth=1.7, markersize=7, ylabelsize=lbsz, xlabelsize=lbsz)
+# time_vs_field(y, "Water_um", line=true, fig=fig, fpos=(1,2), leg=false, linewidth=1.7, markersize=7, ylabelsize=lbsz, xlabelsize=lbsz)
+# time_vs_field(y, "Wsol_tz", line=true, fig=fig, fpos=(2,1), leg=false, linewidth=1.7, markersize=7, ylabelsize=lbsz, xlabelsize=lbsz)
+# time_vs_field(y, "Water_tz", line=true, fig=fig, fpos=(2,2), leg=false, linewidth=1.7, markersize=7, ylabelsize=lbsz, xlabelsize=lbsz)
+# time_vs_field(y, "Wsol_lm", line=true, fig=fig, fpos=(3,1), leg=false, linewidth=1.7, markersize=7, ylabelsize=lbsz, xlabelsize=lbsz)
+# time_vs_field(y, "Water_lm", line=true, fig=fig, fpos=(3,2), leg=false, linewidth=1.7, markersize=7, ylabelsize=lbsz, xlabelsize=lbsz)
 
-# Dump oxygen in oxidizing C → CaCO₃?
+# mantle_water(y25)
+
+# H2O_memory_time(y20, fig=fig, fpos=(1,1))
+# H2O_memory_time(y25, fig=fig, fpos=(1,2), legend=false)
+# H2O_memory_time(y30, fig=fig, fpos=(2,1), legend=false)
+# H2O_memory_time(y35, fig=fig, fpos=(2,2), legend=false)
+# time_vs_field(tot2, "satH2O_um")
+
+# fig = Figure(size=(1000, 700))
+# rprof_series(y50, "fmeltmean", [0.5, 1.5, 2.5, 3.5, 4.4], fig=fig, fpos=(1,1), logscale=false)
+# rprof_series(y25, "Water", 1.5, fig=fig, fpos=(1,2))
+# rprof_series(y25, "Water", 2.5, fig=fig, fpos=(2,1))
+# rprof_series(y25, "Water", 3.5, fig=fig, fpos=(2,2))
+# GLMakie.save("ywater.png", fig)
+
+P = 0.5
+T = 1300.
+p = 0.0             
+ϕ = 0.05
+TOex = 0.05
+TC = 0.1
+
+niter=100
+
+# # Dump oxygen in oxidizing C → CaCO₃?
 
 # data    = Initialize_MAGEMin("sb24", verbose=false);
-conv, mat = partition_Oₑₓ(P, T, p, ϕ, TOex, TC, debugging=false, verbose=true, plotevo=true, data=data, damp=damp, niter=niter);
-println("Done.")
+a, b = partition_Oₑₓ(P, T, p, ϕ, TOex, TC, debugging=true, verbose=true, plotevo=true, data=data, damp=damp, niter=niter);
+# println("Done.")
 # P_T_ϕ_TOₑₓ_TC_topoplogy(data, "T_ϕ", ns=5)
 # Finalize_MAGEMin(data)
-
-# nP  = 15; Pr  = LinRange(1.0, 10.0, nP)
-# nT  = 15; Tr  = LinRange(900., 2200., nT)
-# nϕ  = 15; ϕr  = LinRange(1e-2, 0.2, nϕ)
-# nTO = 15; TOr = LinRange(7e-5, 3e-4, nTO)
-
-# mapϕ, mapTO = P_T_ϕ_TOₑₓ_Rspace(Pr, Tr, ϕr, TOr, data, nres=80)

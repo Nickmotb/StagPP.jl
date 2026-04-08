@@ -17,12 +17,13 @@
 # - Equilibrium mass fraction of TOₑₓ in the solid (sOₑₓ)
 # - Equilibrium mass fraction of TOₑₓ in the melt  (mOₑₓ)
 # - Equilibrium molar XCO₂ in the melt (XCO₂)
+# - Excess fₑₓ
 #
 # Equations:
 # (1) Equilibrium constraint    :  solid fO₂(P,T,sOₑₓ) - melt fO₂(P,T,mOₑₓ) = 0
-# (2) Equilibrium constraint    :  aᵪ[melt fO₂(P,T,mOₑₓ) - EDDOG fO₂(P,T,XCO₂)] = 0
+# (2) Equilibrium constraint    :  melt fO₂(P,T,mOₑₓ) - EDDOG fO₂(P,T,XCO₂) = 0
 # (3) Mass conservation         :  1 - sOₑₓ - mfOₑₓ - Φ*XCO₂/(1-XCO₂) - fₑₓ = 0
-# (4) CaCO₃ oxidation regime    :  (clim - XCO₂)*fₑₓ
+# (4)                              fₑₓ = 0
 #
 # Jacobian : [∂(1)∂sOₑₓ ∂(1)∂mOₑₓ ∂(1)∂XCO₂         [∂S∂sOₑₓ     -∂M∂mOₑₓ        0
 #             ∂(2)∂sOₑₓ ∂(2)∂mOₑₓ ∂(2)∂XCO₂    =        0         ∂M∂mOₑₓ       -∂C∂XCO₂
@@ -42,6 +43,9 @@
 function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, Rf::K=-1.0, nr=25, niter=100, 
                         verbose=false, data=nothing, Rspace=false, plotevo=false, damp=0.25, debugging=false) where {K <: Real}
 
+    # Hirschmann
+    a=0.1917; y1=-520.46; y2=-185.37; y3=494.39; y4=1838.34; y5=2888.48; y8=-1245.09; y9=-1156.86
+
     # Endmember bulks
     XH      = @SVector [0.4347, 0.4597, 0.0835, 0.0090, 0.0100, 0.0001, 0.0030, 0.0] # mass fraction
     XB      = @SVector [0.5097, 0.0988, 0.0718, 0.1268, 0.1698, 0.0225, 0.0007, 0.0] # mass fraction
@@ -51,9 +55,6 @@ function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, 
     X       = p*XB + (1-p)*XH
     molXB   = XB./mmXox; molXB = molXB ./ sum(molXB)
     molX    = X./mmXox;  molX  = molX ./sum(molX)
-
-    # Hirschmann 2022 parameters
-    a=0.1917; b=-1.961; c=4158.1; ΔCₚ=33.25; T₀=1673.15; y1=-520.46; y2=-185.37; y3=494.39; y4=1838.34; y5=2888.48; y8=-1245.09; y9=-1156.86
 
     # Solid / Molten tracer mass [kg]
     Mt = 1e3 # 1 kg
@@ -138,12 +139,12 @@ function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, 
     maxmOₑₓ, maxXCO₂  = min(maxmOₑₓ_uncapped, 1.0), max(min(1.0, maxXCO₂_raw), 0.0)
     maxfₑₓ            = 1.0 
     # -- Initialise (static)solution vector
-    y = sol + [x_to_y(0.5maxsOₑₓ, lowclip, maxsOₑₓ), x_to_y(0.5maxmOₑₓ, lowclip, maxmOₑₓ), x_to_y(0.5maxXCO₂, lowclip, maxXCO₂), x_to_y(lowclip, lowclip, maxfₑₓ)]
+    y = sol + [x_to_y(0.1maxsOₑₓ, lowclip, maxsOₑₓ), x_to_y(0.5maxmOₑₓ, lowclip, maxmOₑₓ), x_to_y(0.1maxXCO₂, lowclip, maxXCO₂), x_to_y(lowclip, lowclip, maxfₑₓ)]
     # -- Define convergence tolerance (ϵ)
-    ϵ = 1.5e-2          
+    ϵ = 1e-6          
     # -- Wrap parameters and call solver
     params = (; verb_flag, P, T, ϕ, Rs, Rf, TOex, TOₑₓ, p, TC, Φ, s, Φₘ,
-                    T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, molXB,
+                    IDV, SymXox, dummy, idxO, _ln10, _T, molXB, a,
                         Ys1, Ys2, plotevo, verbose, lowclip, Mt, sharpness, debugging)
     converged, mat, itout = constrained_smOₑₓ_XCO₂_solver(y, maxsOₑₓ, maxmOₑₓ, maxXCO₂, maxfₑₓ, sfO2, sfO2⁻¹, ∂Sᵢ, ϵ, damp, niter; params...)
     # -- Plot evolution if requested
@@ -162,7 +163,7 @@ function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, 
         scatterlines!(ax, itstart:itout, mat[itstart:itout,3,1], color=:orange,label="(eq. 3) Mass conservation (R₃ = $(round(mat[itout,3,1], digits=4)))",marker=:rect,strokewidth=1.1)
         lines!(ax, [1, itout], [ϵ, ϵ], linestyle=:dash, color=:gray, alpha=0.5)
         lines!(ax, [1, itout], [-ϵ, -ϵ], linestyle=:dash, color=:gray, alpha=0.5)
-        text!(ax, 1, -1.9ϵ, text="Convergence ϵ = $(1e2ϵ)%", font=:italic, alpha=0.5)
+        text!(ax, 1, -1.9ϵ, text="Convergence ϵ = $(round(1e2ϵ, digits=4))%", font=:italic, alpha=0.5)
         axislegend(ax, position=:rt)
         converged && ylims!(ax, -5ϵ, 7ϵ)
 
@@ -255,7 +256,9 @@ function P_T_ϕ_TOₑₓ_TC_topoplogy(data, ivars; p::Float64=0.0, ns=10)
     display(fig)
 end
 
-function Hirsch(T, mOₑₓ, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
+function Hirsch(T, mOₑₓ, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
+    # Hirschmann 2022 parameters
+    a=0.1917; b=-1.961; c=4158.1; ΔCₚ=33.25; T₀=1673.15; y1=-520.46; y2=-185.37; y3=494.39; y4=1838.34; y5=2888.48; y8=-1245.09; y9=-1156.86
     # Checks
     @assert (:O∈SymXox && :FeO∈SymXox) "This function requires FeO + O format!"
     # Reset dummy
@@ -275,10 +278,10 @@ function Hirsch(T, mOₑₓ, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV,
     return mfO2
 end
 
-function Hirsch⁻¹(T, eqfO2, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB, Ys1, Ys2, mlim)
+function Hirsch⁻¹(T, eqfO2, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB, Ys1, Ys2, mlim)
     iguess = 0.05mlim; ϵ = 1e-2
     for it in 1:20
-        R      = eqfO2 - Hirsch(T, iguess, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
+        R      = eqfO2 - Hirsch(T, iguess, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
         (abs(R)<=ϵ) && break
         α      = evα(iguess, Φₘ)
         θₘ     = evθₘ(α, s)
@@ -319,20 +322,22 @@ function magnetite_buffer_fO2(T, logfO2)
     return exp(a/T + b*logfO2 + c +d1*Na2O + d2*K2O)
 end
 
-function Rx(sfO2, P, T, sOₑₓ, mOₑₓ, XCO₂, fₑₓ, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ, Φₘ, molXB, sharpness, clim, Dsat)
+function Rx(y₁, y₂, y₃, y₄, dummy, params)
+    (;sfO2, P, T, IDV, SymXox, idxO, _ln10, _T, s, Φ, Φₘ, molXB, sharpness, Dsat, lowclip, slim, mlim, clim, fₑₓlim) = params
+    sOₑₓ, mOₑₓ, XCO₂, fₑₓ = y_to_x(y₁, lowclip, slim), y_to_x(y₂, lowclip, mlim), y_to_x(y₃, lowclip, clim), y_to_x(y₄, lowclip, fₑₓlim)
     fₛ = sfO2(sOₑₓ)
-    fₗ = Hirsch(T, mOₑₓ, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
+    fₗ = Hirsch(T, mOₑₓ, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
     if Dsat
         fᵪ = XCO₂_to_fO2(clim, P, T, sharpness, clim)
         return SA[  fₛ - fᵪ
                     fₗ - fᵪ
-                    1 - sOₑₓ - mOₑₓ - Φ*clim/(1-clim) - fₑₓ], fₛ, fₗ, fᵪ
+                    1 - sOₑₓ - mOₑₓ - Φ*clim/(1-clim) - fₑₓ], fₛ, fₗ, fᵪ, sOₑₓ, mOₑₓ, XCO₂, fₑₓ
     else
         fᵪ = XCO₂_to_fO2(XCO₂, P, T, sharpness, clim)
         return SA[  fₛ - fₗ
                     fₗ - fᵪ
                     1 - sOₑₓ - mOₑₓ - Φ*XCO₂/(1-XCO₂)
-                    fₑₓ], fₛ, fₗ, fᵪ
+                    fₑₓ], fₛ, fₗ, fᵪ, sOₑₓ, mOₑₓ, XCO₂, fₑₓ
     end
 end
 
@@ -344,8 +349,7 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{4,Float64},        
                                        verb_flag::Int64,P::K,T::K,ϕ::K,Rs::K,Rf::K,
                                        TOex::K,TOₑₓ::K,p::K,TC::K,Mt::K,
                                        # Pre-computed parameters
-                                       s::K,Φ::K,Φₘ::K,T₀::K,ΔCₚ::K,a::K,b::K,c::K,y1::K,y3::K,lowclip::K,
-                                       y4::K,y5::K,y8::K,y9::K,IDV::K,_ln10::K,_T::K,Ys1::K,Ys2::K,sharpness::K,
+                                       s::K,Φ::K,Φₘ::K,lowclip::K,IDV::K,_ln10::K,_T::K,Ys1::K,Ys2::K,sharpness::K,a::K,
                                        idxO::Int64, plotevo::Bool,SymXox::SVector{N, Symbol},verbose::Bool,debugging::Bool,
                                        dummy::Vector{Float64}, molXB::SVector{N, Float64}) where{K<:AbstractFloat, N}
     
@@ -370,26 +374,27 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{4,Float64},        
     switch   = false
     SM3      = @SMatrix zeros(3,3) # Static Matrix 3 × 3
     SM4      = @SMatrix zeros(4,4) # Static Matrix 4 × 4
+    ac       = 1.0
+    αᵢ       = 1.0
     for it in 1:niter
         # Evaluate current stage
         y₁, y₂, y₃, y₄ = y
         # Force boundary just after regime transition
         Dsat && (y₃=y_highc)
         !Dsat && (y₄=y_lowfₑₓ)
-        (switch&&Dsat)  && (y₄=x_to_y(1e-3, lowclip, fₑₓlim))
-        (switch&&!Dsat) && (y₃=0.99y_highc)
+        (switch&&Dsat)  && (y₄=x_to_y(1e-8, lowclip, fₑₓlim))
+        (switch&&!Dsat) && (y₃=0.98y_highc)
         switch = false
-        # Transform back to original variables
-        sOₑₓ, mOₑₓ, XCO₂, fₑₓ = y_to_x(y₁, lowclip, slim), y_to_x(y₂, lowclip, mlim), y_to_x(y₃, lowclip, clim), y_to_x(y₄, lowclip, fₑₓlim)
         # Iteration variables
-        α   = evα(mOₑₓ, Φₘ)
+        α   = evα(y_to_x(y₂, lowclip, mlim), Φₘ)
         θₘ  = evθₘ(α, s)
         # Compute residual
-        Fx, fₛ, fₗ, fᵪ = Rx(sfO2, P, T, sOₑₓ, mOₑₓ, XCO₂, fₑₓ, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φ, Φₘ, molXB, sharpness, clim, Dsat)
+        params = (;sfO2, P, T, IDV, SymXox, idxO, _ln10, _T, s, Φ, Φₘ, molXB, sharpness, Dsat, lowclip, slim, mlim, clim, fₑₓlim)
+        Fx, fₛ, fₗ, fᵪ, sOₑₓ, mOₑₓ, XCO₂, fₑₓ = Rx(y₁, y₂, y₃, y₄, dummy, params)
         # Store values
         Dsat ? (mat[it,:,1] .= [Fx[1], Fx[2], Fx[3], 0.0]) : (mat[it,:,1] .= Fx)
         mat[it,1,2]  = sfO2(sOₑₓ)
-        mat[it,2,2]  = Hirsch(T, mOₑₓ, T₀, ΔCₚ, a, b, c, y1, y3, y4, y5, y8, y9, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
+        mat[it,2,2]  = Hirsch(T, mOₑₓ, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
         mat[it,3,2]  = XCO₂_to_fO2(XCO₂, P, T, sharpness, clim)
         mat[it,:,3] .= [sOₑₓ, mOₑₓ, XCO₂, fₑₓ]
         # Check convergence
@@ -424,7 +429,7 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{4,Float64},        
             @printf "\t(R₁=%.4f, R₂=%.4f, R₃=%.4f)" Fx[1] Fx[2] Fx[3]
             @printf "  (sfO₂=%.4f, mfO₂=%f, cfO₂=%.4f)\n" fₛ fₗ fᵪ
             @printf "\t(∂S=%.4f, ∂M=%f, ∂C=%.4f, ∂3=%.4f)" ∂S ∂M ∂C ∂3
-            @printf "  (∂x∂y₁=%.4f, ∂x∂y₂=%f, ∂x∂y₃=%.4f, ∂x∂y₄=%.4f)\n\n" ∂x∂y₁ ∂x∂y₂ ∂x∂y₃ ∂x∂y₄
+            @printf "  (∂x∂y₁=%.4f, ∂x∂y₂=%f, ∂x∂y₃=%.4f, ∂x∂y₄=%.4f)\n" ∂x∂y₁ ∂x∂y₂ ∂x∂y₃ ∂x∂y₄
         end
         # println("")
         if Dsat
@@ -438,25 +443,33 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{4,Float64},        
                                    0.0          0.0         0.0        ∂x∂y₄]) # J = ∂Rᵢ∂yᵢ =  ∂Rᵢ∂xᵢ * ∂xᵢ∂yᵢ
         end
         # Newton step
-        dn = J⁻¹*Fx*damp; α = 1.0
+        dn = J⁻¹*Fx
+        # bt_line_search(dn, y₁, y₂, y₃, y₄, Fx, dummy, params; α=1.0)
+        # α = 1.0
+        
         # Adaptive stepping
         (y[1]-dn[1]<y_lows)                && (α = min(α, 0.5*(y[1]-y_lows)/dn[1]))
         (y[1]-dn[1]>y_highs)               && (α = min(α, 0.5*(y[1]-y_highs)/dn[1]))
         (y[2]-dn[2]<y_lowm)                && (α = min(α, 0.5*(y[2]-y_lowm)/dn[2]))
         (y[2]-dn[2]>y_highm)               && (α = min(α, 0.5*(y[2]-y_highm)/dn[2]))
         if Dsat
-            (y[4]-dn[3]<y_lowfₑₓ)          && (switch=true; Dsat=false)
+            (y[4]-dn[3]<y_lowfₑₓ)          && (switch=true; Dsat=false; ac=1)
             (debugging && !Dsat)             && println("\t • De-Saturating. Releasing XCO₂ constraint.")
             (y[4]-dn[3]>y_highfₑₓ)         && (α = min(α, 0.5*(y[4]-y_highfₑₓ)/dn[3]))
             # Take step
+            α  = αᵢ*(ac/niter)
             y = y - α*[dn[1], dn[2], 0.0, dn[3]]
         else
             (y[3]-dn[3]<y_lowc)            && (α = min(α, 0.5*(y[3]-y_lowc)/dn[3]))
-            (!Dsat && y[3]-dn[3]>y_highc)  && (switch=true; Dsat=true)
+            (!Dsat && y[3]-dn[3]>y_highc)  && (switch=true; Dsat=true; ac=1)
             (debugging && Dsat)              && println("\t • Saturating. Locking XCO₂ to $clim .")
             # Take step
+            α  = αᵢ*(ac/niter)
             y = y - α*dn
         end
+        debugging && @printf "\t(α = %.3f)\n\n" α
+        ac += 1
+
         # Output if not converged
         if verbose && (it==niter)
             if verb_flag==-1
@@ -491,3 +504,44 @@ end
 @inline ∂C∂XCO₂_noedge(XCO₂, _ln10)                  = _ln10*(1/XCO₂)
 @inline ∂M∂mOₑₓ(Φₘ, Ys1, Ys2, α, θₘ, _ln10, a, XFeO) = -Φₘ/a * ( θₘ^(-2)*(Ys1 + 2Ys2/θₘ) - _ln10*(1/α + 2/(XFeO - 2α)))
 @inline ∂3∂XCO₂(Φ, XCO₂)                             = Φ*(1/(1-XCO₂)^2)
+# Dampening
+function bt_line_search(Δx, y₁, y₂, y₃, y₄, r, dummy, params; α = 1.0, ρ = 0.5, lstol = 0.9, α_min = 1.0e-8)
+
+    x = SA[y₁, y₂, y₃, y₄]
+    perturbed_x = @. x + α * Δx
+    r, = Rx(x.data..., dummy, params)
+    rnorm = mynorm(r, x)
+
+    # Iterate unless step length becomes too small
+    while α > α_min
+        # Apply scaled update
+        perturbed_x = @. x + α * Δx
+
+        # Get updated residual
+        perturbed_r, = Rx(perturbed_x.data..., dummy, params)
+        perturbed_rnorm = mynorm(perturbed_r, x)
+
+        # Check whether residual is sufficiently reduced
+        if perturbed_rnorm ≤ lstol * rnorm
+            break
+        end
+
+        # Bisect step length
+        α *= ρ
+    end
+
+    return α
+end
+
+@generated function mynorm(x::SVector{N, T}, y::SVector{N}) where {N, T}
+    return quote
+        @inline
+        v = zero(T)
+        Base.@nexprs $N i -> begin
+            xi = @inbounds x[i]
+            yi = @inbounds y[i]
+            v += !iszero(yi) * abs(xi / yi)
+        end
+        return v
+    end
+end

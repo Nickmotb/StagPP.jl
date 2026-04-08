@@ -377,7 +377,7 @@
             - savein::String \t\t-->\t Save figure in file [default: "" (no saving)]
     """
     function mantle_water_at_t(Dblock::DataBlock, time; fig=nothing, fpos=(1,1), fsize=(900,600), disp=true, savein="",
-                            xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
+                            xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15, oldplot=false)
 
         # Checks and indexing setup
         @assert Dblock.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(Dblock.metadata.Sname)"
@@ -450,6 +450,7 @@
         # scatter!(ax, 0.0, 0.0, color=:black, alpha=0.0, label = "Mantle water capacity at $(round(mintime, digits=2)) Gyr : $(round(sum(sH2Okg), digits=2)) OM")
         axislegend(ax, position=:rb, framevisible=true, fontsize=15, padding=10, rowgap=10)
 
+
         # Display and save
         disp && display(fig)
         (savein != "") && save(savein*".png", fig)
@@ -482,6 +483,7 @@
         
         # Integrate H2O per timestep
         intH2O = zeros(Float64, 4, timeidx_e - timeidx_s + 1)
+        intH2O_mavg = zeros(Float64, 4, timeidx_e - timeidx_s + 1)
         F = zeros(Float64, 3, timeidx_e - timeidx_s) # Fluxes between reservoirs
         F_mavg = zeros(Float64, 3, timeidx_e - timeidx_s) # Moving average of fluxes
         τ = zeros(Float64, 3, timeidx_e - timeidx_s) # Residence times
@@ -505,56 +507,46 @@
                 dt = Dblock.rproftime[t] - Dblock.rproftime[t-1]
 
                 # Chain computed fluxes ("F_from_to")
-                F_tz_lm = Δlm / dt # OM/Gyr
-                F_um_tz = Δtz/dt + F_tz_lm # OM/Gyr | Δtz = (F_um_tz - F_tz_lm)dt → F_um_tz = Δtz/dt + F_tz_lm
-                F_crust_um = Δum/dt + F_um_tz # OM/Gyr | Δum = (F_crust_um - F_um_tz)dt → F_crust_um = Δum/dt + F_um_tz
-                F[:,t-timeidx_s] = [F_tz_lm, F_um_tz, F_crust_um] # OM/Gyr
+                F_lm2tz = Δlm / dt # OM/Gyr
+                F_tz2um = F_lm2tz - Δtz/dt # OM/Gyr | Δtz = (F_lm2tz - F_tz2um)dt → F_tz2um = F_lm2tz - Δtz/dt
+                F_um2crust = F_tz2um - Δum/dt # OM/Gyr | Δum = (F_tz2um - F_um2crust)dt → F_um2crust = F_tz2um - Δum/dt
+                F[:,t-timeidx_s] = [F_lm2tz, F_tz2um, F_um2crust] # OM/Gyr
 
                 # Residence times (τ = M / F)
-                τ_lm = intH2O[1,t-timeidx_s+1] / F_tz_lm
-                τ_tz = intH2O[2,t-timeidx_s+1] / (F_um_tz + F_tz_lm)
-                τ_um = intH2O[3,t-timeidx_s+1] / (F_crust_um + F_um_tz)
-                τ[:,t-timeidx_s] = [τ_lm, τ_tz, τ_um]
+                # τ_lm = intH2O[1,t-timeidx_s+1] / F_tz_lm
+                # τ_tz = intH2O[2,t-timeidx_s+1] / (F_um_tz + F_tz_lm)
+                # τ_um = intH2O[3,t-timeidx_s+1] / (F_crust_um + F_um_tz)
+                # τ[:,t-timeidx_s] = [τ_lm, τ_tz, τ_um]
+
             end
-
-            # Moving average of fluxes
-            window = round(Int, 0.2 * (timeidx_e - timeidx_s))
-            F_mavg[1,:] .= EasyFit.movavg(F[1,:], window).x
-            F_mavg[2,:] .= EasyFit.movavg(F[2,:], window).x
-            F_mavg[3,:] .= EasyFit.movavg(F[3,:], window).x
-
         end
+        # Moving average of H2O and fluxes
+        window = round(Int, 0.2 * (timeidx_e - timeidx_s))
+        intH2O_mavg[1,:] .= EasyFit.movavg(intH2O[1,:], window).x
+        intH2O_mavg[2,:] .= EasyFit.movavg(intH2O[2,:], window).x
+        intH2O_mavg[3,:] .= EasyFit.movavg(intH2O[3,:], window).x
+        intH2O_mavg[4,:] .= EasyFit.movavg(intH2O[4,:], window).x
+        # F_mavg[1,:] .= EasyFit.movavg(F[1,:], window).x
+        # F_mavg[2,:] .= EasyFit.movavg(F[2,:], window).x
+        # F_mavg[3,:] .= EasyFit.movavg(F[3,:], window).x
+
+        cumH2O = cumsum(intH2O_mavg, dims=1)
 
         # Time averaged τ
-        τ_tavg[1] = t_avg(τ[1,:], Dblock.rproftime[timeidx_s+1:timeidx_e], absolute=true)
-        τ_tavg[2] = t_avg(τ[2,:], Dblock.rproftime[timeidx_s+1:timeidx_e], absolute=true)
-        τ_tavg[3] = t_avg(τ[3,:], Dblock.rproftime[timeidx_s+1:timeidx_e], absolute=true)
+        # τ_tavg[1] = t_avg(τ[1,:], Dblock.rproftime[timeidx_s+1:timeidx_e], absolute=true)
+        # τ_tavg[2] = t_avg(τ[2,:], Dblock.rproftime[timeidx_s+1:timeidx_e], absolute=true)
+        # τ_tavg[3] = t_avg(τ[3,:], Dblock.rproftime[timeidx_s+1:timeidx_e], absolute=true)
 
+        ax = Axis(fig[fpos...], xlabel=L"Time\;\mathrm{[Gyr]}", ylabel=L"Mass\;of\;water\;\mathrm{[OM]}")
+        # Borders
+            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[1,:], color=:black, alpha=0.7)
+            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[2,:], color=:black, alpha=0.7)
+            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[3,:], color=:black, alpha=0.7)
+            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[4,:], color=:black, alpha=0.7)
+        # Bands
+            # band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], )
 
-        lw = 1.0
-        # Water vs time
-        ax = Axis(fig[fpos[1], fpos[2]], ylabel = L"Integrated\;H_2O\;mass\;[OM]", xlabelsize=25, ylabelsize=25, xticklabelsvisible=false,
-                xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xgridvisible=true, ygridvisible=false,
-                xlabelpadding=15, ylabelpadding=15, yscale= logscale ? log10 : identity)
-        lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], intH2O[1,:], color=:orange, alpha=1.0, label="Lower mantle (τ=$(round(τ_tavg[1], digits=2)))", linewidth=lw)
-        lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], intH2O[2,:], color=:green, alpha=1.0, label="Mantle transition zone (τ=$(round(τ_tavg[2], digits=2)))", linewidth=lw)
-        lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], intH2O[3,:], color=:blue, alpha=1.0, label="Upper mantle (τ=$(round(τ_tavg[3], digits=2)))", linewidth=lw)
-        lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], intH2O[4,:], color=:brown, alpha=1.0, label="Crust", linewidth=lw)
-        xlims!(ax, tstart, tend)
-        axislegend(ax, position=:rt, framevisible=false, fontsize=15, padding=10, rowgap=10, orientation=:horizontal)
-
-        # Fluxes vs time
-        ax2 = Axis(fig[fpos[1]+1, fpos[2]], xlabel = L"Time\;[Gyr]", ylabel = L"H_2O\;flux\;[OM/Gyr]", xlabelsize=25, ylabelsize=25,
-                xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xgridvisible=true, ygridvisible=false,
-                xlabelpadding=15, ylabelpadding=15)
-        lines!(ax2, Dblock.rproftime[timeidx_s+1:timeidx_e], -F_mavg[1,:], color=:orange, alpha=1.0, linewidth=lw, label="LM → MTZ")
-        lines!(ax2, Dblock.rproftime[timeidx_s+1:timeidx_e], -F_mavg[2,:], color=:green, alpha=1.0, linewidth=lw, label="MTZ → UM")
-        lines!(ax2, Dblock.rproftime[timeidx_s+1:timeidx_e], -F_mavg[3,:], color=:blue, alpha=1.0, linewidth=lw, label="UM → Crust")
-        lines!(ax2, [-1, 20], [0.0, 0.0], color=:red, linestyle=:dashdot, alpha=1.0, linewidth=1.5)
-        axislegend(ax2, position=:rt, framevisible=false, fontsize=15, padding=10, rowgap=10, orientation=:horizontal)
-        ylims!(ax2, minimum(-F_mavg)*1.1, maximum(-F_mavg)*1.1)
-        xlims!(ax2, tstart, tend)
-
+        ylims!(ax, 0.0, 1.02maximum(intH2O_mavg))
         # Display and save
         disp && display(fig)
         (savein != "") && save(savein*".png", fig)
@@ -621,6 +613,7 @@
                     F[t-timeidx_s] = F_rest_target
                 end
             end
+        return F
         
         end
 
