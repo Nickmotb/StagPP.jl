@@ -200,7 +200,7 @@ function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, 
         # Return partitioning
         return converged, x
     else
-        return converged, mat
+        return converged, mat, itout
     end
 
 end
@@ -394,7 +394,7 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{4,Float64},        
         # Store values
         Dsat ? (mat[it,:,1] .= [Fx[1], Fx[2], Fx[3], 0.0]) : (mat[it,:,1] .= Fx)
         mat[it,1,2]  = sfO2(sOₑₓ)
-        mat[it,2,2]  = Hirsch(T, mOₑₓ, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
+        mat[it,2,2],  = Hirsch(T, mOₑₓ, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
         mat[it,3,2]  = XCO₂_to_fO2(XCO₂, P, T, sharpness, clim)
         mat[it,:,3] .= [sOₑₓ, mOₑₓ, XCO₂, fₑₓ]
         # Check convergence

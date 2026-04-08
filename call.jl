@@ -58,7 +58,10 @@ load_sims = false
 # time_vs_field(y, "Wsol_lm", line=true, fig=fig, fpos=(3,1), leg=false, linewidth=1.7, markersize=7, ylabelsize=lbsz, xlabelsize=lbsz)
 # time_vs_field(y, "Water_lm", line=true, fig=fig, fpos=(3,2), leg=false, linewidth=1.7, markersize=7, ylabelsize=lbsz, xlabelsize=lbsz)
 
-# mantle_water(y25)
+# IOplot(noK)
+# mantle_water(y25, fig=fig, fpos=(1,2), lim=3.0)
+# mantle_water(y30, fig=fig, fpos=(2,1), lim=3.0)
+# mantle_water(y35, fig=fig, fpos=(2,2), lim=3.0)
 
 # H2O_memory_time(y20, fig=fig, fpos=(1,1))
 # H2O_memory_time(y25, fig=fig, fpos=(1,2), legend=false)
@@ -73,19 +76,19 @@ load_sims = false
 # rprof_series(y25, "Water", 3.5, fig=fig, fpos=(2,2))
 # GLMakie.save("ywater.png", fig)
 
-P = 0.5
-T = 1300.
-p = 0.0             
+P = 4.0
+T = 1500.
 ϕ = 0.05
-TOex = 0.05
-TC = 0.1
+TOex = 0.03
+TC = 0.05
 
 niter=100
 
-# # Dump oxygen in oxidizing C → CaCO₃?
+# Dump oxygen in oxidizing C → CaCO₃?
 
 # data    = Initialize_MAGEMin("sb24", verbose=false);
-a, b = partition_Oₑₓ(P, T, p, ϕ, TOex, TC, debugging=true, verbose=true, plotevo=true, data=data, damp=damp, niter=niter);
+a = partition_Oₑₓ(P, T, p, ϕ, TOex, TC, debugging=true, verbose=true, plotevo=true, data=data, niter=niter);
+
 # println("Done.")
 # P_T_ϕ_TOₑₓ_TC_topoplogy(data, "T_ϕ", ns=5)
 # Finalize_MAGEMin(data)

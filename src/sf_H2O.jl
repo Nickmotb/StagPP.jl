@@ -456,7 +456,8 @@
         (savein != "") && save(savein*".png", fig)
     end
 
-    function mantle_water(Dblock; fig=nothing, fpos=(1,1), fsize=(1000,700), disp=true, savein="", tstart=nothing, tend=nothing, logscale=false)
+    function mantle_water(Dblock; fig=nothing, lim=nothing, leg=true,
+                            fpos=(1,1), fsize=(1000,700), disp=true, savein="", tstart=nothing, tend=nothing, logscale=false)
 
         # Checks and indexing setup
         @assert Dblock.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(Dblock.metadata.Sname)"
@@ -470,6 +471,7 @@
         isnothing(tend) && (tend = last(Dblock.rproftime))
         timeidx_s = findfirst(Dblock.rproftime .>= tstart)
         timeidx_e = findlast(Dblock.rproftime .<= tend)
+        nt = length(timeidx_s:timeidx_e)
 
 
         # Gather Data
@@ -530,23 +532,27 @@
         # F_mavg[2,:] .= EasyFit.movavg(F[2,:], window).x
         # F_mavg[3,:] .= EasyFit.movavg(F[3,:], window).x
 
-        cumH2O = cumsum(intH2O_mavg, dims=1)
+        # cumH2O = cumsum(intH2O_mavg, dims=1)
+        cumH2O = cumsum(intH2O, dims=1)
 
         # Time averaged τ
         # τ_tavg[1] = t_avg(τ[1,:], Dblock.rproftime[timeidx_s+1:timeidx_e], absolute=true)
         # τ_tavg[2] = t_avg(τ[2,:], Dblock.rproftime[timeidx_s+1:timeidx_e], absolute=true)
         # τ_tavg[3] = t_avg(τ[3,:], Dblock.rproftime[timeidx_s+1:timeidx_e], absolute=true)
 
-        ax = Axis(fig[fpos...], xlabel=L"Time\;\mathrm{[Gyr]}", ylabel=L"Mass\;of\;water\;\mathrm{[OM]}")
-        # Borders
-            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[1,:], color=:black, alpha=0.7)
-            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[2,:], color=:black, alpha=0.7)
-            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[3,:], color=:black, alpha=0.7)
-            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[4,:], color=:black, alpha=0.7)
+        ax = Axis(fig[fpos...], xlabel=L"Time\;\mathrm{[Gyr]}", ylabel=L"Mass\;of\;water\;\mathrm{[OM]}", xgridvisible=false, ygridvisible=false)
         # Bands
-            # band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], )
+            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], zeros(nt), cumH2O[1,:], color=:orange, alpha=0.4)
+            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[1,:], cumH2O[2,:], color=:olivedrab2, alpha=0.4)
+            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[2,:], cumH2O[3,:], color=:skyblue2, alpha=0.4)
+            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[3,:], cumH2O[4,:], color=:sienna4, alpha=0.4)
+        # Borders
+            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[1,:], color=:black, alpha=0.7, linewidth=0.5)
+            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[2,:], color=:black, alpha=0.7, linewidth=0.5)
+            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[3,:], color=:black, alpha=0.7, linewidth=0.5)
+            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[4,:], color=:black, alpha=0.7, linewidth=0.5)
 
-        ylims!(ax, 0.0, 1.02maximum(intH2O_mavg))
+        !isnothing(lim) ? ylims!(ax, 0.0, lim) : ylims!(ax, 0.0, 1.2maximum(cumH2O))
         # Display and save
         disp && display(fig)
         (savein != "") && save(savein*".png", fig)
@@ -690,14 +696,14 @@
 
         # Vectors
         time = Dblock.timedata[:,idxT["time"]]
-        startidx = findfirst(time .> trimt) # Start after initial ingassing. Sets Δ to zero at chosen startint t.
+        startidx = findfirst(time .> trimt) # Start after initial ingassing. Sets Δ to zero at chosen starting t.
         rawingas, rawoutgas = Dblock.timedata[startidx:end,idxT["IngassedH2O"]], Dblock.timedata[startidx:end,idxT["OutgassedH2O"]]
         Δi = rawingas[1] - rawoutgas[1];
         Δi > 0.0 ? (rawingas .-= Δi) : (rawoutgas .-= -Δi) # Align initial ingassed and outgassed H₂O
         sectioned_in, sectioned_out = diff(rawingas), -diff(rawoutgas)
         time = time[startidx:end]
         mavg_ingas, mavg_outgas = EasyFit.movavg(sectioned_in, mv_avg_window).x, EasyFit.movavg(sectioned_out, mv_avg_window).x
-        Δ = (rawingas .- rawoutgas)
+        Δ = (Dblock.timedata[startidx,idxT["SurfOceanMass3D"]].-Dblock.timedata[startidx:end,idxT["SurfOceanMass3D"]])./om
 
         # Time window
         isnothing(tstart) && (tstart = first(time))
@@ -707,12 +713,17 @@
         isnothing(fig) && (fig = Figure(size = fsize))
         ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Time\;[\mathrm{Gyr}]", ylabel = L"H_2O\;mass\;[\mathrm{kg}]", xlabelsize=25, ylabelsize=25, 
                     xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15, xgridvisible=false, ygridvisible=false)
-        axr = Axis(fig[fpos[1], fpos[2]], yticklabelcolor = :green, ylabelcolor=:green, yaxisposition = :right, ylabel = L"\Delta_{in-out}\;[\mathrm{kg}]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
+        axr = Axis(fig[fpos[1], fpos[2]], yticklabelcolor = :green, ylabelcolor=:green, yaxisposition = :right, ylabel = L"\Delta_{in-out}\;[\mathrm{OM}]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
                             xgridvisible=false, ygridvisible=false)
         scatter!(axr, tstart*ones(2), [minimum(Δ), maximum(Δ)], alpha=0.0)
         xlims!(ax, (tstart, tend))
         xlims!(axr, (tstart, tend))
-        !isnothing(yrange) && ylims!(ax, (-yrange, yrange))
+        if isnothing(yrange)
+            val = 1.05max(abs(minimum(Δ)), abs(maximum(Δ)))
+            ylims!(axr, -val, val)
+        else
+            ylims!(axr, (-yrange, yrange))
+        end
         hidespines!(axr); hidexdecorations!(axr)
 
         lines!(ax, time[2:end], sectioned_in, color=:black, linewidth=0.1, linestyle=:solid, alpha=0.4)
