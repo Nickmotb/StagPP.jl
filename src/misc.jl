@@ -306,22 +306,6 @@ function XCO₂_to_fO2(XCO₂, P, T, sharpness, clim)
     end
 end
 
-# From Ariskin and Barmina 1999
-function magnetite_buffer_fO2(T, logfO2)
-    # Ariskin and Barmina 1999 parameters
-    # b0 = -0.6232; b1=0.6826; b2=4.0438; b3=0.8251; c=0.0159; d1=8.3626; d2=35.9674; d3=10.7347
-    a=20964.7; b=0.6159; c=-8.8187; d1=-10.1838; d2=32.7525; d3=-14.2506
-    # Parameterized melt composition
-    SiO2=0.5109/mm.SiO2; TiO2=0.0207/mm.TiO2; Al2O3=0.1534/mm.Al2O3/2
-    FeO=0.1330/mm.FeO; MgO=0.0617/mm.MgO; CaO=0.0896/mm.CaO; Na2O= 0.0199/mm.Na2O/2
-    K2O=0.0109/mm.K2O/2
-    # Normalize
-    s = SiO2 + TiO2 + Al2O3 + FeO + MgO + CaO + Na2O + K2O
-    SiO2/=s; TiO2/=s; Al2O3/=s; FeO/=s; MgO/=s; CaO/=s; Na2O/=s; K2O/=s
-    # Compute logfO₂
-    return exp(a/T + b*logfO2 + c +d1*Na2O + d2*K2O)
-end
-
 function Rx(y₁, y₂, y₃, y₄, dummy, params)
     (;sfO2, P, T, IDV, SymXox, idxO, _ln10, _T, s, Φ, Φₘ, molXB, sharpness, Dsat, lowclip, slim, mlim, clim, fₑₓlim) = params
     sOₑₓ, mOₑₓ, XCO₂, fₑₓ = y_to_x(y₁, lowclip, slim), y_to_x(y₂, lowclip, mlim), y_to_x(y₃, lowclip, clim), y_to_x(y₄, lowclip, fₑₓlim)

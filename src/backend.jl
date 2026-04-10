@@ -27,7 +27,27 @@ function aggregate_StagData(Sname::String, filename::String, timevec::Union{Arra
         # Try parse to Bool
         (length(val)==1) && (val=="T" ? (return true) : (val=="F" && (return false)))
         # Check whether it is an array
-        if occursin(r"E.*E", val)
+        if occursin("*", val) && occursin(r"E.*E", val)
+            arr = Float64[]
+            Eidx = findall(==('E'), val).+4; Eidx = vcat(0, Eidx)
+            prodidx = findall(==('*'), val); prodvals = zeros(Float64, length(prodidx))
+            for i in eachindex(prodidx)
+                prodvals[i] = parse(Int, val[prodidx[i]-1])
+            end
+            prodcounter = 1
+            for i in 1:length(Eidx)-1
+                flag = (prodidx[prodcounter]==Eidx[i]+2)
+                if flag
+                    for l in 1:prodvals[prodcounter]
+                        push!(arr, Parsers.parse(Float64, val[Eidx[i]+3:Eidx[i+1]]))
+                    end
+                    prodcounter = min(length(prodcounter), prodcounter+1)
+                else
+                    push!(arr, Parsers.parse(Float64, val[Eidx[i]+1:Eidx[i+1]]))
+                end
+            end
+            return arr
+        elseif occursin(r"E.*E", val)
             Eidx = findall(==('E'), val).+4; Eidx = vcat(0, Eidx)
             arr = zeros(Float64, length(Eidx)-1)
             for i in 1:length(Eidx)-1
