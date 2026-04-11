@@ -639,6 +639,9 @@ end
             return itp(pressure)
         end
 
+    # Convert OM/Gyr to Tg/Myr
+        @inline OM_Gyr_2_Tg_Myr(v) = v*om*1e-12
+
     # Color palette generator
     function cpalette(scheme_sym::Symbol, n::Integer)
         cs = getfield(ColorSchemes, scheme_sym)         # e.g. :vik100 → ColorSchemes.vik100

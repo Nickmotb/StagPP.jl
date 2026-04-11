@@ -3,7 +3,7 @@ module StagPP
     # Dependencies
     using Mmap, Parsers, Interpolations, ForwardDiff, LinearAlgebra, StaticArrays, LightXML
     using Statistics, EasyFit, LsqFit, StatsBase, MultivariateStats, MAGEMin_C, ColorSchemes
-    using GLMakie, DelimitedFiles, Printf, NumericalIntegration
+    using GLMakie, DelimitedFiles, Printf, NumericalIntegration, LaTeXStrings
 
     # === Structures
     include("struct.jl")
@@ -26,12 +26,12 @@ module StagPP
         include("backend.jl")
     # === Checks
         include("checks.jl")
+    # === Public API
+        include("api.jl")
     # === sᴴ²ᴼ
         include("sf_H2O.jl")
     # === Misc
         include("misc.jl")
-    # === Public API
-        include("api.jl")
 
     # Structure export
     export DataBlock, sᴴ²ᴼ, min_sᴴ²ᴼ
@@ -43,8 +43,8 @@ module StagPP
     export partition_Oₑₓ, P_T_ϕ_TOₑₓ_TC_topoplogy
     # Plot exports
     export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, ta_series_vs_field, 
-            mantle_water, mantle_water_at_t, plot_sf, minmap, rprof_series, time_vs_ratio,
-            snapshot, IOplot, omplot, H2O_memory_time, H2O_memory_time_multiple, H2O_PCA,
+            mantle_water, mantle_water_at_t, plot_sf, minmap, time_vs_ratio,
+            snapshot, IOplot, H2O_sector_ACF, H2O_PCA,
     # Auxilliaries
             idx_ph_transitions, t_avg, oxidize_bulk, c2k, k2c, km2GPa, GPa2km
 end

@@ -1,4 +1,4 @@
-using StagPP, GLMakie, MAGEMin_C
+using StagPP, GLMakie
 
 load_sims = false
 # Sims
@@ -67,9 +67,8 @@ load_sims = false
         # no = [y20, noR, noK, noKR]
     end
 
-fig = Figure(size=(1400, 700))
-mantle_water(logm, fig=fig, fpos=(1,1), lim=1.5)
-mantle_water(logm05, fig=fig, fpos=(1,2), leg=false, lim=1.5)
-mantle_water(logp05, fig=fig, fpos=(2,1), leg=false, lim=1.5)
-mantle_water(logp, fig=fig, fpos=(2,2), leg=false, lim=1.5)
+# test = load_sim("C:\\Users\\Nickm\\.julia\\dev\\StagPP\\test_data1\\EW", "test");
+# test2 = load_sim("C:\\Users\\Nickm\\.julia\\dev\\StagPP\\test_data2\\EW", "test");
+# t = [test, test2]
 
+ta_field_vs_field(t, "Wsol_lm", "freeH2O_lm")

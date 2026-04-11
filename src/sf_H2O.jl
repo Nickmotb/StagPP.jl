@@ -376,8 +376,13 @@
             - ylabelpadding::Int64 \t\t-->\t Y-axis label padding [default: 15]
             - savein::String \t\t-->\t Save figure in file [default: "" (no saving)]
     """
-    function mantle_water_at_t(Dblock::DataBlock, time; fig=nothing, fpos=(1,1), fsize=(900,600), disp=true, savein="",
-                            xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15, oldplot=false)
+    function mantle_water_at_t(Dblock::DataBlock, time;  yrange=yrange,
+                        # figure parameters
+                        fig=fig, fpos=fpos, fsize=fsize, disp=disp, leg=leg, legpos=legpos, framevisible=framevisible, xlabelsize=xlabelsize, xticklabelsize=xticklabelsize,
+                        xticksize=xticksize, ylabelsize=ylabelsize, yticklabelsize=yticklabelsize, yticksize=yticksize, xlabelpadding=xlabelpadding,
+                        ylabelpadding=ylabelpadding, xreversed=xreversed, yreversed=yreversed, xgrid=xgrid, ygrid=ygrid, savein=savein, scatter=scatter, marker=marker,
+                        markersize=markersize, strokewidth=strokewidth, strokecolor=strokecolor, line=line, linewidth=linewidth, linestyle=linestyle,
+                        cmap_reverse=cmap_reverse, subsample=subsample, color=color, cmap=cmap)
 
         # Checks and indexing setup
         @assert Dblock.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(Dblock.metadata.Sname)"
@@ -385,39 +390,26 @@
         mintime = min(time, Dblock.rproftime[end], Dblock.timedata[end,idxT["time"]])
         timeidx = findfirst(Dblock.rproftime .>= mintime)
         timeidxT = findfirst(Dblock.timedata[:,idxT["time"]] .>= mintime)
-
         # Initialize figure 
         isnothing(fig) && (fig = Figure(size = fsize))
-
         # Gather Data
         r = Dblock.rprofdata[:, timeidx, idxR["r"]]
-        midpoint_r = 0.5(r[1:end-1] .+ r[2:end])
-        midpoint_r² = 0.5(midpoint_r[1:end-1] .+ midpoint_r[2:end])
-        ρ = Dblock.rprofdata[:, timeidx, idxR["rhomean"]]
-        ∂ρ_∂r = diff(ρ)./diff(r)
-        ∂²ρ_∂r² = diff(∂ρ_∂r)./diff(midpoint_r)
         water = Dblock.rprofdata[:, timeidx, idxR["Water"]]
         s = Dblock.rprofdata[:, timeidx, idxR["Wsol"]]
         ∂M = Dblock.rprofdata[:, timeidx, idxR["dM"]]
         H2Okg = water./om.*∂M.*1e-2 # wt% to fraction
-        sH2Okg = s./om.*∂M.*1e-2
-
         # Find radial phase boundaries
         pv_ring, wad_ol, lith_ol = idx_ph_transitions(Dblock; timeidx=timeidx)
-
         # Ocean mass
         omass = max.(Dblock.timedata[timeidxT,idxT["SurfOceanMass3D"]]/om, 0)
-
         # Divide by sectors
-        lm_H2Okg = sum(H2Okg[1:pv_ring])
-        tz_H2Okg = sum(H2Okg[pv_ring+1:wad_ol])
-        um_H2Okg = sum(H2Okg[wad_ol+1:lith_ol])
+        lm_H2Okg    = sum(H2Okg[1:pv_ring])
+        tz_H2Okg    = sum(H2Okg[pv_ring+1:wad_ol])
+        um_H2Okg    = sum(H2Okg[wad_ol+1:lith_ol])
         crust_H2Okg = sum(H2Okg[lith_ol+1:end])
-
-        ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Radius\;[km]", ylabel = L"Cumulative\;H_2O\;mass\;[OM]", xlabelsize=xlabelsize, ylabelsize=ylabelsize,
+        ax = Axis(fig[fpos...], xlabel = L"Radius\;[km]", ylabel = L"Cumulative\;H_2O\;mass\;[OM]", xlabelsize=xlabelsize, ylabelsize=ylabelsize,
                 xticklabelsize=xticklabelsize, yticklabelsize=yticklabelsize, xticksize=xticksize, yticksize=yticksize,
                 xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding)
-
         # Sector bands
         # -- LM
             band!(ax, 1e-3r[1:pv_ring], zeros(length(r[1:pv_ring])), lm_H2Okg*ones(length(r[1:pv_ring])), color=:orange, alpha=0.3)
@@ -433,94 +425,73 @@
         # -- Crust
             band!(ax, 1e-3r[1:lith_ol], (lm_H2Okg+tz_H2Okg+um_H2Okg)*ones(length(r[1:lith_ol])), (lm_H2Okg+tz_H2Okg+um_H2Okg+crust_H2Okg)*ones(length(r[1:lith_ol])), color=:brown, alpha=0.1)
             band!(ax, 1e-3r[lith_ol:end], (lm_H2Okg+tz_H2Okg+um_H2Okg)*ones(length(r[lith_ol:end])), (lm_H2Okg+tz_H2Okg+um_H2Okg+crust_H2Okg)*ones(length(r[lith_ol:end])), color=:brown, alpha=0.3)
-
         # Text
         f = 0.5
         text!(ax, 200, f*(lm_H2Okg), text="$(round(lm_H2Okg, digits=3)) OM (Lower mantle)", color=:black, align = (:left, :center), fontsize=20)
         text!(ax, 200, lm_H2Okg + f*tz_H2Okg, text="$(round(tz_H2Okg, digits=3)) OM (MTZ)", color=:black, align = (:left, :center), fontsize=20)
         text!(ax, 200, lm_H2Okg + tz_H2Okg + f*um_H2Okg, text="$(round(um_H2Okg, digits=3)) OM (Upper mantle)", color=:black, align = (:left, :center), fontsize=20)
         text!(ax, 200, lm_H2Okg + tz_H2Okg + um_H2Okg + f*crust_H2Okg, text="$(round(crust_H2Okg, digits=3)) OM (Crust)", color=:black, align = (:left, :center), fontsize=20)
-
         # Lines
         lines!(ax, 1e-3r, cumsum(H2Okg), color=:black, linewidth=3.0, alpha=1.0)
-        # lines!(ax, 1e-3r, cumsum(sH2Okg), color=:blue, linestyle=:dash, linewidth=2.5, alpha=0.3, label = "Mantle water capacity")
         scatter!(ax, 0.0, 0.0, color=:black, alpha=0.0, label = "Ocean mass at $(round(mintime, digits=2)) Gyr : $(round(omass, digits=2)) OM")
-        # scatter!(ax, 0.0, 0.0, color=:black, alpha=0.0, label = "Parameter | Integrated Total H₂O mass at $(round(time, digits=2)) Gyr : $(round(Dblock.metadata.totH₂O/om, digits=2)) | $(round(sum(H2Okg)+omass, digits=2)) OM")
         scatter!(ax, 0.0, 0.0, color=:black, alpha=0.0, label = "Integrated mantle H₂O mass at $(round(mintime, digits=2)) Gyr : $(round(sum(H2Okg), digits=2)) OM")
-        # scatter!(ax, 0.0, 0.0, color=:black, alpha=0.0, label = "Mantle water capacity at $(round(mintime, digits=2)) Gyr : $(round(sum(sH2Okg), digits=2)) OM")
         axislegend(ax, position=:rb, framevisible=true, fontsize=15, padding=10, rowgap=10)
-
-
         # Display and save
         disp && display(fig)
         (savein != "") && save(savein*".png", fig)
     end
 
-    function mantle_water(Dblock; fig=nothing, lim=nothing, leg=true,
-                            fpos=(1,1), fsize=(1000,700), disp=true, savein="", tstart=nothing, tend=nothing, logscale=false, fluxes=false, rtime=false)
+    function mantle_water(Dblock::DataBlock;  yrange=yrange, tstart=tstart, tend=tend, fluxes=false, Tg_Myr=true, rtime=false, regimes=true, ingasclr=:green, outgasclr=:grey40,
+                        # figure parameters
+                        fig=fig, fpos=fpos, fsize=fsize, disp=disp, leg=leg, legfontsize=legfontsize, legpos=legpos, legflat=legflat, framevisible=framevisible, xlabelsize=xlabelsize, xticklabelsize=xticklabelsize,
+                        xticksize=xticksize, ylabelsize=ylabelsize, yticklabelsize=yticklabelsize, yticksize=yticksize, xlabelpadding=xlabelpadding,
+                        ylabelpadding=ylabelpadding, xreversed=xreversed, yreversed=yreversed, xgrid=xgrid, ygrid=ygrid, savein=savein, scatter=scatter, marker=marker,
+                        markersize=markersize, strokewidth=strokewidth, strokecolor=strokecolor, line=line, linewidth=linewidth, linestyle=linestyle,
+                        cmap_reverse=cmap_reverse, subsample=subsample, color=color, cmap=cmap)
 
         # Checks and indexing setup
         @assert Dblock.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(Dblock.metadata.Sname)"
         idxT, idxR, idxP = data_encoding(Dblock)
-
         # Initialize figure 
         isnothing(fig) && (fig = Figure(size = fsize))
-
         # Timing indexes
-        isnothing(tstart) && (tstart = first(Dblock.rproftime))
-        isnothing(tend) && (tend = last(Dblock.rproftime))
+        (tstart==-1)    && (tstart = first(Dblock.rproftime))
+        (tend==-1)      && (tend = last(Dblock.rproftime))
         timeidx_s = findfirst(Dblock.rproftime .>= tstart)
         timeidx_e = findlast(Dblock.rproftime .<= tend)
         nt = length(timeidx_s:timeidx_e)
-
-
         # Gather Data
-        r = Dblock.rprofdata[:, timeidx_s:timeidx_e, idxR["r"]]
-        ρ = Dblock.rprofdata[:, timeidx_s:timeidx_e, idxR["rhomean"]]
-        water = Dblock.rprofdata[:, timeidx_s:timeidx_e, idxR["Water"]]
-        s = Dblock.rprofdata[:, timeidx_s:timeidx_e, idxR["Wsol"]]
-        ∂M = Dblock.rprofdata[:, timeidx_s:timeidx_e, idxR["dM"]]
-        H2Okg = water./om.*∂M.*1e-2 # wt% to fraction
-        sH2Okg = s./om.*∂M.*1e-2
-        
+        water   = @view Dblock.rprofdata[:, timeidx_s:timeidx_e, idxR["Water"]]
+        ∂M      = @view Dblock.rprofdata[:, timeidx_s:timeidx_e, idxR["dM"]]
+        H2Okg   = water./om.*∂M.*1e-2 # wt% to fraction
         # Integrate H2O per timestep
         intH2O = zeros(Float64, 4, timeidx_e - timeidx_s + 1)
         intH2O_mavg = zeros(Float64, 4, timeidx_e - timeidx_s + 1)
-        F = zeros(Float64, 4, timeidx_e - timeidx_s) # Fluxes between reservoirs
-        F_mavg = zeros(Float64, 4, timeidx_e - timeidx_s) # Moving average of fluxes
-        τ = zeros(Float64, 3, timeidx_e - timeidx_s) # Residence times
-        τ_tavg = zeros(Float64, 3) # Moving average of residence times
+        F = zeros(Float64, 5, timeidx_e - timeidx_s) # Fluxes between reservoirs
+        F_mavg = zeros(Float64, 5, timeidx_e - timeidx_s) # Moving average of fluxes
         for t in timeidx_s:timeidx_e
             # Find radial phase boundaries
             pv_ring, wad_ol, lith_ol = idx_ph_transitions(Dblock; timeidx=t)
-
             # Divide by sectors
             intH2O[1,t-timeidx_s+1] = sum(H2Okg[1:pv_ring, t - timeidx_s + 1])
             intH2O[2,t-timeidx_s+1] = sum(H2Okg[pv_ring+1:wad_ol, t - timeidx_s + 1])
             intH2O[3,t-timeidx_s+1] = sum(H2Okg[wad_ol+1:lith_ol, t - timeidx_s + 1])
             intH2O[4,t-timeidx_s+1] = sum(H2Okg[lith_ol+1:end, t - timeidx_s + 1])
-
             # Computes fluxes
             if t>timeidx_s
                 # Net reservoir changes
-                Δlm = intH2O[1,t-timeidx_s+1] - intH2O[1,t-timeidx_s] # + -> reservoir gained water | - -> reservoir lost water
-                Δtz = intH2O[2,t-timeidx_s+1] - intH2O[2,t-timeidx_s]
-                Δum = intH2O[3,t-timeidx_s+1] - intH2O[3,t-timeidx_s]
+                Δlm     = intH2O[1,t-timeidx_s+1] - intH2O[1,t-timeidx_s] # + -> reservoir gained water | - -> reservoir lost water
+                Δtz     = intH2O[2,t-timeidx_s+1] - intH2O[2,t-timeidx_s]
+                Δum     = intH2O[3,t-timeidx_s+1] - intH2O[3,t-timeidx_s]
+                Δcrust  = intH2O[4,t-timeidx_s+1] - intH2O[4,t-timeidx_s]
                 dt = Dblock.rproftime[t] - Dblock.rproftime[t-1]
-
                 # Chain computed fluxes
                 F_lm2tz = -Δlm / dt # OM/Gyr.
                 F_tz2um = F_lm2tz - Δtz/dt # OM/Gyr | Δtz = (F_lm2tz - F_tz2um)dt → F_tz2um = F_lm2tz - Δtz/dt
                 F_um2crust = F_tz2um - Δum/dt # OM/Gyr | Δum = (F_tz2um - F_um2crust)dt → F_um2crust = F_tz2um - Δum/dt
-                F[1:3,t-timeidx_s] .= [F_lm2tz, F_tz2um, F_um2crust] # OM/Gyr
-                F[4,t-timeidx_s] = sum(F[1:3,t-timeidx_s])
-
-                # Residence times (τ = M / F)
-                # τ_lm = intH2O[1,t-timeidx_s+1] / F_tz_lm
-                # τ_tz = intH2O[2,t-timeidx_s+1] / (F_um_tz + F_tz_lm)
-                # τ_um = intH2O[3,t-timeidx_s+1] / (F_crust_um + F_um_tz)
-                # τ[:,t-timeidx_s] = [τ_lm, τ_tz, τ_um]
-
+                F_out = F_um2crust - Δcrust/dt # OM/Gyr | Δum = (F_tz2um - F_um2crust)dt → F_um2crust = F_tz2um - Δum/dt
+                F[1:4,t-timeidx_s] .= [F_lm2tz, F_tz2um, F_um2crust, F_out] # OM/Gyr
+                F[5,t-timeidx_s] = sum(F[1:4,t-timeidx_s])
             end
         end
         # Moving average of H2O and fluxes
@@ -532,123 +503,70 @@
         F_mavg[1,:] .= EasyFit.movavg(F[1,:], window).x
         F_mavg[2,:] .= EasyFit.movavg(F[2,:], window).x
         F_mavg[3,:] .= EasyFit.movavg(F[3,:], window).x
-        F_mavg[4,:] = sum(F_mavg[1:3,:], dims=1)
+        F_mavg[4,:] .= EasyFit.movavg(F[4,:], window).x
+        F_mavg[5,:] = sum(F_mavg[1:4,:], dims=1)
+        Tg_Myr && (F_mavg .= OM_Gyr_2_Tg_Myr.(F_mavg))
 
+        # Cumulative sum of either raw or mavg array
         # cumH2O = cumsum(intH2O_mavg, dims=1)
         cumH2O = cumsum(intH2O, dims=1)
 
-        # Time averaged τ
-        # τ_tavg[1] = t_avg(τ[1,:], Dblock.rproftime[timeidx_s+1:timeidx_e], absolute=true)
-        # τ_tavg[2] = t_avg(τ[2,:], Dblock.rproftime[timeidx_s+1:timeidx_e], absolute=true)
-        # τ_tavg[3] = t_avg(τ[3,:], Dblock.rproftime[timeidx_s+1:timeidx_e], absolute=true)
-
+        ylab = Tg_Myr ? L"H_2O\;flux\;\mathrm{[Tg/Myr]}" : fluxes ? L"H_2O\;flux\;\mathrm{[OM/Gyr]}" : rtime ? L"" : L"H_2O\;mass\;\mathrm{[OM]}"
+        ax = Axis(fig[fpos...], xlabel=L"Time\;\mathrm{[Gyr]}", ylabel=ylab, xlabelsize=xlabelsize, ylabelsize=ylabelsize,
+                xticklabelsize=xticklabelsize, yticklabelsize=yticklabelsize, xticksize=xticksize, yticksize=yticksize,
+                xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding, xgridvisible=xgrid, ygridvisible=ygrid)
         if fluxes
-            ax = Axis(fig[fpos...], xlabel=L"Time\;\mathrm{[Gyr]}", ylabel=L"H_2O\;flux\;\mathrm{[OM/Gyr]}", xgridvisible=false, ygridvisible=false)
-            lines!(ax, [Dblock.rproftime[timeidx_s], Dblock.rproftime[timeidx_e]], [0.0, 0.0], color=:red, alpha=0.7)
-            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e-1], F_mavg[1,:], label="LM → TZ", color=:orange, linewidth=0.5)
-            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e-1], F_mavg[2,:], label="TZ → UM", color=:green, linewidth=0.5)
-            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e-1], F_mavg[3,:], label="UM → Crust", color=:blue, linewidth=0.5)
-            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e-1], F_mavg[4,:], label="Cumulative", color=:black)
-            mn, mx = minimum(F_mavg), maximum(F_mavg)
+            t   = Dblock.rproftime[timeidx_s+1:timeidx_e-1]
+            t05 = 0.5(Dblock.rproftime[timeidx_s:timeidx_e-1] .+ Dblock.rproftime[timeidx_s+1:timeidx_e])
+            mn, mx = minimum(F_mavg[1:4,:]), maximum(F_mavg[1:4,:])
             d = mx-mn
-            ylims!(ax, mn-0.1d, mx+0.1d)
-            leg && axislegend(ax, position=:rb)
-        elseif rtime
-            ax = Axis(fig[fpos...], xlabel=L"Time\;\mathrm{[Gyr]}", ylabel=L"H_2O\;flux\;\mathrm{[OM/Gyr]}", xgridvisible=false, ygridvisible=false)
+            # Regime bands
+            if regimes
+                cumarr = @view F_mavg[4,:]
+                f = diff(sign.(cumarr))
+                i0 = 1; isign = sign(cumarr[1])
+                current_band_clr = isign==-1 ? outgasclr : ingasclr
+                for i in eachindex(t)
+                    # continue if within the same regime
+                    (f[i]==0.0 && i!=length(t)) && continue
+                    if f[i]==-2.0 # If crossing down
+                        band!(ax, t[i0:i], mn, mx, color=current_band_clr, alpha=0.15, label="Ingassing")
+                        i0 = i; current_band_clr = outgasclr
+                    elseif f[i]==2.0 # If crossing up
+                        band!(ax, t[i0:i], mn, mx, color=current_band_clr, alpha=0.15, label="Degassing")
+                        i0 = i; current_band_clr = ingasclr
+                    else
+                        band!(ax, t[i0:i], mn, mx, color=current_band_clr, alpha=0.15)
+                    end
+                end
+            end
+            # Plot
             lines!(ax, [Dblock.rproftime[timeidx_s], Dblock.rproftime[timeidx_e]], [0.0, 0.0], color=:red, alpha=0.7)
-            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e-1], F_mavg[1,:], label="LM → TZ", color=:orange, linewidth=0.5)
-            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e-1], F_mavg[2,:], label="TZ → UM", color=:green, linewidth=0.5)
-            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e-1], F_mavg[3,:], label="UM → Crust", color=:blue, linewidth=0.5)
-            lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e-1], F_mavg[4,:], label="Cumulative", color=:black)
-            mn, mx = minimum(F_mavg), maximum(F_mavg)
-            d = mx-mn
-            ylims!(ax, mn-0.1d, mx+0.1d)
-            leg && axislegend(ax, position=:rb)
+            lines!(ax, t05, F_mavg[1,:], label="LM → TZ", color=:red, linewidth=0.7)
+            lines!(ax, t05, F_mavg[2,:], label="TZ → UM", color=:purple, linewidth=0.7)
+            lines!(ax, t05, F_mavg[3,:], label="UM → Crust", color=:blue, linewidth=0.7)
+            scatterlines!(ax, t05, F_mavg[4,:], label="Crust → Atm", color=:black, linewidth=2.5)
+            # lines!(ax, t05, F_mavg[5,:], label="Cumulative", color=:black)
         else
-        ax = Axis(fig[fpos...], xlabel=L"Time\;\mathrm{[Gyr]}", ylabel=L"Mass\;of\;water\;\mathrm{[OM]}", xgridvisible=false, ygridvisible=false)
-        # Bands
-        band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[3,:], cumH2O[4,:], color=:sienna4, alpha=0.4, label="Crust")
-        band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[2,:], cumH2O[3,:], color=:skyblue2, alpha=0.4, label="UM")
-        band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[1,:], cumH2O[2,:], color=:olivedrab2, alpha=0.4, label="TZ")
-            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], zeros(nt), cumH2O[1,:], color=:orange, alpha=0.4, label="LM")
-        # Borders
+            mn, mx = minimum(cumH2O), maximum(cumH2O)
+            d = mx-mn
+            # Bands
+            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[3,:], cumH2O[4,:], color=:grey40, alpha=0.4, label="Crust")
+            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[2,:], cumH2O[3,:], color=:blue, alpha=0.4, label="UM")
+            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[1,:], cumH2O[2,:], color=:purple, alpha=0.4, label="TZ")
+            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], zeros(nt), cumH2O[1,:], color=:red, alpha=0.4, label="LM")
+            # Borders
             lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[1,:], color=:black, alpha=0.7, linewidth=0.5)
             lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[2,:], color=:black, alpha=0.7, linewidth=0.5)
             lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[3,:], color=:black, alpha=0.7, linewidth=0.5)
             lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[4,:], color=:black, alpha=0.7, linewidth=0.5)
-        # Axis
-        leg && axislegend(ax, position=:lt, orientation=:horizontal)
-            !isnothing(lim) ? ylims!(ax, 0.0, lim) : ylims!(ax, 0.0, 1.2maximum(cumH2O))
         end
+        # Axis
+        leg && axislegend(ax, position=legpos, orientation=legflat ? :horizontal : :vertical, labelsize=legfontsize, unique=true)
+        (yrange==(-1,-1)) ? ylims!(ax, mn-0.17d, mx+0.17d) : ylims!(ax, yrange[1], yrange[2])
         # Display and save
         disp && display(fig)
         (savein != "") && save(savein*".png", fig)
-
-    end
-
-    function H2Oflux_across_depth(Dblock, depth; fig=nothing, fpos=(1,1), fsize=(900,600), disp=true, savein="", tstart=nothing, tend=nothing)
-
-        # Checks and indexing setup
-        @assert Dblock.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(Dblock.metadata.Sname)"
-        idxT, idxR, idxP = data_encoding(Dblock)
-
-        # Initialize figure 
-        isnothing(fig) && (fig = Figure(size = fsize))
-
-        # Timing indexes
-        isnothing(tstart) && (tstart = first(Dblock.rproftime))
-        isnothing(tend) && (tend = last(Dblock.rproftime))
-        timeidx_s = findfirst(Dblock.rproftime .>= tstart)
-        timeidx_e = findlast(Dblock.rproftime .<= tend)
-
-        # Gather Data
-        r = Dblock.rprofdata[:, timeidx_s:timeidx_e, idxR["r"]][:,1]
-        water = Dblock.rprofdata[:, timeidx_s:timeidx_e, idxR["Water"]]
-        ∂M = Dblock.rprofdata[:, timeidx_s:timeidx_e, idxR["dM"]]
-        H2Okg = water./om.*∂M.*1e-2 # wt% to fraction
-
-        # idx of target depth
-        depth_idx = findfirst(r .>= r[end]-1e3depth)
-        
-        # Integrate H2O per timestep
-        intH2O = zeros(Float64, 4, timeidx_e - timeidx_s + 1)
-        F = zeros(Float64, timeidx_e - timeidx_s) # Fluxes between reservoirs
-        F_mavg = zeros(Float64, timeidx_e - timeidx_s) # Moving average of fluxes
-        for t in timeidx_s:timeidx_e
-
-            if depth_idx <= pv_ring
-
-            else
-                # Find radial phase boundaries
-                pv_ring, wad_ol, lith_ol = idx_ph_transitions(Dblock; timeidx=t)
-
-                # Divide by sectors
-                intH2O[1,t-timeidx_s+1] = sum(H2Okg[1:pv_ring, t - timeidx_s + 1])
-                intH2O[2,t-timeidx_s+1] = sum(H2Okg[pv_ring+1:wad_ol, t - timeidx_s + 1])
-                intH2O[3,t-timeidx_s+1] = sum(H2Okg[wad_ol+1:lith_ol, t - timeidx_s + 1])
-                intH2O[4,t-timeidx_s+1] = sum(H2Okg[lith_ol+1:end, t - timeidx_s + 1])
-
-                # Computes fluxes
-                if t>timeidx_s
-                    # Net reservoir changes
-                    Δlm = intH2O[1,t-timeidx_s+1] - intH2O[1,t-timeidx_s]
-                    Δtz = intH2O[2,t-timeidx_s+1] - intH2O[2,t-timeidx_s]
-                    Δum = intH2O[3,t-timeidx_s+1] - intH2O[3,t-timeidx_s]
-                    dt = Dblock.rproftime[t] - Dblock.rproftime[t-1]
-
-                    # Chain computed fluxes ("F_from_to")
-                    F_tz_lm = Δlm / dt # OM/Gyr
-                    F_um_tz = Δtz/dt + F_tz_lm # OM/Gyr | Δtz = (F_um_tz - F_tz_lm)dt → F_um_tz = Δtz/dt + F_tz_lm
-                    F_crust_um = Δum/dt + F_um_tz # OM/Gyr | Δum = (F_crust_um - F_um_tz)dt → F_crust_um = Δum/dt + F_um_tz
-                    (depth_idx <= wad_ol) && (F_rest_target = (sum(H2Okg[pv_ring+1:depth_idx, t - timeidx_s + 1]) - sum(H2Okg[pv_ring+1:depth_idx, t - timeidx_s]))/dt + F_tz_lm) # OM/Gyr | Δtz = (F_um_tz - F_tz_lm)dt → F_um_tz = Δtz/dt + F_tz_lm
-                    (depth_idx > wad_ol && depth_idx <= lith_ol) && (F_rest_target = (sum(H2Okg[wad_ol+1:depth_idx, t - timeidx_s + 1]) - sum(H2Okg[wad_ol+1:depth_idx, t - timeidx_s]))/dt + F_um_tz) # OM/Gyr | Δum = (F_crust_um - F_um_tz)dt → F_crust_um = Δum/dt + F_um_tz
-                    (depth_idx > lith_ol) && (F_rest_target = (sum(H2Okg[lith_ol+1:depth_idx, t - timeidx_s + 1]) - sum(H2Okg[lith_ol+1:depth_idx, t - timeidx_s]))/dt + F_crust_um) # OM/Gyr | Δum = (F_crust_um - F_um_tz)dt → F_crust_um = Δum/dt + F_um_tz
-                    F[t-timeidx_s] = F_rest_target
-                end
-            end
-        return F
-        
-        end
 
     end
 
@@ -707,52 +625,43 @@
         disp && display(fig)
     end
 
-    function IOplot(Dblock; fig=nothing, fpos=(1,1), fsize=(1000,500), disp=true, tstart=nothing, tend=nothing, yrange=nothing, savein="", trimt=0.1)
-
-        if typeof(Dblock) == Vector{DataBlock}
-            IOplot_multiple(Dblock; fig=fig, fpos=fpos, fsize=fsize, disp=disp, tstart=tstart, tend=tend, yrange=yrange, savein=savein)
-            return
-        end
+    function IOplot(Dblock::DataBlock;  yrange=yrange, tstart=tstart, tend=tend, trimt=0.1,
+                        # figure parameters
+                        fig=fig, fpos=fpos, fsize=fsize, disp=disp, leg=leg, legfontsize=legfontsize, legpos=legpos, legflat=legflat, framevisible=framevisible, xlabelsize=xlabelsize, xticklabelsize=xticklabelsize,
+                        xticksize=xticksize, ylabelsize=ylabelsize, yticklabelsize=yticklabelsize, yticksize=yticksize, xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding, xgrid=xgrid, ygrid=ygrid, savein=savein, 
+                        markersize=markersize, strokewidth=strokewidth, strokecolor=strokecolor, line=line, linewidth=linewidth, linestyle=linestyle)
 
         # Checks
         @assert Dblock.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(Dblock.metadata.name)"
-
         # Get encoding
         idxT, idxR, idxP = data_encoding(Dblock.timeheader, Dblock.rprofheader, Dblock.platesheader)
         mv_avg_window=30
-
         # Vectors
         time = Dblock.timedata[:,idxT["time"]]
         startidx = findfirst(time .> trimt) # Start after initial ingassing. Sets Δ to zero at chosen starting t.
         rawingas, rawoutgas = Dblock.timedata[startidx:end,idxT["IngassedH2O"]], Dblock.timedata[startidx:end,idxT["OutgassedH2O"]]
-        Δi = rawingas[1] - rawoutgas[1];
-        Δi > 0.0 ? (rawingas .-= Δi) : (rawoutgas .-= -Δi) # Align initial ingassed and outgassed H₂O
         sectioned_in, sectioned_out = diff(rawingas), -diff(rawoutgas)
         time = time[startidx:end]
         mavg_ingas, mavg_outgas = EasyFit.movavg(sectioned_in, mv_avg_window).x, EasyFit.movavg(sectioned_out, mv_avg_window).x
         mavg_ingas = max.(mavg_ingas, 0.0)
         mavg_outgas = min.(mavg_outgas, 0.0)
         Δ = (Dblock.timedata[startidx,idxT["SurfOceanMass3D"]].-Dblock.timedata[startidx:end,idxT["SurfOceanMass3D"]])./om
-
+        mn, mx = minimum(Δ), maximum(Δ)
+        amx = max(abs(mn), abs(mx)); d=2amx
         # Time window
-        isnothing(tstart) && (tstart = first(time))
-        isnothing(tend) && (tend = last(time))
-
+        (tstart==-1) && (tstart = first(time))
+        (tend==-1)   && (tend = last(time))
         # Initialise figure
         isnothing(fig) && (fig = Figure(size = fsize))
-        ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Time\;[\mathrm{Gyr}]", ylabel = L"H_2O\;mass\;[\mathrm{kg}]", xlabelsize=25, ylabelsize=25, 
-                    xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15, xgridvisible=false, ygridvisible=false)
-        axr = Axis(fig[fpos[1], fpos[2]], yticklabelcolor = :green, ylabelcolor=:green, yaxisposition = :right, ylabel = L"\Delta_{in-out}\;[\mathrm{OM}]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
+        ax = Axis(fig[fpos...], xlabel = L"Time\;[\mathrm{Gyr}]", ylabel = L"H_2O\;mass\;[\mathrm{kg}]", xlabelsize=xlabelsize, ylabelsize=ylabelsize,
+                xticklabelsize=xticklabelsize, yticklabelsize=yticklabelsize, xticksize=xticksize, yticksize=yticksize,
+                xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding, xgridvisible=xgrid, ygridvisible=ygrid)
+        axr = Axis(fig[fpos...], yticklabelcolor = :green, ylabelcolor=:green, yaxisposition = :right, ylabel = L"\Delta_{in-out}\;[\mathrm{OM}]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
                             xgridvisible=false, ygridvisible=false)
-        scatter!(axr, tstart*ones(2), [minimum(Δ), maximum(Δ)], alpha=0.0)
+        scatter!(axr, tstart*ones(2), [mn, mx], alpha=0.0)
         xlims!(ax, (tstart, tend))
         xlims!(axr, (tstart, tend))
-        if isnothing(yrange)
-            val = 1.05max(abs(minimum(Δ)), abs(maximum(Δ)))
-            ylims!(axr, -val, val)
-        else
-            ylims!(axr, (-yrange, yrange))
-        end
+        (yrange!=(-1,-1)) ? ylims!(axr, (-yrange, yrange)) : ylims!(axr, -amx-0.1d, amx+0.1d)
         hidespines!(axr); hidexdecorations!(axr)
 
         lines!(ax, time[2:end], sectioned_in, color=:black, linewidth=0.1, linestyle=:solid, alpha=0.4)
@@ -761,14 +670,18 @@
         lines!(ax, time[2:end], mavg_outgas, color=:red, linewidth=1.0, linestyle=:solid, label="Outgassed H₂O")
         lines!(axr, time, Δ, color=:green, linewidth=1.5, linestyle=:dash)
         mx = max(maximum(mavg_outgas), maximum(mavg_ingas)); d=2mx
-        ylims!(ax, -mx-d, mx+d)
-        axislegend(ax, position=:rc, framevisible=false, fontsize=15, padding=10, rowgap=10)
+        ylims!(ax, -mx-1.8d, mx+1.8d)
+        axislegend(ax, position=:rb, framevisible=false, fontsize=15, padding=10, rowgap=10)
         disp && display(fig)
         (savein != "") && save(savein*".png", fig)
 
     end
 
-    function IOplot_multiple(Dblocks::Vector{DataBlock};  fig=nothing, fpos=(1,1), fsize=(800,500), disp=true, tstart=nothing, tend=nothing, yrange=(nothing, nothing), savein="", clrsmap=:vik100)
+    function IOplot(Dblocks::Vector{DataBlock}; yrange=yrange, tstart=tstart, tend=tend, trimt=0.1,
+                        # figure parameters
+                        fig=fig, fpos=fpos, fsize=fsize, disp=disp, leg=leg, legfontsize=legfontsize, legpos=legpos, legflat=legflat, framevisible=framevisible, xlabelsize=xlabelsize, xticklabelsize=xticklabelsize,
+                        xticksize=xticksize, ylabelsize=ylabelsize, yticklabelsize=yticklabelsize, yticksize=yticksize, xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding, xgrid=xgrid, ygrid=ygrid, savein=savein, 
+                        markersize=markersize, strokewidth=strokewidth, strokecolor=strokecolor, line=line, linewidth=linewidth, linestyle=linestyle, scatter=scatter, marker=marker, cmap_reverse=cmap_reverse)
 
         # Checks
         for blck in Dblocks
@@ -777,103 +690,35 @@
 
         # Initialise figure
         isnothing(fig) && (fig = Figure(size = fsize))
-        ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Time\;[\mathrm{Gyr}]", ylabel = L"\Delta_{in-out}\;[\mathrm{kg}]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
-                            xgridvisible=false, ygridvisible=false)
+        ax = Axis(fig[fpos...], xlabel = L"Time\;[\mathrm{Gyr}]", ylabel = L"\Delta_{in-out}\;[\mathrm{kg}]", xlabelsize=xlabelsize, ylabelsize=ylabelsize,
+                xticklabelsize=xticklabelsize, yticklabelsize=yticklabelsize, xticksize=xticksize, yticksize=yticksize,
+                xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding, xgridvisible=xgrid, ygridvisible=ygrid)
         maxΔ, minΔ = -Inf, Inf
-        clrs = cpalette(clrsmap, length(Dblocks))
-
+        lb = length(Dblocks)
+        clrs = cpalette(cmap, lb)
         # Block loop
         for (b, blck) in enumerate(Dblocks)
-
             # Get encoding
             idxT, idxR, idxP = data_encoding(blck.timeheader, blck.rprofheader, blck.platesheader)
-
             # Vectors
             time = blck.timedata[:,idxT["time"]];
             startidx = findfirst(time .> 0.1) # Start after initial ingassing. Sets Δ to zero at chosen startint t.
             rawingas, rawoutgas = blck.timedata[startidx:end,idxT["IngassedH2O"]], blck.timedata[startidx:end,idxT["OutgassedH2O"]]
-            Δi = rawingas[1] - rawoutgas[1]; 
-            Δi > 0.0 ? (rawingas .-= Δi) : (rawoutgas .-= -Δi) # Align initial ingassed and outgassed H₂O
             time = time[startidx:end]
-            Δ = (rawingas .- rawoutgas)
-
+            Δ = (blck.timedata[startidx,idxT["SurfOceanMass3D"]].-blck.timedata[startidx:end,idxT["SurfOceanMass3D"]])./om
             # Time window
-            isnothing(tstart) && (tstart = first(time))
-            isnothing(tend) && (tend = last(time))
-
+            (tstart==-1) && (tstart = first(time))
+            (tend==-1)   && (tend = last(time))
             # Plot
-            lines!(ax, time, Δ, linewidth=2.5, label=blck.metadata.name, color=clrs[b])
-        
+            line    && lines!(ax, time, Δ, linewidth=linewidth, linestyle=linestyle, color=clrs[cmap_reverse ? lb-b+1 : b])
+            scatter && scatter!(ax, time, Δ, color=clrs[cmap_reverse ? lb-b+1 : b], marker=marker, markersize=markersize, strokewidth=strokewidth, strokecolor=strokecolor)
+            # Ensure label
+            scatter!(ax, time[1], Δ[1], color=clrs[cmap_reverse ? lb-b+1 : b], marker=marker, markersize=markersize, strokewidth=strokewidth, strokecolor=strokecolor, label=blck.metadata.name)
         end
         xlims!(ax, (tstart, tend))
-        axislegend(ax, position=:cb, framevisible=true, fontsize=15, padding=10, rowgap=10, orientation=:horizontal)
+        leg && axislegend(ax, position=legpos, framevisible=framevisible, fontsize=legfontsize, padding=10, rowgap=10, orientation=legflat ? :horizontal : :vertical)
         disp && display(fig)
         (savein != "") && save(savein*".png", fig)
-
-    end
-
-    function omplot(Dblock; fig=nothing, fpos=(1,1), fsize=(800,500), disp=true, tstart=nothing, tend=nothing)
-
-        if typeof(Dblock) == Vector{DataBlock}
-            omplot_multiple(Dblock; fig=fig, fpos=fpos, fsize=fsize, disp=disp, tstart=tstart, tend=tend)
-            return
-        end
-
-        # Checks
-        @assert Dblock.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(Dblock.metadata.name)"
-
-        # Get encoding
-        idxT, idxR, idxP = data_encoding(Dblock.timeheader, Dblock.rprofheader, Dblock.platesheader)
-
-        # Vectors
-        time = Dblock.timedata[:,idxT["time"]]
-
-        # Time window
-        isnothing(tstart) && (tstart = first(time))
-        isnothing(tend) && (tend = last(time))
-
-        # Initialise figure
-        isnothing(fig) && (fig = Figure(size = fsize))
-        ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Time\;[\mathrm{Gyr}]", ylabel = L"Surface\;Ocean\;[\mathrm{OM}]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15)
-        xlims!(ax, (tstart, tend))
-
-        lines!(ax, time, Dblock.timedata[:,idxT["SurfOceanMass3D"]]./om, color=:black, linewidth=3.0, linestyle=:solid, label="Ingassed H₂O")
-        disp && display(fig)
-
-    end
-
-    function omplot_multiple(Dblocks::Vector{DataBlock}; fig=nothing, fpos=(1,1), fsize=(800,500), disp=true, tstart=nothing, tend=nothing, clrsmap=:vik100)
-
-        # Checks
-        for blck in Dblocks
-            @assert blck.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(blck.metadata.name)"
-        end
-
-        # Initialise figure
-        isnothing(fig) && (fig = Figure(size = fsize))
-        ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Time\;[\mathrm{Gyr}]", ylabel = L"Surface\;Ocean\;[\mathrm{OM}]", xlabelsize=25, ylabelsize=25, xticklabelsize=17, yticklabelsize=17, xticksize=10, yticksize=10, xlabelpadding=15, ylabelpadding=15,
-                            xgridvisible=false, ygridvisible=false)
-        clrs = cpalette(clrsmap, length(Dblocks))
-        # Block loop
-        for (b, blck) in enumerate(Dblocks)
-
-            # Get encoding
-            idxT, idxR, idxP = data_encoding(blck.timeheader, blck.rprofheader, blck.platesheader)
-
-            # Vectors
-            time = blck.timedata[:,idxT["time"]]
-
-            # Time window
-            isnothing(tstart) && (tstart = first(time))
-            isnothing(tend) && (tend = last(time))
-
-            # Plot
-            lines!(ax, time, blck.timedata[:,idxT["SurfOceanMass3D"]]./om, linewidth=2.5, label=blck.metadata.name, color=clrs[b])
-        
-        end
-        xlims!(ax, (tstart, tend))
-        axislegend(ax, position=:ct, framevisible=true, fontsize=15, padding=10, rowgap=10, orientation=:horizontal)
-        disp && display(fig)
 
     end
 
