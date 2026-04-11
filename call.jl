@@ -71,4 +71,5 @@ load_sims = false
 # test2 = load_sim("C:\\Users\\Nickm\\.julia\\dev\\StagPP\\test_data2\\EW", "test");
 # t = [test, test2]
 
-ta_field_vs_field(t, "Wsol_lm", "freeH2O_lm")
+a = solve_sH2O_fO2(30, 30, nR=3)
+plot_sf(a)

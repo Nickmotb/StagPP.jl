@@ -55,8 +55,8 @@
         # Oxidizing routine 
         function assignR_to_Xv!(Xv, Xox, Xdummy, Rv, cap)
             for i in 1:cap
-                Xv[i] = oxidize_bulk(Xv[i], Rv[i], Xdummy; wt_in=(sys_in=="wt"), wt_out=false, FeFormat="FeO_O", vector=true, Xox=Xox);
-                Xv[i+cap] = oxidize_bulk(Xv[i+cap], Rv[i], Xdummy; wt_in=(sys_in=="wt"), wt_out=false, FeFormat="FeO_O", vector=true, Xox=Xox);
+                Xv[i] = oxidize_bulk(Xv[i], Rv[i], Xdummy; wt_in=(sys_in=="wt"), wt_out=false, FeFormat="FeO_O", vector=true, oldXox=Xox);
+                Xv[i+cap] = oxidize_bulk(Xv[i+cap], Rv[i], Xdummy; wt_in=(sys_in=="wt"), wt_out=false, FeFormat="FeO_O", vector=true, oldXox=Xox);
             end
         end
 
@@ -125,13 +125,13 @@
                 # duplicate to fit size
                 outHB = vcat(repeat(outHB[1:nPnT], nR), repeat(outHB[nPnT+1:2nPnT], nR))
             else; outHB = 0.0; end
-        # Call UM through SB24 to get fO₂0
+        # Initialize sb24 MAGEMin environment
+            (fO2||s) && (data    = Initialize_MAGEMin("sb24", verbose=false))
+        # Call UM through SB24 to get fO₂
             if fO2
                 verbose && println("Calculating upper mantle fO₂...")
-                data    = Initialize_MAGEMin("sb24", verbose=false);
                 !unoxidized && (assignR_to_Xv!(Xv, Xox, Xdummy, Rvec, nPnTnR))  # Oxidize bulk for UM fO₂ calculations
                 out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox24, name_solvus=true, progressbar=verbose, sys_in=sys_in)
-                Finalize_MAGEMin(data);
             else; out_fO2 = 0.0; end
         # Assemble
             sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, ΔFMQ_um, nPnTnR, nR, s=s, fO2=fO2)
@@ -154,14 +154,13 @@
         # Minimizer call + assembly
             if s || fO2
                 verbose && println("Calculating transition zone fO₂ | sᴴ²ᴼ...")
-                data    = Initialize_MAGEMin("sb24", verbose=false);
                 out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox24, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
-                Finalize_MAGEMin(data);
             end; 
+            (fO2||s) && Finalize_MAGEMin(data);
         # DHMS
             if s
                 DHMS && verbose && println("Exploring DHMS paths...")
-                ppaths, paths, _  =  DHMS ? path_solve(XH, Xox_in, phase_out, Pv_nPnT, Tv_nPnT, DBswitchP, (@view out_fO2[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0, 0.0)
+                ppaths, paths, _  =  DHMS ? path_solve(XH, Xox, phase_out, Pv_nPnT, Tv_nPnT, DBswitchP, (@view out_fO2[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0, 0.0)
         # Assemble  
                 ∫sᴴ²ᴼ!(tz, (@view Pv[1:nPnTnR]), (@view Tv[1:nPnTnR]), min_s, out_fO2, DHMS, ppaths, paths, nPnTnR)
                 tz = cat(reshape(tz[:,1], nP, nT, nR), reshape(tz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
@@ -179,13 +178,13 @@
 
         # Lower mantle mesh vectorization
             mesh_vectorization!(Plm, Tlm, Rdom, nP, nT, nR, Pv, Tv, Rvec)
+        # Restart sb24 environment
+            (fO2||s) && (data    = Initialize_MAGEMin("sb24", verbose=false))
 
         # Minimizer call + assembly
             if s || fO2
                 verbose && println("Calculating lower mantle sᴴ²ᴼ...")
-                data    = Initialize_MAGEMin("sb24", verbose=false);
                 out_fO2   .= multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox24, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
-                Finalize_MAGEMin(data);
             end
             if s
                 ∫sᴴ²ᴼ!(lm, (@view Pv[1:nPnTnR]), (@view Tv[1:nPnTnR]), min_s, out_fO2, DHMS, ppaths, paths, nPnTnR)
@@ -197,10 +196,16 @@
                 flm = cat(reshape(flm[:,1], nP, nT, nR), reshape(flm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                 ΔFMQ_lm = reshape(ΔFMQ_lm[:,1], nP, nT)
             end
+        
+        # Finalize sb24 MAGEMin environment
+        (fO2||s) && Finalize_MAGEMin(data);
 
         # ================================
         # ====== Post-minimization =======
         # ================================
+
+        # Ensure positivity
+        um.=max.(1e-10, um); tz.=max.(1e-10, tz); lm.=max.(1e-10, lm)
 
         # Return structure
         sfmap = sfstruct( um, tz, lm, fum, ftz, flm, ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm, ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm, Pum, Tum, Ptz, Ttz, Plm, Tlm, (nR>1) ? collect(Rdom) : Rv )
@@ -229,7 +234,7 @@
             - `savein::String`: Path to save the figure. Default is `""` (does not save).
             - `bigpicture::Tuple{Bool, Int}`: Whether to create a big picture figure. Default is `(false, 1)`.
     """
-    function plot_sf(sfmap; cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, savein="", FMQ=true, fsize=nothing, sblck=false, fblck=false, Rv=nothing)
+    function plot_sf(sfmap; cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, savein="", FMQ=false, fsize=nothing, sblck=false, fblck=false, Rv=nothing)
 
         function f_at_Rv(FeR, Rv, field)
             idx = findfirst(FeR.>=Rv)
@@ -297,9 +302,18 @@
             end
             
         else
-            (length(sfmap.FeR)!=1) && (Rval = isnothing(Rv) ? 0.5(sfmap.FeR[1]+sfmap.FeR[end]) : max(min(Rv, sfmap.FeR[end]), sfmap.FeR[1]))
+            nR = length(sfmap.FeR)
+            if nR>1
+                Rval = isnothing(Rv) ? 0.5(sfmap.FeR[1]+sfmap.FeR[end]) : max(min(Rv, sfmap.FeR[end]), sfmap.FeR[1])
+            else
+                Rval = sfmap.FeR
+            end
             if s
-                um, tz, lm = copy(f_at_Rv(sfmap.FeR, Rval, sfmap.sum)), copy(f_at_Rv(sfmap.FeR, Rval, sfmap.stz)), copy(f_at_Rv(sfmap.FeR, Rval, sfmap.slm))
+                if nR>1
+                    um, tz, lm = copy(f_at_Rv(sfmap.FeR, Rval, sfmap.sum)), copy(f_at_Rv(sfmap.FeR, Rval, sfmap.stz)), copy(f_at_Rv(sfmap.FeR, Rval, sfmap.slm))
+                else
+                    um, tz, lm = copy(sfmap.sum), copy(sfmap.stz), copy(sfmap.slm)
+                end
                 # Upper Mantle
                 ax = Axis(fig[1, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted,\;wt%)", yreversed=true,
                             xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
@@ -324,7 +338,11 @@
             end
 
             if f
-                um, tz, lm = copy(f_at_Rv(sfmap.FeR, Rval, sfmap.fum)), copy(f_at_Rv(sfmap.FeR, Rval, sfmap.ftz)), copy(f_at_Rv(sfmap.FeR, Rval, sfmap.flm))
+                if nR>1
+                    um, tz, lm = copy(f_at_Rv(sfmap.FeR, Rval, sfmap.fum)), copy(f_at_Rv(sfmap.FeR, Rval, sfmap.ftz)), copy(f_at_Rv(sfmap.FeR, Rval, sfmap.flm))
+                else
+                    um, tz, lm = copy(sfmap.fum), copy(sfmap.ftz), copy(sfmap.flm)
+                end
                 um[um.==0.0] .= NaN; tz[tz.==0.0] .= NaN; lm[lm.==0.0] .= NaN
                 fcrange = (-16., -1.)
                 ipp = s ? 4 : 0
@@ -1069,7 +1087,7 @@
         # Generate paths
         for s in blends
             # Temperature path
-            Tpath = interpolate((P,), compute_path(P, s), Gridded(Linear()))
+            Tpath = Interpolations.interpolate((P,), compute_path(P, s), Gridded(Linear()))
             # Reaction history vector
             rh = fill("", ns)
             # Find first crossing
@@ -1674,7 +1692,11 @@
                 # Data
                 for r in 1:nR
                     for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
-                        pmap .= n>4 ? sfmap.slm[:,:,r,slot] : n>2 ? sfmap.stz[:,:,r,slot] : sfmap.sum[:,:,r,slot]
+                        if nR==1
+                            pmap .= n>4 ? sfmap.slm[:,:,slot] : n>2 ? sfmap.stz[:,:,slot] : sfmap.sum[:,:,slot]
+                        else
+                            pmap .= n>4 ? sfmap.slm[:,:,r,slot] : n>2 ? sfmap.stz[:,:,r,slot] : sfmap.sum[:,:,r,slot]
+                        end
                         for i in 1:nP
                             for j in 1:nT
                                 print(io, pmap[i,j], " ")
@@ -1696,7 +1718,11 @@
                 # Data
                 for r in 1:nR
                     for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
-                        pmap .= n>4 ? sfmap.flm[:,:,r,slot] : n>2 ? sfmap.ftz[:,:,r,slot] : sfmap.fum[:,:,r,slot]
+                        if nR==1
+                            pmap .= n>4 ? sfmap.flm[:,:,slot] : n>2 ? sfmap.ftz[:,:,slot] : sfmap.fum[:,:,slot]
+                        else
+                            pmap .= n>4 ? sfmap.flm[:,:,r,slot] : n>2 ? sfmap.ftz[:,:,r,slot] : sfmap.fum[:,:,r,slot]
+                        end
                         for i in 1:nP
                             for j in 1:nT
                                 print(io, pmap[i,j], " ")
