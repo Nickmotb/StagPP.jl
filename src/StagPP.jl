@@ -8,18 +8,20 @@ module StagPP
     # === Structures
     include("struct.jl")
 
-    # Constants
-    const R = 8.31446261815324 # J mol⁻¹ K⁻¹
+    # Physical Constants
+    const R = 8.31446261815324 # J mol⁻¹ K⁻¹ | 1e-9R m³ GPa mol⁻¹ K⁻¹ | 1e6R cm³ Pa mol⁻¹ K⁻¹ | 1e-3R cm³ GPa mol⁻¹ K⁻¹
+    const Nₐ = 6.02214076e23 # Avogadro's number (mol⁻¹)
     const H₂O_mm = 18.01528 # g/mol
     const sec2Gyr = 3.1536e-17 # Gyr s⁻¹
     const om = 1.31e21 # Ocean mass in kg
     const m_s2cm_yr = 3.1536e9 # (cm yr⁻¹) / (m s⁻¹)
-    const ocD2toD3 = 244.45 # Conversion factor of surface budgets from 2D to 3D
-    const rootdir = @__DIR__
-    const savedir = joinpath(rootdir, "../", "+op"); !isdir(savedir) && mkdir(savedir)
     # Molar masses (g/mol)
     const mm = Cbulk(60.08, 101.96, 71.85, 55.85, 56.08, 101.96, 61.98, 151.99, 159.69, 16.0, 79.88, 94.2, 18.015, 44.009, 12.011)
     const Cbulk_iterator = String.(fieldnames(Cbulk))
+    # Numerical Constants
+    const ocD2toD3 = 244.45 # Conversion factor of surface budgets from 2D to 3D
+    const rootdir = @__DIR__
+    const savedir = joinpath(rootdir, "../", "+op"); !isdir(savedir) && mkdir(savedir)
     
 
     # === Backend

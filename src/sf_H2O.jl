@@ -37,10 +37,12 @@
                             Xox=["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "H2O"],
                             XH=[43.43, 45.93, 8.34, 0.9, 1.0, 0.01, 0.3, 10.0], # From stxirtude & Bertelloni 2024
                             XB=[50.42, 9.77, 7.1, 12.54, 16.8, 2.23, 0.07, 10.0], # From stxirtude & Bertelloni 2024
+                            XP = [39.13, 49.00, 5.85, 3.31, 2.28, 0.30, 0.13, 10.0],
+                            cc = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                             Prange=(1e-4, 135.0), Trange=(500.0, 4000.0), verbose=true,
                             cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"],
                             test_path=false, sys_in="mol", unoxidized=false, melt_ints=true,
-                            Rv=0.01, nR=1, Rrange=(0.001, 0.2)
+                            Rv=0.01, nR=1, Rrange=(0.001, 0.2), pyr=false
                             )
 
         # Checks
@@ -53,15 +55,21 @@
         # (nR>1) && (s=false; fO2=true; println("Large fO₂ block run called. Disabling sᴴ²ᴼ computations."))
 
         # Oxidizing routine 
-        function assignR_to_Xv!(Xv, Xox, Xdummy, Rv, cap)
+        function assignR_to_Xv!(Xv, Xox, Xdummy, Rv, cap, cflag)
             for i in 1:cap
                 Xv[i] = oxidize_bulk(Xv[i], Rv[i], Xdummy; wt_in=(sys_in=="wt"), wt_out=false, FeFormat="FeO_O", vector=true, oldXox=Xox);
-                Xv[i+cap] = oxidize_bulk(Xv[i+cap], Rv[i], Xdummy; wt_in=(sys_in=="wt"), wt_out=false, FeFormat="FeO_O", vector=true, oldXox=Xox);
+                !cflag && (Xv[i+cap] = oxidize_bulk(Xv[i+cap], Rv[i], Xdummy; wt_in=(sys_in=="wt"), wt_out=false, FeFormat="FeO_O", vector=true, oldXox=Xox))
             end
         end
 
+        # Run pyrolitic composition
+        pyr && (cc .= XP)
+        cflag = cc!=zeros(length(Xox))
+        cflag && (melt_ints=false)
+
         # Vetorization size
         nPnT, nPnTnR = nP*nT, nP*nT*nR
+        eff_nPnTnR = cflag ? nPnTnR : 2nPnTnR
 
         # Change in oxide list to Stx24
             Xox24 = ["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "O"]
@@ -72,27 +80,29 @@
             Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(700., Trange[2], nT)
             Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(700., Trange[2], nT)
             Rdom = nR>1 ? LinRange(Rrange[1], Rrange[2], nR) : Rv
-            Pv, Tv, Rvec = zeros(Float64, 2nPnTnR), zeros(Float64, 2nPnTnR), (nR>1) ? zeros(Float64, nPnTnR) : Rv.*ones(Float64, nPnTnR);
+            Pv, Tv, Rvec = zeros(Float64, eff_nPnTnR), zeros(Float64, eff_nPnTnR), (nR>1) ? zeros(Float64, eff_nPnTnR) : Rv.*ones(Float64, eff_nPnTnR);
         # --- Composition
-            Xv = Vector{Vector{Float64}}(undef, 2nPnTnR)
+            Xv = Vector{Vector{Float64}}(undef, eff_nPnTnR)
             for i in 1:nPnTnR
-                Xv[i] = XH; Xv[i+nPnTnR] = XB
+                cflag ? Xv[i] = cc : (Xv[i] = XH; Xv[i+nPnTnR] = XB)
             end
             Xdummy = (X=Vector{Float64}(zeros(length(Xox24))), Xox=Vector{String}(Xox24), mm=get_Xoxmm(Xox24)) # Dummy for Stx24 oxidizing calls
             tnP, tnP05 = Int64(ceil(1.1max(nP, nT))), Int64(ceil(0.5max(nP, nT)))
         # --- Window variables
             Pv_nPnT = @view Pv[1:nPnT]
             Tv_nPnT = @view Tv[1:nPnT]
-            Pv_2nPnT = @view Pv[1:2nPnT]
-            Tv_2nPnT = @view Tv[1:2nPnT]
+            if !cflag
+                Pv_2nPnT = @view Pv[1:2nPnT]
+                Tv_2nPnT = @view Tv[1:2nPnT]
+            end
         # --- Maps
             if s
-                um, tz, lm = zeros(Float64, nPnTnR, 2), zeros(Float64, nPnTnR, 2), zeros(Float64, nPnTnR, 2)  # later reshaped as 'T, P, reshape(um, nP, :)'
+                um, tz, lm = zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2)  # later reshaped as 'T, P, reshape(um, nP, :)'
             else
                 um, tz, lm = nothing, nothing, nothing
             end
             if fO2
-                fum, ftz, flm = zeros(Float64, nPnTnR, 2), zeros(Float64, nPnTnR, 2), zeros(Float64, nPnTnR, 2)
+                fum, ftz, flm = zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2)
                 ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm = zeros(Float64, nPnT), zeros(Float64, nPnT), zeros(Float64, nPnT)
             else
                 fum, ftz, flm, ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm = nothing, nothing, nothing, nothing, nothing, nothing
@@ -114,34 +124,34 @@
         # ========================
 
         # Upper mantle mesh vectorization (MAGEMin parallelization)
-            mesh_vectorization!(Pum, Tum, Rdom, nP, nT, nR, Pv, Tv, Rvec)
+            mesh_vectorization!(Pum, Tum, Rdom, nP, nT, nR, Pv, Tv, Rvec, single=cflag)
         # Minimizer call + assembly
             if s
                 verbose && println("Calculating upper mantle sᴴ²ᴼ...")
                 data    = Initialize_MAGEMin("um", verbose=false, buffer="aH2O");
                 # rm_list = remove_phases(phase_out, "um")
-                outHB   = multi_point_minimization(10Pv_2nPnT, Tv_2nPnT.-273.15, data, X=vcat(Xv[1:nPnT], Xv[nPnTnR+1:nPnTnR+nPnT]), Xoxides=Xox, name_solvus=true, B=ones(2nPnT), progressbar=verbose, sys_in=sys_in) # kbar and K
+                outHB   = multi_point_minimization(10*(cflag ? Pv_nPnT : Pv_2nPnT), (cflag ? Tv_nPnT : Tv_2nPnT).-273.15, data, X= cflag ? Xv[1:nPnT] : vcat(Xv[1:nPnT], Xv[nPnTnR+1:nPnTnR+nPnT]), Xoxides=Xox, name_solvus=true, B=ones(cflag ? nPnT : 2nPnT), progressbar=verbose, sys_in=sys_in) # kbar and K
                 Finalize_MAGEMin(data);
                 # duplicate to fit size
-                outHB = vcat(repeat(outHB[1:nPnT], nR), repeat(outHB[nPnT+1:2nPnT], nR))
+                outHB = cflag ? repeat(outHB, nR) : vcat(repeat(outHB[1:nPnT], nR), repeat(outHB[nPnT+1:2nPnT], nR))
             else; outHB = 0.0; end
         # Initialize sb24 MAGEMin environment
             (fO2||s) && (data    = Initialize_MAGEMin("sb24", verbose=false))
         # Call UM through SB24 to get fO₂
             if fO2
                 verbose && println("Calculating upper mantle fO₂...")
-                !unoxidized && (assignR_to_Xv!(Xv, Xox, Xdummy, Rvec, nPnTnR))  # Oxidize bulk for UM fO₂ calculations
+                !unoxidized && (assignR_to_Xv!(Xv, Xox, Xdummy, Rvec, nPnTnR, cflag))  # Oxidize bulk for UM fO₂ calculations
                 out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox24, name_solvus=true, progressbar=verbose, sys_in=sys_in)
             else; out_fO2 = 0.0; end
         # Assemble
-            sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, ΔFMQ_um, nPnTnR, nR, s=s, fO2=fO2)
+            sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, ΔFMQ_um, nPnTnR, nR, cflag, s=s, fO2=fO2)
             if s
-                um = cat(reshape(um[:,1], nP, nT, nR), reshape(um[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                um = cflag ? reshape(um, nP, nT, nR) : cat(reshape(um[:,1], nP, nT, nR), reshape(um[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                 verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
                 min_s = min_sᴴ²ᴼ_assembler(tnP)
             end
             if fO2
-                fum = cat(reshape(fum[:,1], nP, nT, nR), reshape(fum[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                fum = cflag ? reshape(fum, nP, nT, nR) : cat(reshape(fum[:,1], nP, nT, nR), reshape(fum[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                 ΔFMQ_um = reshape(ΔFMQ_um[:,1], nP, nT)
             end
 
@@ -150,7 +160,7 @@
         # ===========================
 
         # Transition zone mesh vectorization
-            mesh_vectorization!(Ptz, Ttz, Rdom, nP, nT, nR, Pv, Tv, Rvec)
+            mesh_vectorization!(Ptz, Ttz, Rdom, nP, nT, nR, Pv, Tv, Rvec, single=cflag)
         # Minimizer call + assembly
             if s || fO2
                 verbose && println("Calculating transition zone fO₂ | sᴴ²ᴼ...")
@@ -160,15 +170,15 @@
         # DHMS
             if s
                 DHMS && verbose && println("Exploring DHMS paths...")
-                ppaths, paths, _  =  DHMS ? path_solve(XH, Xox, phase_out, Pv_nPnT, Tv_nPnT, DBswitchP, (@view out_fO2[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0, 0.0)
+                ppaths, paths, _  =  DHMS ? path_solve(cflag ? cc : XH, Xox, phase_out, Pv_nPnT, Tv_nPnT, DBswitchP, (@view out_fO2[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0, 0.0)
         # Assemble  
-                ∫sᴴ²ᴼ!(tz, (@view Pv[1:nPnTnR]), (@view Tv[1:nPnTnR]), min_s, out_fO2, DHMS, ppaths, paths, nPnTnR)
-                tz = cat(reshape(tz[:,1], nP, nT, nR), reshape(tz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                ∫sᴴ²ᴼ!(tz, (@view Pv[1:nPnTnR]), (@view Tv[1:nPnTnR]), min_s, out_fO2, DHMS, ppaths, paths, nPnTnR, cflag)
+                tz = cflag ? reshape(tz, nP, nT, nR) : cat(reshape(tz[:,1], nP, nT, nR), reshape(tz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
             end
             if fO2 
                 verbose && println("Extracting transition zone fO₂...")
-                sᴴ²ᴼ_fO₂_assembler!(tz, ftz, 0.0, out_fO2, ΔFMQ_tz, nPnTnR, nR, s=false)
-                ftz = cat(reshape(ftz[:,1], nP, nT, nR), reshape(ftz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                sᴴ²ᴼ_fO₂_assembler!(tz, ftz, 0.0, out_fO2, ΔFMQ_tz, nPnTnR, nR, cflag, s=false)
+                ftz = cflag ? reshape(ftz, nP, nT, nR) : cat(reshape(ftz[:,1], nP, nT, nR), reshape(ftz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                 ΔFMQ_tz = reshape(ΔFMQ_tz[:,1], nP, nT)
             end
 
@@ -177,7 +187,7 @@
         # ===========================
 
         # Lower mantle mesh vectorization
-            mesh_vectorization!(Plm, Tlm, Rdom, nP, nT, nR, Pv, Tv, Rvec)
+            mesh_vectorization!(Plm, Tlm, Rdom, nP, nT, nR, Pv, Tv, Rvec, single=cflag)
         # Restart sb24 environment
             (fO2||s) && (data    = Initialize_MAGEMin("sb24", verbose=false))
 
@@ -187,13 +197,13 @@
                 out_fO2   .= multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox24, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
             end
             if s
-                ∫sᴴ²ᴼ!(lm, (@view Pv[1:nPnTnR]), (@view Tv[1:nPnTnR]), min_s, out_fO2, DHMS, ppaths, paths, nPnTnR)
-                lm = cat(reshape(lm[:,1], nP, nT, nR), reshape(lm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                ∫sᴴ²ᴼ!(lm, (@view Pv[1:nPnTnR]), (@view Tv[1:nPnTnR]), min_s, out_fO2, DHMS, ppaths, paths, nPnTnR, cflag)
+                lm = cflag ? reshape(lm, nP, nT, nR) : cat(reshape(lm[:,1], nP, nT, nR), reshape(lm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
             end
             if fO2 
                 verbose && println("Extracting lower mantle fO₂...")
-                sᴴ²ᴼ_fO₂_assembler!(lm, flm, 0.0, out_fO2, ΔFMQ_lm, nPnTnR, nR, s=false)
-                flm = cat(reshape(flm[:,1], nP, nT, nR), reshape(flm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                sᴴ²ᴼ_fO₂_assembler!(lm, flm, 0.0, out_fO2, ΔFMQ_lm, nPnTnR, nR, cflag, s=false)
+                flm = cflag ? reshape(flm, nP, nT, nR) : cat(reshape(flm[:,1], nP, nT, nR), reshape(flm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                 ΔFMQ_lm = reshape(ΔFMQ_lm[:,1], nP, nT)
             end
         
@@ -212,7 +222,7 @@
 
         # Export
         verbose && println("Exporting...")
-        (s || fO2 || melt_ints) && write_output(sfmap, s=s, fO2=fO2, melt_ints=melt_ints)
+        (s || fO2 || melt_ints) && write_output(sfmap, cflag, s=s, fO2=fO2, melt_ints=melt_ints)
 
         # Plot
         (plt && verbose) && println("Plotting...")
@@ -234,7 +244,7 @@
             - `savein::String`: Path to save the figure. Default is `""` (does not save).
             - `bigpicture::Tuple{Bool, Int}`: Whether to create a big picture figure. Default is `(false, 1)`.
     """
-    function plot_sf(sfmap; cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, savein="", FMQ=false, fsize=nothing, sblck=false, fblck=false, Rv=nothing)
+    function plot_sf(sfmap; cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, savein="", FMQ=false, fsize=nothing, sblck=false, fblck=false, Rv=nothing, ps=true, pf=true)
 
         function f_at_Rv(FeR, Rv, field)
             idx = findfirst(FeR.>=Rv)
@@ -251,6 +261,9 @@
         fblck && (sblck=false)
         (sblck && !s) && (sblck=false)
         (fblck && !f) && (fblck=false)
+        single = (s&&size(sfmap.sum, 3)==1) || (f&&size(sfmap.fum, 3)==1)
+        s = ps&&s
+        f = pf&&f
 
         # Inputs
         xlabsz, ylabsz, titlesz, xticklabsz, yticklabsz, xticksz, yticksz = 20, 20, 22, 16, 16, 12, 12
@@ -315,26 +328,31 @@
                     um, tz, lm = copy(sfmap.sum), copy(sfmap.stz), copy(sfmap.slm)
                 end
                 # Upper Mantle
-                ax = Axis(fig[1, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted,\;wt%)", yreversed=true,
+                ax = Axis(fig[1, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title= single ? L"Upper\;Mantle\;(Custom,\;wt%)" : L"Upper\;Mantle\;(Depleted,\;wt%)", yreversed=true,
                             xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz)
                 hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, logscale ? log10.(um[:,:,1]') : um[:,:,1]'; colormap=cmap, interpolate=interp, colorrange= logscale ? (-2., log10(maximum(um[:,:,1]))) : (minimum(um[:,:,1]), maximum(um[:,:,1]))); Colorbar(fig[1, 2], hm)
-                ax = Axis(fig[1, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched,\;wt%)", yreversed=true,
-                            xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
-                hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, logscale ? log10.(um[:,:,2]') : um[:,:,2]'; colormap=cmap, interpolate=interp, colorrange= logscale ? (-2., log10(maximum(um[:,:,2]))) : (minimum(um[:,:,2]), maximum(um[:,:,2]))); Colorbar(fig[1, 4], hm)
                 # Transition zone
-                ax = Axis(fig[2, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Depleted,\;wt%)", yreversed=true,
+                ax = Axis(fig[2, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title= single ? L"Transition\;Zone\;(Custom,\;wt%)" : L"Transition\;Zone\;(Depleted,\;wt%)", yreversed=true,
                             xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
                 hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, logscale ? log10.(tz[:,:,1]') : tz[:,:,1]'; colormap=cmap, interpolate=interp); Colorbar(fig[2, 2], hm)
-                ax = Axis(fig[2, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched,\;wt%)", yreversed=true,
-                            xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
-                hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, logscale ? log10.(tz[:,:,2]') : tz[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[2, 4], hm)
                 # Lower Mantle
-                ax = Axis(fig[3, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Depleted,\;wt%)", yreversed=true,
+                ax = Axis(fig[3, 1], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title= single ? L"Lower\;Mantle\;(Custom,\;wt%)" : L"Lower\;Mantle\;(Depleted,\;wt%)", yreversed=true,
                             xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
                 hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, logscale ? log10.(lm[:,:,1]') : lm[:,:,1]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 2], hm)
-                ax = Axis(fig[3, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched,\;wt%)", yreversed=true,
-                            xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
-                hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, logscale ? log10.(lm[:,:,2]') : lm[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 4], hm)
+                if !single
+                    # Upper Mantle
+                    ax = Axis(fig[1, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched,\;wt%)", yreversed=true,
+                                xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+                    hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, logscale ? log10.(um[:,:,2]') : um[:,:,2]'; colormap=cmap, interpolate=interp, colorrange= logscale ? (-2., log10(maximum(um[:,:,2]))) : (minimum(um[:,:,2]), maximum(um[:,:,2]))); Colorbar(fig[1, 4], hm)
+                    # Transition zone
+                    ax = Axis(fig[2, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched,\;wt%)", yreversed=true,
+                                xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+                    hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, logscale ? log10.(tz[:,:,2]') : tz[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[2, 4], hm)
+                    # Lower Mantle
+                    ax = Axis(fig[3, 3], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched,\;wt%)", yreversed=true,
+                                xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+                    hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, logscale ? log10.(lm[:,:,2]') : lm[:,:,2]'; colormap=cmap, interpolate=interp); Colorbar(fig[3, 4], hm)
+                end
             end
 
             if f
@@ -345,33 +363,38 @@
                 end
                 um[um.==0.0] .= NaN; tz[tz.==0.0] .= NaN; lm[lm.==0.0] .= NaN
                 fcrange = (-16., -1.)
-                ipp = s ? 4 : 0
+                ipp = s ? (single ? 2 : 4) : 0
                 # Upper Mantle
-                ax = Axis(fig[1, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Depleted,\;log_{10})", yreversed=true,
+                ax = Axis(fig[1, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title= single ? L"Upper\;Mantle\;(Custom,\;log_{10})" : L"Upper\;Mantle\;(Depleted,\;log_{10})", yreversed=true,
                             xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=!s, xlabelvisible=!s)
                 hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, FMQ ? (um[:,:,1].-sfmap.FMQum[:,:])' : um[:,:,1]'; colormap=:vik100, interpolate=interp, nan_color=:grey); Colorbar(fig[1, 2+ipp], hm)
-                ax = Axis(fig[1, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched,\;log_{10})", yreversed=true,
-                            xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
-                hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, FMQ ? (um[:,:,2].-sfmap.FMQum[:,:])' : um[:,:,2]'; colormap=:vik100, interpolate=interp, nan_color=:grey); Colorbar(fig[1, 4+ipp], hm)
                 # Transition zone
-                ax = Axis(fig[2, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Depleted,\;log_{10})", yreversed=true,
+                ax = Axis(fig[2, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title= single ? L"Transition\;Zone\;(Custom,\;log_{10})" : L"Transition\;Zone\;(Depleted,\;log_{10})", yreversed=true,
                             xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
                 hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, FMQ ? (tz[:,:,1].-sfmap.FMQtz[:,:])' : tz[:,:,1]'; colormap=:vik100, interpolate=interp, nan_color=:grey); Colorbar(fig[2, 2+ipp], hm)
-                ax = Axis(fig[2, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched,\;log_{10})", yreversed=true,
-                            xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
-                hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, FMQ ? (tz[:,:,2].-sfmap.FMQtz[:,:])' : tz[:,:,2]'; colormap=:vik100, interpolate=interp, nan_color=:grey); Colorbar(fig[2, 4+ipp], hm)
                 # Lower Mantle
-                ax = Axis(fig[3, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Depleted,\;log_{10})", yreversed=true,
+                ax = Axis(fig[3, 1+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title= single ? L"Lower\;Mantle\;(Custom,\;log_{10})" : L"Lower\;Mantle\;(Depleted,\;log_{10})", yreversed=true,
                             xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
                 hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, FMQ ? (lm[:,:,1].-sfmap.FMQlm[:,:])' : lm[:,:,1]'; colormap=:vik100, interpolate=interp, nan_color=:grey); Colorbar(fig[3, 2+ipp], hm)
-                ax = Axis(fig[3, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched,\;log_{10})", yreversed=true,
-                            xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
-                hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, FMQ ? (lm[:,:,2].-sfmap.FMQlm[:,:])' : lm[:,:,2]'; colormap=:vik100, interpolate=interp, nan_color=:grey, label="Fe³⁺/Feᵀ = $Rval"); Colorbar(fig[3, 4+ipp], hm)
-                axislegend(ax, position=:rb, labelsize=20, labelfont=:bold)
+                if !single
+                    # Upper Mantle
+                    ax = Axis(fig[1, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Upper\;Mantle\;(Enriched,\;log_{10})", yreversed=true,
+                                xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+                    hm = heatmap!(ax, sfmap.Tum, sfmap.Pum, FMQ ? (um[:,:,2].-sfmap.FMQum[:,:])' : um[:,:,2]'; colormap=:vik100, interpolate=interp, nan_color=:grey); Colorbar(fig[1, 4+ipp], hm)
+                    # Transition zone
+                    ax = Axis(fig[2, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Transition\;Zone\;(Enriched,\;log_{10})", yreversed=true,
+                                xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+                    hm = heatmap!(ax, sfmap.Ttz, sfmap.Ptz, FMQ ? (tz[:,:,2].-sfmap.FMQtz[:,:])' : tz[:,:,2]'; colormap=:vik100, interpolate=interp, nan_color=:grey); Colorbar(fig[2, 4+ipp], hm)
+                    # Lower Mantle
+                    ax = Axis(fig[3, 3+ipp], ylabel=L"Pressure\;[\mathrm{GPa}]", xlabel=L"Temperature\;[\mathrm{K}]", title=L"Lower\;Mantle\;(Enriched,\;log_{10})", yreversed=true,
+                                xlabelsize=xlabsz, ylabelsize=ylabsz, titlesize=titlesz, xticklabelsize=xticklabsz, yticklabelsize=yticklabsz, xticksize=xticksz, yticksize=yticksz, ylabelvisible=false, xlabelvisible=false)
+                    hm = heatmap!(ax, sfmap.Tlm, sfmap.Plm, FMQ ? (lm[:,:,2].-sfmap.FMQlm[:,:])' : lm[:,:,2]'; colormap=:vik100, interpolate=interp, nan_color=:grey, label="Fe³⁺/Feᵀ = $Rval"); Colorbar(fig[3, 4+ipp], hm)
+                    axislegend(ax, position=:rb, labelsize=20, labelfont=:bold)
+                end
             end
         end
         display(fig)
-        savein!="" && CairoMakie.save(savein*".png", fig)
+        savein!="" && GLMakie.save(savein*".png", fig)
     end
 
     """
@@ -459,16 +482,17 @@
         (savein != "") && save(savein*".png", fig)
     end
 
-    function mantle_water(Dblock::DataBlock;  yrange=yrange, tstart=tstart, tend=tend, fluxes=false, Tg_Myr=true, rtime=false, regimes=true, ingasclr=:green, outgasclr=:grey40,
+    function mantle_water(Dblock::DataBlock;  yrange=yrange, tstart=tstart, tend=tend, fluxes=false, Tg_Myr=true, rtime=false, regimes=true, ingasclr=:green, outgasclr=:grey40, mavg=false, vals=true,
                         # figure parameters
                         fig=fig, fpos=fpos, fsize=fsize, disp=disp, leg=leg, legfontsize=legfontsize, legpos=legpos, legflat=legflat, framevisible=framevisible, xlabelsize=xlabelsize, xticklabelsize=xticklabelsize,
-                        xticksize=xticksize, ylabelsize=ylabelsize, yticklabelsize=yticklabelsize, yticksize=yticksize, xlabelpadding=xlabelpadding,
+                        xticksize=xticksize, ylabelsize=ylabelsize, yticklabelsize=yticklabelsize, yticksize=yticksize, xlabelpadding=xlabelpadding, xlabelvisible=xlabelvisible, ylabelvisible=ylabelvisible,
                         ylabelpadding=ylabelpadding, xreversed=xreversed, yreversed=yreversed, xgrid=xgrid, ygrid=ygrid, savein=savein, scatter=scatter, marker=marker,
                         markersize=markersize, strokewidth=strokewidth, strokecolor=strokecolor, line=line, linewidth=linewidth, linestyle=linestyle,
                         cmap_reverse=cmap_reverse, subsample=subsample, color=color, cmap=cmap)
 
         # Checks and indexing setup
         @assert Dblock.metadata.H₂O_tracked "Mantle water content tracking not enabled in simulation $(Dblock.metadata.Sname)"
+        !fluxes && (Tg_Myr=false)
         idxT, idxR, idxP = data_encoding(Dblock)
         # Initialize figure 
         isnothing(fig) && (fig = Figure(size = fsize))
@@ -507,21 +531,32 @@
                 F_lm2tz = -Δlm / dt # OM/Gyr.
                 F_tz2um = F_lm2tz - Δtz/dt # OM/Gyr | Δtz = (F_lm2tz - F_tz2um)dt → F_tz2um = F_lm2tz - Δtz/dt
                 F_um2crust = F_tz2um - Δum/dt # OM/Gyr | Δum = (F_tz2um - F_um2crust)dt → F_um2crust = F_tz2um - Δum/dt
-                F_out = F_um2crust - Δcrust/dt # OM/Gyr | Δum = (F_tz2um - F_um2crust)dt → F_um2crust = F_tz2um - Δum/dt
+                F_out = F_um2crust - Δcrust/dt # OM/Gyr | Δcrust = (F_tz2um - F_um2crust)dt → F_um2crust = F_tz2um - Δum/dt
                 F[1:4,t-timeidx_s] .= [F_lm2tz, F_tz2um, F_um2crust, F_out] # OM/Gyr
                 F[5,t-timeidx_s] = sum(F[1:4,t-timeidx_s])
             end
         end
         # Moving average of H2O and fluxes
-        window = round(Int, (fluxes ? 0.08 : 0.5) * (timeidx_e - timeidx_s))
-        intH2O_mavg[1,:] .= EasyFit.movavg(intH2O[1,:], window).x
-        intH2O_mavg[2,:] .= EasyFit.movavg(intH2O[2,:], window).x
-        intH2O_mavg[3,:] .= EasyFit.movavg(intH2O[3,:], window).x
-        intH2O_mavg[4,:] .= EasyFit.movavg(intH2O[4,:], window).x
-        F_mavg[1,:] .= EasyFit.movavg(F[1,:], window).x
-        F_mavg[2,:] .= EasyFit.movavg(F[2,:], window).x
-        F_mavg[3,:] .= EasyFit.movavg(F[3,:], window).x
-        F_mavg[4,:] .= EasyFit.movavg(F[4,:], window).x
+        if mavg
+            window = round(Int, (fluxes ? 0.005 : 0.02) * (timeidx_e - timeidx_s))
+            intH2O_mavg[1,:] .= EasyFit.movavg(intH2O[1,:], window).x
+            intH2O_mavg[2,:] .= EasyFit.movavg(intH2O[2,:], window).x
+            intH2O_mavg[3,:] .= EasyFit.movavg(intH2O[3,:], window).x
+            intH2O_mavg[4,:] .= EasyFit.movavg(intH2O[4,:], window).x
+            F_mavg[1,:] .= EasyFit.movavg(F[1,:], window).x
+            F_mavg[2,:] .= EasyFit.movavg(F[2,:], window).x
+            F_mavg[3,:] .= EasyFit.movavg(F[3,:], window).x
+            F_mavg[4,:] .= EasyFit.movavg(F[4,:], window).x
+        else
+            intH2O_mavg[1,:] .= intH2O[1,:]
+            intH2O_mavg[2,:] .= intH2O[2,:]
+            intH2O_mavg[3,:] .= intH2O[3,:]
+            intH2O_mavg[4,:] .= intH2O[4,:]
+            F_mavg[1,:] .= F[1,:]
+            F_mavg[2,:] .= F[2,:]
+            F_mavg[3,:] .= F[3,:]
+            F_mavg[4,:] .= F[4,:]
+        end
         F_mavg[5,:] = sum(F_mavg[1:4,:], dims=1)
         Tg_Myr && (F_mavg .= OM_Gyr_2_Tg_Myr.(F_mavg))
 
@@ -529,8 +564,8 @@
         # cumH2O = cumsum(intH2O_mavg, dims=1)
         cumH2O = cumsum(intH2O, dims=1)
 
-        ylab = Tg_Myr ? L"H_2O\;flux\;\mathrm{[Tg/Myr]}" : fluxes ? L"H_2O\;flux\;\mathrm{[OM/Gyr]}" : rtime ? L"" : L"H_2O\;mass\;\mathrm{[OM]}"
-        ax = Axis(fig[fpos...], xlabel=L"Time\;\mathrm{[Gyr]}", ylabel=ylab, xlabelsize=xlabelsize, ylabelsize=ylabelsize,
+        ylab = Tg_Myr ? L"Net\;H_2O\;flux\;\mathrm{[Tg/Myr]}" : fluxes ? L"Net\;H_2O\;flux\;\mathrm{[OM/Gyr]}" : rtime ? L"" : L"H_2O\;mass\;\mathrm{[OM]}"
+        ax = Axis(fig[fpos...], xlabel=L"Time\;\mathrm{[Gyr]}", ylabel=ylab, xlabelsize=xlabelsize, ylabelsize=ylabelsize, xlabelvisible=xlabelvisible, ylabelvisible=ylabelvisible,
                 xticklabelsize=xticklabelsize, yticklabelsize=yticklabelsize, xticksize=xticksize, yticksize=yticksize,
                 xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding, xgridvisible=xgrid, ygridvisible=ygrid)
         if fluxes
@@ -543,16 +578,16 @@
                 cumarr = @view F_mavg[4,:]
                 f = diff(sign.(cumarr))
                 i0 = 1; isign = sign(cumarr[1])
-                current_band_clr = isign==-1 ? outgasclr : ingasclr
+                current_band_clr = isign==-1 ? ingasclr : outgasclr
                 for i in eachindex(t)
                     # continue if within the same regime
                     (f[i]==0.0 && i!=length(t)) && continue
                     if f[i]==-2.0 # If crossing down
-                        band!(ax, t[i0:i], mn, mx, color=current_band_clr, alpha=0.15, label="Ingassing")
-                        i0 = i; current_band_clr = outgasclr
-                    elseif f[i]==2.0 # If crossing up
                         band!(ax, t[i0:i], mn, mx, color=current_band_clr, alpha=0.15, label="Degassing")
                         i0 = i; current_band_clr = ingasclr
+                    elseif f[i]==2.0 # If crossing up
+                        band!(ax, t[i0:i], mn, mx, color=current_band_clr, alpha=0.15, label="Ingassing")
+                        i0 = i; current_band_clr = outgasclr
                     else
                         band!(ax, t[i0:i], mn, mx, color=current_band_clr, alpha=0.15)
                     end
@@ -569,10 +604,10 @@
             mn, mx = minimum(cumH2O), maximum(cumH2O)
             d = mx-mn
             # Bands
-            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[3,:], cumH2O[4,:], color=:grey40, alpha=0.4, label="Crust")
-            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[2,:], cumH2O[3,:], color=:blue, alpha=0.4, label="UM")
-            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[1,:], cumH2O[2,:], color=:purple, alpha=0.4, label="TZ")
-            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], zeros(nt), cumH2O[1,:], color=:red, alpha=0.4, label="LM")
+            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[3,:], cumH2O[4,:], color=:grey40, alpha=0.4, label= vals ? "Crust ($(round(intH2O[4,end], digits=3)))" : "Crust")
+            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[2,:], cumH2O[3,:], color=:blue, alpha=0.4, label="UM ($(round(intH2O[3,end], digits=3)))")
+            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[1,:], cumH2O[2,:], color=:purple, alpha=0.4, label="TZ ($(round(intH2O[2,end], digits=3)))")
+            band!(ax, Dblock.rproftime[timeidx_s:timeidx_e], zeros(nt), cumH2O[1,:], color=:red, alpha=0.4, label="LM ($(round(intH2O[1,end], digits=3)))")
             # Borders
             lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[1,:], color=:black, alpha=0.7, linewidth=0.5)
             lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[2,:], color=:black, alpha=0.7, linewidth=0.5)
@@ -580,12 +615,11 @@
             lines!(ax, Dblock.rproftime[timeidx_s:timeidx_e], cumH2O[4,:], color=:black, alpha=0.7, linewidth=0.5)
         end
         # Axis
-        leg && axislegend(ax, position=legpos, orientation=legflat ? :horizontal : :vertical, labelsize=legfontsize, unique=true)
+        leg && axislegend(ax, position=legpos, orientation=legflat ? :horizontal : :vertical, labelsize=legfontsize, unique=true, framevisible=framevisible)
         (yrange==(-1,-1)) ? ylims!(ax, mn-0.17d, mx+0.17d) : ylims!(ax, yrange[1], yrange[2])
         # Display and save
         disp && display(fig)
         (savein != "") && save(savein*".png", fig)
-
     end
 
     """
@@ -643,7 +677,7 @@
         disp && display(fig)
     end
 
-    function IOplot(Dblock::DataBlock;  yrange=yrange, tstart=tstart, tend=tend, trimt=0.1,
+    function IOplot(Dblock::DataBlock;  yrange1=yrange, yrange2=yrange, tstart=tstart, tend=tend, trimt=0.1, D2D3=false,
                         # figure parameters
                         fig=fig, fpos=fpos, fsize=fsize, disp=disp, leg=leg, legfontsize=legfontsize, legpos=legpos, legflat=legflat, framevisible=framevisible, xlabelsize=xlabelsize, xticklabelsize=xticklabelsize,
                         xticksize=xticksize, ylabelsize=ylabelsize, yticklabelsize=yticklabelsize, yticksize=yticksize, xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding, xgrid=xgrid, ygrid=ygrid, savein=savein, 
@@ -656,9 +690,10 @@
         mv_avg_window=30
         # Vectors
         time = Dblock.timedata[:,idxT["time"]]
-        startidx = findfirst(time .> trimt) # Start after initial ingassing. Sets Δ to zero at chosen starting t.
+        startidx = findfirst(time .> max(trimt, tstart)) # Start after initial ingassing. Sets Δ to zero at chosen starting t.
         rawingas, rawoutgas = Dblock.timedata[startidx:end,idxT["IngassedH2O"]], Dblock.timedata[startidx:end,idxT["OutgassedH2O"]]
         sectioned_in, sectioned_out = diff(rawingas), -diff(rawoutgas)
+        D2D3 && (sectioned_in*=ocD2toD3; sectioned_out*=ocD2toD3)
         time = time[startidx:end]
         mavg_ingas, mavg_outgas = EasyFit.movavg(sectioned_in, mv_avg_window).x, EasyFit.movavg(sectioned_out, mv_avg_window).x
         mavg_ingas = max.(mavg_ingas, 0.0)
@@ -679,7 +714,7 @@
         scatter!(axr, tstart*ones(2), [mn, mx], alpha=0.0)
         xlims!(ax, (tstart, tend))
         xlims!(axr, (tstart, tend))
-        (yrange!=(-1,-1)) ? ylims!(axr, (-yrange, yrange)) : ylims!(axr, -amx-0.1d, amx+0.1d)
+        (yrange2!=(-1,-1)) ? ylims!(axr, (-yrange2, yrange2)) : ylims!(axr, -amx-0.1d, amx+0.1d)
         hidespines!(axr); hidexdecorations!(axr)
 
         lines!(ax, time[2:end], sectioned_in, color=:black, linewidth=0.1, linestyle=:solid, alpha=0.4)
@@ -688,7 +723,7 @@
         lines!(ax, time[2:end], mavg_outgas, color=:red, linewidth=1.0, linestyle=:solid, label="Outgassed H₂O")
         lines!(axr, time, Δ, color=:green, linewidth=1.5, linestyle=:dash)
         mx = max(maximum(mavg_outgas), maximum(mavg_ingas)); d=2mx
-        ylims!(ax, -mx-1.8d, mx+1.8d)
+        yrange1!=(-1,-1) ? ylims!(ax, yrange1[1], yrange1[2]) : ylims!(ax, -mx-1.1d, mx+1.1d)
         axislegend(ax, position=:rb, framevisible=false, fontsize=15, padding=10, rowgap=10)
         disp && display(fig)
         (savein != "") && save(savein*".png", fig)
@@ -812,7 +847,7 @@
 # ==== Integration =======
 # ========================
 
-    function ∫sᴴ²ᴼ!(fmap, Pv, Tv, min_s, outHB, DHMS, ppaths, paths, n)
+    function ∫sᴴ²ᴼ!(fmap, Pv, Tv, min_s, outHB, DHMS, ppaths, paths, n, cflag)
 
         # Post-stishovite boundary
         CaCl₂_st, α_PbO₂_st = CaCl₂_α_PbO₂_boundary()
@@ -853,15 +888,17 @@
             nmol = @MVector zeros(Float64, 12); nmol[end]=1.0
 
             # Basalt
-            for ph in eachindex(outHB[i+n].ph)
-                ib = i+n
-                # Skip if dry phase
-                phase = outHB[ib].ph[ph]
-                dry_phase(phase) && continue
-                # Fraction of current phase
-                phwt = outHB[ib].ph_frac[ph]
-                # Contribute to sum
-                s_phase_sum!(fmap, i, ib, min_s, phase, ph, outHB, phwt, Pv[i], Tv[i], 2, nmol)
+            if !cflag
+                for ph in eachindex(outHB[i+n].ph)
+                    ib = i+n
+                    # Skip if dry phase
+                    phase = outHB[ib].ph[ph]
+                    dry_phase(phase) && continue
+                    # Fraction of current phase
+                    phwt = outHB[ib].ph_frac[ph]
+                    # Contribute to sum
+                    s_phase_sum!(fmap, i, ib, min_s, phase, ph, outHB, phwt, Pv[i], Tv[i], 2, nmol)
+                end
             end
 
             # Harzburgite
@@ -1599,26 +1636,28 @@
 # ======= Others =======
 # ======================
 
-    function sᴴ²ᴼ_fO₂_assembler!(smap, fmap, out_s, out_fO2, ΔFMQ, n, nR; s=true, fO2=true)
+    function sᴴ²ᴼ_fO₂_assembler!(smap, fmap, out_s, out_fO2, ΔFMQ, n, nR, cflag; s=true, fO2=true)
         (!s && !fO2) && return
         Threads.@threads for i in 1:n
             if (s) # sᴴ²ᴼ
                 H₂O = 0.0
-                # Depleted (Harzburgite)
+                # Depleted (Harzburgite) or custom
                 for j in eachindex(out_s[i].SS_vec)
                     ("H2O" in out_s[i].SS_vec[j].emNames) && continue
                     H₂O += sum(out_s[i].SS_vec[j].Comp[end-1])
-                end; smap[i, 1] = sum(H₂O)
+                end; smap[i, 1]=sum(H₂O)
                 # Enriched (Basalt)
-                H₂O = 0.0
-                for j in eachindex(out_s[i+n].SS_vec)
-                    ("H2O" in out_s[i+n].SS_vec[j].emNames) && continue
-                    H₂O += sum(out_s[i+n].SS_vec[j].Comp[end-1])
-                end; smap[i, 2] = sum(H₂O)
+                if !cflag
+                    H₂O = 0.0
+                    for j in eachindex(out_s[i+n].SS_vec)
+                        ("H2O" in out_s[i+n].SS_vec[j].emNames) && continue
+                        H₂O += sum(out_s[i+n].SS_vec[j].Comp[end-1])
+                    end; smap[i, 2] = sum(H₂O)
+                end
             end
             if fO2
-                fmap[i, 1] = out_fO2[i].fO2 # Depleted (Harzburgite)
-                fmap[i, 2] = out_fO2[i+n].fO2 # Enriched (Basalt)
+                fmap[i, 1]=out_fO2[i].fO2 # Depleted (Harzburgite)
+                !cflag && (fmap[i, 2] = out_fO2[i+n].fO2) # Enriched (Basalt)
                 (i <= n/nR) && (ΔFMQ[i] = out_fO2[i].fO2 - out_fO2[i].dQFM) # Depleted (Harzburgite) FMQ surface point
             end
         end
@@ -1677,10 +1716,11 @@
 # ======= Export =======
 # ======================
 
-    function write_output(sfmap; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", fname_melt_ints="StagIDVs.dat", fname_FMQ="FMQbase.dat", s=true, fO2=true, melt_ints=true)
+    function write_output(sfmap, cflag; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", fname_melt_ints="StagIDVs.dat", fname_FMQ="FMQbase.dat", s=true, fO2=true, melt_ints=true)
         # Array dimensions
         nP, nT, nR = length(sfmap.Pum), length(sfmap.Tum), length(sfmap.FeR)
         pmap = zeros(Float64, nP, nT)
+        ivec = cflag ? [1, 1, 1] : [2, 1, 2, 1, 2, 1]
         if s
             open(joinpath(savedir, fname_s), "w") do io
                 # Header
@@ -1691,7 +1731,7 @@
                 println(io, sfmap.FeR[1], " ", sfmap.FeR[end], "\n")
                 # Data
                 for r in 1:nR
-                    for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
+                    for (n, slot) in enumerate(ivec)
                         if nR==1
                             pmap .= n>4 ? sfmap.slm[:,:,slot] : n>2 ? sfmap.stz[:,:,slot] : sfmap.sum[:,:,slot]
                         else
@@ -1717,7 +1757,7 @@
                 println(io, sfmap.FeR[1], " ", sfmap.FeR[end], "\n")
                 # Data
                 for r in 1:nR
-                    for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
+                    for (n, slot) in enumerate(ivec)
                         if nR==1
                             pmap .= n>4 ? sfmap.flm[:,:,slot] : n>2 ? sfmap.ftz[:,:,slot] : sfmap.fum[:,:,slot]
                         else
@@ -1758,7 +1798,7 @@
                 println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
                 println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end], "\n")
                 # Data
-                for (n, slot) in enumerate([2, 1, 2, 1, 2, 1])
+                for (n, slot) in enumerate(ivec)
                     pmap .= n>4 ? sfmap.DVlm[:,:,slot] : n>2 ? sfmap.DVtz[:,:,slot] : sfmap.DVum[:,:,slot]
                     for i in 1:nP
                         for j in 1:nT

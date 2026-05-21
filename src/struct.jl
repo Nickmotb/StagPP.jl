@@ -17,7 +17,8 @@ struct StagData
     ndts        :: Union{Int64, Nothing}    # Number of time steps
     totH₂O      :: Float64                  # Total water content in kg
     ADC_κ       :: Array{Float64,1}         # Constant permeability for ADC model
-    ystress      :: Float64                 # Yield stress in MPa
+    ystress     :: Float64                  # Yield stress in MPa
+    g           :: Float64                  # Gravity
     # Simulation Parameters
     T_tracked   :: Bool                     # Whether temperature is tracked
     H₂O_tracked :: Bool                     # Whether water is tracked
@@ -38,6 +39,7 @@ struct DataBlock
     rprofdata   :: Union{Array{Float64,3}, Nothing}     # Azimuthal-averaged profile block (nfields x 2D arrays)
     platesdata  :: Union{Array{Float64,2}, Nothing}     # Plates block (nfields x 2D arrays) (can be nothing)
     # Extra
+    # Ra          :: Union{Array{Float64,1}, Nothing}     # Rayleigh number
     rproftime   :: Union{Array{Float64,1}, Nothing}     # Time vector for rprof/plates data (Sampled)
     rprofdV     :: Union{Array{Float64,1}, Nothing}     # Radial volume differentials for rprof data
     Mmantle     :: Union{Float64, Nothing}              # Mantle mass in kg
@@ -51,17 +53,17 @@ end
 
 struct sfstruct
     # sᴴ²ᴼ maps
-    sum      :: Union{Array{Float64,3}, Array{Float64,4}, Nothing}    # Upper mantle sᴴ²ᴼ grid (nP x nT x endmember)
-    stz      :: Union{Array{Float64,3}, Array{Float64,4}, Nothing}    # Transition zone sᴴ²ᴼ grid (nP x nT x endmember)
-    slm      :: Union{Array{Float64,3}, Array{Float64,4}, Nothing}    # Lower mantle sᴴ²ᴼ grid (nP x nT x endmember)
+    sum      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Upper mantle sᴴ²ᴼ grid (nP x nT x endmember)
+    stz      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Transition zone sᴴ²ᴼ grid (nP x nT x endmember)
+    slm      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Lower mantle sᴴ²ᴼ grid (nP x nT x endmember)
     # fO₂ maps
-    fum      :: Union{Array{Float64,3}, Array{Float64,4}, Nothing}    # Upper mantle fO₂ grid (nP x nT x endmember)
-    ftz      :: Union{Array{Float64,3}, Array{Float64,4}, Nothing}    # Transition zone fO₂ (nP x nT x endmember)
-    flm      :: Union{Array{Float64,3}, Array{Float64,4}, Nothing}    # Lower mantle fO₂ (nP x nT x endmember)
+    fum      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Upper mantle fO₂ grid (nP x nT x endmember)
+    ftz      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Transition zone fO₂ (nP x nT x endmember)
+    flm      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Lower mantle fO₂ (nP x nT x endmember)
     # Melt ∫(ΔV/RT)dP maps
-    DVum     :: Union{Array{Float64,3}, Nothing}    # Upper mantle melt ∫(ΔV/RT)dP grid (nP x nT x endmember)
-    DVtz     :: Union{Array{Float64,3}, Nothing}    # Transition zone melt ∫(ΔV/RT)dP grid (nP x nT x endmember)
-    DVlm     :: Union{Array{Float64,3}, Nothing}    # Lower mantle melt ∫(ΔV/RT)dP grid (nP x nT x endmember)
+    DVum     :: Union{Array{Float64,2}, Array{Float64,3}, Nothing}    # Upper mantle melt ∫(ΔV/RT)dP grid (nP x nT x endmember)
+    DVtz     :: Union{Array{Float64,2}, Array{Float64,3}, Nothing}    # Transition zone melt ∫(ΔV/RT)dP grid (nP x nT x endmember)
+    DVlm     :: Union{Array{Float64,2}, Array{Float64,3}, Nothing}    # Lower mantle melt ∫(ΔV/RT)dP grid (nP x nT x endmember)
     # ΔFMQ maps
     FMQum    :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)
     FMQtz    :: Union{Array{Float64,2}, Nothing}    # ΔFMQ grid (nP x nT x endmember)

@@ -1,3 +1,51 @@
+# time.dat field --> String
+LTN = Dict(
+    "time"  => L"Evolution\;time\;[\mathrm{Gyr}]",
+    "ra_eff" => L"Effective\;Ra",
+    "F_top" => L"Surface\;heat\;flux\;[\mathrm{mW/m^2}]", "F_top_norm" => L"Normalized\;surface\;heat\;flux",
+    "F_bot" => L"CMB\;heat\;flux\;[\mathrm{mW/m^2}]", "F_bot_norm" => L"Normalized\;CMB\;heat\;flux",
+    "Tmean" => L"Mean\;mantle\;temperature\;[\mathrm{K}]", "Tmean_norm" => L"Normalized\;mean\;mantle\;temperature",
+    "Vrms"  => L"RMS\;velocity\;[\mathrm{cm/yr}]", "Vrms_norm"  => L"Normalized\;RMS\;velocity",
+    "eta_amean" => L"Mean\;viscosity\;[\mathrm{Pa\cdot s}]", "eta_amean_norm" => L"Normalized\;mean\;viscosity",
+    "eta_mean"  => L"Mean\;viscosity\;[\mathrm{Pa\cdot s}]", "eta_mean_norm"  => L"Normalized\;mean\;viscosity",
+    "erupta" => L"Recycled\;material\;[\mathrm{kg}]", "erupta_norm" => L"Normalized\;recycled\;material",
+    "erupt_rate" => L"Eruption\;rate\;[\mathrm{kg/s}]", "erupt_rate_norm" => L"Normalized\;eruption\;rate",
+    "Tcmb" => L"CMB\;temperature\;[\mathrm{K}]", "Tcmb_norm" => L"Normalized\;CMB\;temperature",
+    "Tsurf" => L"Surface\;temperature\;[\mathrm{K}]", "Tsurf_norm" => L"Normalized\;surface\;temperature",
+    "Tpotl" => L"Potential\;temperature\;[\mathrm{K}]", "Tpotl_norm" => L"Normalized\;potential\;temperature",
+    "cH2O_mean" => L"Mean\;mantle\;H_2O\;content\;[\mathrm{wt%}]", "cH2O_mean_norm" => L"Normalized\;mean\;mantle\;H_2O\;content",
+    "influxH2O" => L"H_2O\;intake\;[\mathrm{Tg/Myr}]",
+    "IngassedH2O" => L"TH_2O^{in}\;[\mathrm{kg}]", "IngassedH2O_norm" => L"Normalized\;total\;ingassed\;H_2O",
+    "OutgassedH2O" => L"TH_2O^{out}\;[\mathrm{kg}]", "OutgassedH2O_norm" => L"Normalized\;total\;outgassed\;H_2O",
+    "SaturationOutgasH2O" => L"Saturation\;outgassed\;H_2O\;[\mathrm{kg}]", "SaturationOutgassH2O_norm" => L"Normalized\;saturation\;outgassed\;H_2O",
+    "EruptedH2O" => L"Erupted\;H_2O\;[\mathrm{kg}]", "EruptedH2O_norm" => L"Normalized\;erupted\;H_2O",
+    "SurfOceanMass3D" => L"Surface\;ocean\;mass\;[\mathrm{OM}]", "SurfOceanMass3D_norm" => L"Normalized\;surface\;ocean\;mass",
+    "TotH2OMassOceanPlusMantle" => L"Total\;system\;H_2O\;[\mathrm{kg}]", "TotH2OMassOceanPlusMantle_norm" => L"Normalized\;total\;system\;H_2O",
+    "Mob" => L"Lithosphere\;mobility\;[\mathrm{v_{surf}/v_{rms}}]", "Mob_norm" => L"Normalized\;lithosphere\;mobility",
+    "Vsurf" => L"Surface\;velocity\;[\mathrm{cm/yr}]", "Vsurf_norm" => L"Normalized\;surface\;velocity",
+
+)
+
+# rprof.dat field --> String
+LRN = Dict(
+    "Tmean" => L"Mean\;mantle\;temperature\;[\mathrm{K}]",
+    "Vrms"  => L"RMS\;velocity\;[\mathrm{cm/yr}]",
+    "eta_amean" => L"Mean\;viscosity\;[\mathrm{Pa\cdot s}]",
+    "eta_mean"  => L"Mean\;viscosity\;[\mathrm{Pa\cdot s}]",
+    "Water" => L"c^{H_2O}\;[\mathrm{wt%}]",
+    "boundH2O" => L"Bound\;H_2O\;[\mathrm{wt%}]",
+    "freeH2O" => L"Free\;H_2O\;[\mathrm{wt%}]",
+    "Wsol" => L"s^{H_2O}\;[\mathrm{wt%}]",
+    "satH2O" => L"H_2O\;saturation\;[\mathrm{%}]",
+    "fO2" => L"fO_2\;[log_{10}FMQ]",
+    "rhomean" => L"Mean\;density\;[\mathrm{kg/m^3}]",
+    "bsmean" => L"Mean\;basalt\;fraction",
+    "etalog" => L"Viscosity\;[\mathrm{Pa\cdot s}]",
+    "H2Odarcy" => L"H_2O\;darcy\;velocity\;[\mathrm{cm/yr}]",
+    "fmeltmean" => L"Mean\;melt\;fraction",
+    "vzmax" => L"v_z^{max}"
+)
+
 # =========================
 # ==== Reading Backend ====
 # =========================
@@ -78,6 +126,7 @@ function aggregate_StagData(Sname::String, filename::String, timevec::Union{Arra
     totH₂O  = pass_field("INITIALOCEANMASS")
     ADC_κ   = pass_field("LIMITFLOW_CONSTANT_PERMEABILITY")
     ystress = 1e-6pass_field("STRESSY_ETA")
+    g       = pass_field("G_DIMENSIONAL")
     # Simulation Parameters
     T_tracked   = pass_field("TRACERS_TEMPERATURE")
     H₂O_tracked = pass_field("TRACEELEMENT_WATER")
@@ -86,7 +135,7 @@ function aggregate_StagData(Sname::String, filename::String, timevec::Union{Arra
     outdir = dirname(filename)
     sroot = split(basename(filename), "_")[1]
 
-    return StagData(name, shape, rkm, rcmb, nx, ny, nz, tend, ndts, totH₂O, ADC_κ, ystress,
+    return StagData(name, shape, rkm, rcmb, nx, ny, nz, tend, ndts, totH₂O, ADC_κ, ystress, g,
                         T_tracked, H₂O_tracked, Crb_tracked, outdir, sroot)
 end
 
@@ -270,15 +319,26 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
     # Encoding
     idxT, idxR, idxP = data_encoding(time ? time_header : nothing, rprof ? rprof_header : nothing, plates ? plates_header : nothing)
     # Unit conversions
-    Mmantle = 0.0
+    Mmantle, Ra = 0.0, 0.0
     if rprof
         rprof_data[:,:,idxR["vrms"]] .= m_s2cm_yr*rprof_data[:,:,idxR["vrms"]]
         rprof_header[idxR["vrms"]] = "Vrms"
         if haskey(idxR, "rhomean")
+            # Annular mass
             massprof = ∂m(rprof_data[:, :, idxR["r"]], Stag.rcmb, rprof_data[:, :, idxR["rhomean"]])
             rprof_header = vcat(rprof_header, "dM")
             rprof_data = cat(rprof_data, massprof, dims=3)
             Mmantle = sum(massprof[:,1])
+            # if time
+            #     # Rayleigh number approximation
+            #     ρ  = mean(rprof_data[:,:,idxR["rhomean"]], dims=1)
+            #     ΔT = rprof_data[1,:,2] .- rprof_data[end,:,2]
+            #     l³ = (1e3Stag.rkm)^3; g = Stag.g
+            #     η  = mean(rprof_data[:,:,idxR["etalog"]], dims=1)
+            #     α  = 3e-5; κ = 1e-6
+            #     Ra = vec(g.*ρ.*l³.*ΔT.*α./η./κ)
+            # end
+
         end
         if Stag.H₂O_tracked
             # Add Saturation
@@ -296,20 +356,18 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
     if time
         time_data[:,idxT["time"]] .= sec2Gyr*time_data[:,idxT["time"]]; # Convert time to Gyr
         time_data[:,idxT["Vrms"]] .= m_s2cm_yr*time_data[:,idxT["Vrms"]]; # Convert time to Gyr
+        time_data[:,idxT["erupta"]] .*= Mmantle; # Convert time to Gyr
         # Outgassing
         if Stag.H₂O_tracked
             # Add outgassed H2O
             time_header = vcat(time_header, "OutgassedH2O")
             time_data = hcat(time_data, (time_data[:,idxT["OutputtedNotEruptedH2O"]].+time_data[:,idxT["EruptedH2O"]].+
                                 (("SaturationOutgasH2O" in time_header) ? time_data[:,idxT["SaturationOutgasH2O"]] : time_data[:,idxT["SaturationOutgassH2O"]])))
-            # Add IngassedH2O / OutgassedH2O
-            time_header = vcat(time_header, "I/O_H2O")
-            time_data = hcat(time_data, max.(time_data[:,idxT["IngassedH2O"]], 1)./max.(time_data[:,end], 1))
-            # Add EruptedH2O / erupta
-            time_header = vcat(time_header, "eH2O/e")
-            ∂erupta, ∂eH2O = diff(time_data[:,idxT["erupta"]]), diff(time_data[:,idxT["EruptedH2O"]])
-            time_data = hcat(time_data, replace(vcat(0, 1e2∂eH2O./(∂erupta*Mmantle)), Inf=>0.0, NaN=>0.0)) # wt%
+            # Add H2O intake as a function of time
+            time_header = vcat(time_header, "influxH2O")
+            time_data   = hcat(time_data, vcat(0.0, diff(time_data[:,idxT["IngassedH2O"]])./diff(time_data[:,2])*1e-12)) # Tg/Myr
         end
+
     end
     if plates
         plates_header[idxP["Vsurf_rms"]] = "Vsurf"
@@ -321,6 +379,7 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
     println("Simulation '$Sname' loaded successfully.")
     return DataBlock(time ? time_header : nothing, rprof ? rprof_header : nothing, plates ? plates_header : nothing,
                     time ? time_data : nothing, rprof ? rprof_data : nothing, plates ? plates_data : nothing, 
+                    # Ra==0.0 ? nothing : Ra,
                     plates ? plates_data[:,2] : rprof ? sec2Gyr*rprof_time : nothing,
                     haskey(idxR, "r") ? ∂V(rprof_data[:, 1, idxR["r"]], Stag.rcmb) : nothing,
                     Mmantle==0.0 ? nothing : Mmantle,
@@ -671,4 +730,66 @@ end
 
     @inline c2k(T) = T+273.15
     @inline k2c(T) = T-273.15
+
+    # String format to field
+    function fin2label(field, in_rprof)
+        field2use = replace(field, "_lm"=>"", "_tz"=>"", "_um"=>"", "_crust"=>"", "∂"=>"")
+        ylab = in_rprof ? LRN[field2use] : LTN[field2use]
+        # Sector
+        ylab = contains(field, "_crust") ? L"%$ylab\;Crust" : contains(field, "_um") ? L"%$ylab\;UM" : contains(field, "_tz") ? L"%$ylab\;MTZ" : contains(field, "_lm") ? L"%$ylab\;LM" : ylab
+        # Differential
+        contains(field, "∂") && (ylab = L"∂(%$ylab)")
+        return ylab
+    end
+
+    @inline model1(x, p)        = @. p[1]*x + p[2]
+    @inline model2(x, p)        = @. p[1]*x^2 + p[2]*x + p[1]
+    @inline model3(x, p)        = @. p[1]*x^3 + p[2]*x^2 + p[3]*x + p[1]
+    @inline model_exp(x, p)     = @. p[1]*exp(p[2]*x + p[3]) + p[4]
+    @inline model_log10(x, p)   = @. p[1]*log10(p[2]*x + p[3]) + p[4]
+    @inline model_ln(x, p)      = @. p[1]*log(p[2]*x + p[3]) + p[4]
+    @inline model_root(x,p)     = @. p[1]*sqrt(p[2]*x + p[3]) + p[4]
+    @inline model_fract(x, p)   = @. p[1]/x + p[2]
+    function datafit(xvec, yvec, deg)
+        p = 0.5*ones(10)
+        fit = curve_fit(if deg=="1"
+                            model1
+                        elseif deg=="2"
+                            model2
+                        elseif deg=="3"
+                            model3
+                        elseif deg=="exp"
+                            model_exp
+                        elseif deg=="log"
+                            model_log10
+                        elseif deg=="ln"
+                            model_ln
+                        elseif deg=="root"
+                            model_root
+                        elseif deg=="fr"
+                            model_fract
+                        end, 
+                        xvec, yvec, p)
+        xHD = LinRange(minimum(xvec), maximum(xvec), 5*length(xvec))
+        yHD = if deg=="1"
+                model1(xHD, fit.param)
+            elseif deg=="2"
+                model2(xHD, fit.param)
+            elseif deg=="3"
+                model3(xHD, fit.param)
+            elseif deg=="exp"
+                model_exp(xHD, fit.param)
+            elseif deg=="log"
+                model_log10(xHD, fit.param)
+            elseif deg=="ln"
+                model_ln(xHD, fit.param)
+            elseif deg=="root"
+                model_root(xHD, fit.param)
+            elseif deg=="fr"
+                model_fract(xHD, fit.param)
+            end
+        # Root mean squared error of fit
+        rmse = sqrt(sum(abs2, fit.resid) / (length(yvec) - length(fit.param)))
+        return xHD, yHD, rmse
+    end
     
