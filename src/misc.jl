@@ -40,8 +40,8 @@
 # - Hirschmann 2022 melt mapping from XFe₂O₃ (Oₑₓ) ↔ fO₂
 # - Stixrude and Bertelloni 2024 (MAGEMin) solid mapping from XFe₂O₃ (Oₑₓ) ↔ fO₂
 # - Stagno and Frost 2010 parameterization of melt EDDOG2 buffer fO₂ ↔ XCO₂
-function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, Rf::K=-1.0, nr=25, niter=100, 
-                        verbose=false, data=nothing, Rspace=false, plotevo=false, damp=0.25, debugging=false) where {K <: Real}
+function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, Rf::K=-1.0, nr=25, niter=150, 
+                        verbose=false, data=nothing, Rspace=false, plotevo=false, damp=0.25, debugging=false, saveplotevery=false, savein="") where {K <: Real}
 
     # Hirschmann
     a=0.1917; y1=-520.46; y2=-185.37; y3=494.39; y4=1838.34; y5=2888.48; y8=-1245.09; y9=-1156.86
@@ -106,7 +106,7 @@ function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, 
     Ys2         = molXB[1]*(y8*molXB[5] + y9*molXB[2])*_T                       # Sum of non-linear parameterized molar components
 
     # -- Solver boundary margin and XCO₂ sharpness parameter
-    lowclip   = 1e-12
+    lowclip   = 1e-3
     sharpness = 0.0
 
     # === Generate solid fO₂ space
@@ -126,22 +126,22 @@ function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, 
         out = multi_point_minimization(10P*ones(nr), k2c(T)*ones(nr), data, X=Xlist, Xoxides=Vector{String}(Xox), name_solvus=true, sys_in="wt", progressbar=false)
         flag && Finalize_MAGEMin(data);
     # -- Create interpolation object
-        sfO2   = extrapolate(interpolate((sOₑₓlist.*Ms./TOₑₓ,), [out[i].fO2 for i in eachindex(out)], Gridded(Linear())), Flat())
+        sfO2   = extrapolate(Interpolations.interpolate((sOₑₓlist.*Ms./TOₑₓ,), [out[i].fO2 for i in eachindex(out)], Gridded(Linear())), Flat())
         sfO2⁻¹ = 0.0 #extrapolate(interpolate(([out[i].fO2 for i in eachindex(out)],), sOₑₓlist.*Ms./TOₑₓ, Gridded(Linear())), Flat())
-        sample_sOlist = LinRange(0.8lowclip, 1.2maxsOₑₓ, 100)
+        sample_sOlist = LinRange(0.8lowclip, 1.3maxsOₑₓ, 100)
         sample_sOlist05 = 0.5(sample_sOlist[1:end-1] + sample_sOlist[2:end])
         sampled_sfO2 = sfO2(sample_sOlist)
     # -- Solid partial derivative
-        ∂Sᵢ   = extrapolate(interpolate((sample_sOlist05,), ∂S∂sOₑₓ(sampled_sfO2, sample_sOlist), Gridded(Linear())), Line())
+        ∂Sᵢ   = extrapolate(Interpolations.interpolate((sample_sOlist05,), ∂S∂sOₑₓ(sampled_sfO2, sample_sOlist), Gridded(Linear())), Line())
         
     # -- Compute independent boundaries
     maxmOₑₓ_uncapped  = (0.5molXB[3]*mm.O)/(sum(XB) + 0.5molXB[3]*mm.O)*(Mf/TOₑₓ)
     maxmOₑₓ, maxXCO₂  = min(maxmOₑₓ_uncapped, 1.0), max(min(1.0, maxXCO₂_raw), 0.0)
     maxfₑₓ            = 1.0 
     # -- Initialise (static)solution vector
-    y = sol + [x_to_y(0.1maxsOₑₓ, lowclip, maxsOₑₓ), x_to_y(0.5maxmOₑₓ, lowclip, maxmOₑₓ), x_to_y(0.1maxXCO₂, lowclip, maxXCO₂), x_to_y(lowclip, lowclip, maxfₑₓ)]
+    y = sol + [x_to_y(0.1maxsOₑₓ, lowclip, maxsOₑₓ), x_to_y(0.5maxmOₑₓ, lowclip, maxmOₑₓ), x_to_y(0.5maxXCO₂, lowclip, maxXCO₂), x_to_y(lowclip, lowclip, maxfₑₓ)]
     # -- Define convergence tolerance (ϵ)
-    ϵ = 1e-6          
+    ϵ = 1e-14          
     # -- Wrap parameters and call solver
     params = (; verb_flag, P, T, ϕ, Rs, Rf, TOex, TOₑₓ, p, TC, Φ, s, Φₘ,
                     IDV, SymXox, dummy, idxO, _ln10, _T, molXB, a,
@@ -155,44 +155,88 @@ function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, 
         co2clr   = :green
         fₑₓclr   = :purple
         itstart  = converged ? Int(floor(0.1itout)) : 1
-        # Plot evolution
-        fig = Figure(size=(1800, 800))
-        ax = Axis(fig[1,1], ylabel=L"Solution\;residual", xlabel=L"Iterations", xgridvisible=false, ygridvisible=false, ylabelsize=25, xlabelsize=25); 
-        scatterlines!(ax, itstart:itout, mat[itstart:itout,1,1], color=meltclr, label="(eq. 1) Solid ↔ melt fO₂ equilibrium (R₁ = $(round(mat[itout,1,1], digits=4)))",marker=:rect,strokewidth=1.1)
-        scatterlines!(ax, itstart:itout, mat[itstart:itout,2,1], color=co2clr,label="(eq. 2) Solid ↔ EDDOG fO₂ equilibrium (R₂ = $(round(mat[itout,2,1], digits=4)))",marker=:rect,strokewidth=1.1)
-        scatterlines!(ax, itstart:itout, mat[itstart:itout,3,1], color=:orange,label="(eq. 3) Mass conservation (R₃ = $(round(mat[itout,3,1], digits=4)))",marker=:rect,strokewidth=1.1)
-        lines!(ax, [1, itout], [ϵ, ϵ], linestyle=:dash, color=:gray, alpha=0.5)
-        lines!(ax, [1, itout], [-ϵ, -ϵ], linestyle=:dash, color=:gray, alpha=0.5)
-        text!(ax, 1, -1.9ϵ, text="Convergence ϵ = $(round(1e2ϵ, digits=4))%", font=:italic, alpha=0.5)
-        axislegend(ax, position=:rt)
-        converged && ylims!(ax, -5ϵ, 7ϵ)
+        if saveplotevery
+            for it in itstart+1:itout
+                x .= mat[it, :, 3]
+                # Plot evolution
+                fig = Figure(size=(1800, 800))
+                ax = Axis(fig[1,1], ylabel=L"Solution\;residual", xlabel=L"Iterations", xgridvisible=false, ygridvisible=false, ylabelsize=25, xlabelsize=25, yscale=log10); 
+                scatterlines!(ax, itstart:it, abs.(mat[itstart:it,1,1]), color=meltclr, label="(eq. 1) Solid ↔ melt fO₂ equilibrium (R₁ = $(Float16(mat[it,1,1])))",marker=:rect,strokewidth=1.1)
+                scatterlines!(ax, itstart:it, abs.(mat[itstart:it,2,1]), color=co2clr,label="(eq. 2) Solid ↔ EDDOG fO₂ equilibrium (R₂ = $(Float16(mat[it,2,1])))",marker=:rect,strokewidth=1.1)
+                scatterlines!(ax, itstart:it, abs.(mat[itstart:it,3,1]), color=:orange,label="(eq. 3) Mass conservation (R₃ = $(Float16(mat[it,3,1])))",marker=:rect,strokewidth=1.1)
+                lines!(ax, [1, itout], [ϵ, ϵ], linestyle=:dash, color=:gray, alpha=0.5)
+                text!(ax, 1, 1.9ϵ, text="Convergence ϵ = $(round(1e2ϵ, digits=4))%", font=:italic, alpha=0.5)
+                axislegend(ax, position=:rt)
+                # converged && ylims!(ax, -5ϵ, 7ϵ)
 
-        ax = Axis(fig[2,1], ylabel=L"log\;fO_2", xlabel=L"Iterations", xgridvisible=false, ygridvisible=false, ylabelsize=25, xlabelsize=25); 
-        scatterlines!(ax, itstart:itout, mat[itstart:itout,1,2], color=solidclr, label="Solid (fO₂ = $(round(mat[itout,1,2], digits=4)))",marker=:rect,strokewidth=1.1)
-        scatterlines!(ax, itstart:itout, mat[itstart:itout,2,2], color=meltclr,label="Melt (fO₂ = $(round(mat[itout,2,2], digits=4)))",marker=:rect,strokewidth=1.1)
-        scatterlines!(ax, itstart:itout, mat[itstart:itout,3,2], color=co2clr,label="EDDOG (fO₂ = $(round(mat[itout,3,2], digits=4)))",marker=:rect,strokewidth=1.1)
-        axislegend(ax, position=:rt)
-        converged && ylims!(ax, mat[itout,3,2]-0.5, mat[itout,3,2]+1)
+                ax = Axis(fig[2,1], ylabel=L"log\;fO_2", xlabel=L"Iterations", xgridvisible=false, ygridvisible=false, ylabelsize=25, xlabelsize=25); 
+                scatterlines!(ax, itstart:it, mat[itstart:it,1,2], color=solidclr, label="Solid (fO₂ = $(round(mat[it,1,2], digits=4)))",marker=:rect,strokewidth=1.1)
+                scatterlines!(ax, itstart:it, mat[itstart:it,2,2], color=meltclr,label="Melt (fO₂ = $(round(mat[it,2,2], digits=4)))",marker=:rect,strokewidth=1.1)
+                scatterlines!(ax, itstart:it, mat[itstart:it,3,2], color=co2clr,label="EDDOG (fO₂ = $(round(mat[it,3,2], digits=4)))",marker=:rect,strokewidth=1.1)
+                axislegend(ax, position=:rt)
+                converged && ylims!(ax, mat[itout,3,2]-0.5, mat[itout,3,2]+1)
 
-        ax = Axis(fig[1:2,2], xlabel=L"Iterations", ylabel=L"Fraction\;of\;TO_{ex}", rightspinecolor=:green, xgridvisible=false, ygridvisible=false, ylabelsize=25, xlabelsize=25); 
-        lines!(ax, itstart:itout, mat[itstart:itout,1,3],label="In solid Fe ($(round(x[1], digits=3)) TOₑₓ)",color=solidclr,linewidth=2.0)
-        lines!(ax, itstart:itout, mat[itstart:itout,2,3], color=meltclr,label="In melt Fe ($(round(x[2], digits=3)) TOₑₓ)",linewidth=2.0)
-        lines!(ax, itstart:itout, mat[itstart:itout,4,3], color=fₑₓclr,label="Precipitated ($(round(x[4], digits=3)) TOₑₓ)",linewidth=2.0)
-        scatter!(ax, 1, mat[1,3,3], label="Melt XCO₂ = $(round(x[3], digits=5))", alpha=0.0)
-        axislegend(ax, position=:rt, framevisible=true)
-        # Mark ceilings
-        scatterlines!(ax, [itstart, itout], [maxsOₑₓ, maxsOₑₓ], alpha=0.3, color=solidclr,marker=:rect,strokewidth=1.1); text!(ax, 0.1itout, 1.02maxsOₑₓ, text="Solid Fe³⁺ cap = $(round(maxsOₑₓ, digits=3))"*(maxsOₑₓ_uncapped>1.0 ? " ($(round(maxsOₑₓ_uncapped, digits=3)))" : ""), fontsize=12, font=:italic, color=solidclr)
-        scatterlines!(ax, [itstart, itout], [maxmOₑₓ, maxmOₑₓ], alpha=0.3, color=meltclr,marker=:rect,strokewidth=1.1); text!(ax, 0.4itout, 1.02maxmOₑₓ, text="Melt Fe³⁺ cap = $(round(maxmOₑₓ, digits=3))"*(maxmOₑₓ_uncapped>1.0 ? " ($(round(maxmOₑₓ_uncapped, digits=3)))" : ""), fontsize=12, font=:italic, color=meltclr)
-        ax2 = Axis(fig[1:2,2], ylabel=L"XCO_2", yaxisposition=:right, ylabelcolor=co2clr, ytickcolor=co2clr, yticklabelcolor=co2clr, xgridvisible=false, ygridvisible=false); hidespines!(ax2, :l, :t, :b, :r); hidexdecorations!(ax2)
-            lines!(ax2, itstart:itout, mat[itstart:itout,3,3], color=co2clr,label="In melt CO₂ ($(round(1 - x[1] - x[2], digits=3)) TOₑₓ)",linewidth=2.0)
-            scatterlines!(ax2, [itstart, itout], [maxXCO₂, maxXCO₂], alpha=0.3, color=co2clr,marker=:rect,strokewidth=1.1); text!(ax2, 0.7itout, 1.1maxXCO₂, text="Carbon limited XCO₂ = $(round(maxXCO₂, digits=3))", fontsize=12, font=:italic, color=co2clr)
-        # Limits
-            ul = max(maxsOₑₓ, maxmOₑₓ, maxXCO₂)
-            d = itout-itstart
-            xlims!(ax, itstart-0.05d, itout+0.05d)
-            xlims!(ax2, itstart-0.05d, itout+0.05d)
-            ylims!(ax, 0.0, 1.07ul); 
-            ylims!(ax2, 0.0, 1.07ul);
+                ax = Axis(fig[1:2,2], xlabel=L"Iterations", ylabel=L"Fraction\;of\;TO_{ex}", rightspinecolor=:green, xgridvisible=false, ygridvisible=false, ylabelsize=25, xlabelsize=25); 
+                lines!(ax, itstart:it, mat[itstart:it,1,3],label="In solid Fe ($(round(x[1], digits=3)) TOₑₓ)",color=solidclr,linewidth=2.0)
+                lines!(ax, itstart:it, mat[itstart:it,2,3], color=meltclr,label="In melt Fe ($(round(x[2], digits=3)) TOₑₓ)",linewidth=2.0)
+                lines!(ax, itstart:it, mat[itstart:it,4,3], color=fₑₓclr,label="Precipitated ($(round(x[4], digits=3)) TOₑₓ)",linewidth=2.0)
+                scatter!(ax, 1, mat[1,3,3], label="Melt XCO₂ = $(round(x[3], digits=5))", alpha=0.0)
+                axislegend(ax, position=:rt, framevisible=true)
+                # Mark ceilings
+                scatterlines!(ax, [itstart, itout], [maxsOₑₓ, maxsOₑₓ], alpha=0.3, color=solidclr,marker=:rect,strokewidth=1.1); text!(ax, 0.1itout, 1.02maxsOₑₓ, text="Solid Fe³⁺ cap = $(round(maxsOₑₓ, digits=3))"*(maxsOₑₓ_uncapped>1.0 ? " ($(round(maxsOₑₓ_uncapped, digits=3)))" : ""), fontsize=12, font=:italic, color=solidclr)
+                scatterlines!(ax, [itstart, itout], [maxmOₑₓ, maxmOₑₓ], alpha=0.3, color=meltclr,marker=:rect,strokewidth=1.1); text!(ax, 0.4itout, 1.02maxmOₑₓ, text="Melt Fe³⁺ cap = $(round(maxmOₑₓ, digits=3))"*(maxmOₑₓ_uncapped>1.0 ? " ($(round(maxmOₑₓ_uncapped, digits=3)))" : ""), fontsize=12, font=:italic, color=meltclr)
+                ax2 = Axis(fig[1:2,2], ylabel=L"XCO_2", yaxisposition=:right, ylabelcolor=co2clr, ytickcolor=co2clr, yticklabelcolor=co2clr, xgridvisible=false, ygridvisible=false); hidespines!(ax2, :l, :t, :b, :r); hidexdecorations!(ax2)
+                    lines!(ax2, itstart:it, mat[itstart:it,3,3], color=co2clr,label="In melt CO₂ ($(round(1 - x[1] - x[2], digits=3)) TOₑₓ)",linewidth=2.0)
+                    scatterlines!(ax2, [itstart, itout], [maxXCO₂, maxXCO₂], alpha=0.3, color=co2clr,marker=:rect,strokewidth=1.1); text!(ax2, 0.7itout, 1.02maxXCO₂, text="Carbon limited XCO₂ = $(round(maxXCO₂, digits=3))", fontsize=12, font=:italic, color=co2clr)
+                # Limits
+                    ul = max(maxmOₑₓ, maxXCO₂)
+                    d = itout-itstart
+                    xlims!(ax, itstart-0.05d, itout+0.05d)
+                    xlims!(ax2, itstart-0.05d, itout+0.05d)
+                    ylims!(ax, 0.0, 1.3ul); 
+                    ylims!(ax2, 0.0, 1.3ul);
+                GLMakie.save("./+img/+toex_seq/it_$it.png", fig)
+            end
+        else
+            # Plot evolution
+            fig = Figure(size=(1800, 800))
+            ax = Axis(fig[1,1], ylabel=L"Solution\;residual", xlabel=L"Iterations", xgridvisible=false, ygridvisible=false, ylabelsize=25, xlabelsize=25, yscale=log10); 
+            scatterlines!(ax, itstart:itout, abs.(mat[itstart:itout,1,1]), color=meltclr, label="(eq. 1) Solid ↔ melt fO₂ equilibrium (R₁ = $(Float16(mat[itout,1,1])))",marker=:rect,strokewidth=1.1)
+            scatterlines!(ax, itstart:itout, abs.(mat[itstart:itout,2,1]), color=co2clr,label="(eq. 2) Solid ↔ EDDOG fO₂ equilibrium (R₂ = $(Float16(mat[itout,2,1])))",marker=:rect,strokewidth=1.1)
+            scatterlines!(ax, itstart:itout, abs.(mat[itstart:itout,3,1]), color=:orange,label="(eq. 3) Mass conservation (R₃ = $(Float16(mat[itout,3,1])))",marker=:rect,strokewidth=1.1)
+            lines!(ax, [1, itout], [ϵ, ϵ], linestyle=:dash, color=:gray, alpha=0.5)
+            text!(ax, 1, 1.9ϵ, text="Convergence ϵ = $ϵ", font=:italic, alpha=0.5)
+            axislegend(ax, position=:rt)
+            # converged && ylims!(ax, -5ϵ, 7ϵ)
+
+            ax = Axis(fig[2,1], ylabel=L"log\;fO_2", xlabel=L"Iterations", xgridvisible=false, ygridvisible=false, ylabelsize=25, xlabelsize=25); 
+            scatterlines!(ax, itstart:itout, mat[itstart:itout,1,2], color=solidclr, label="Solid (fO₂ = $(round(mat[itout,1,2], digits=4)))",marker=:rect,strokewidth=1.1)
+            scatterlines!(ax, itstart:itout, mat[itstart:itout,2,2], color=meltclr,label="Melt (fO₂ = $(round(mat[itout,2,2], digits=4)))",marker=:rect,strokewidth=1.1)
+            scatterlines!(ax, itstart:itout, mat[itstart:itout,3,2], color=co2clr,label="EDDOG (fO₂ = $(round(mat[itout,3,2], digits=4)))",marker=:rect,strokewidth=1.1)
+            axislegend(ax, position=:rt)
+            converged && ylims!(ax, mat[itout,3,2]-0.5, mat[itout,3,2]+1)
+
+            ax = Axis(fig[1:2,2], xlabel=L"Iterations", ylabel=L"Fraction\;of\;TO_{ex}", rightspinecolor=:green, xgridvisible=false, ygridvisible=false, ylabelsize=25, xlabelsize=25); 
+            lines!(ax, itstart:itout, mat[itstart:itout,1,3],label="In solid Fe ($(round(x[1], digits=3)) TOₑₓ)",color=solidclr,linewidth=2.0)
+            lines!(ax, itstart:itout, mat[itstart:itout,2,3], color=meltclr,label="In melt Fe ($(round(x[2], digits=3)) TOₑₓ)",linewidth=2.0)
+            lines!(ax, itstart:itout, mat[itstart:itout,4,3], color=fₑₓclr,label="Precipitated ($(round(x[4], digits=3)) TOₑₓ)",linewidth=2.0)
+            scatter!(ax, 1, mat[1,3,3], label="Melt XCO₂ = $(round(x[3], digits=5))", alpha=0.0)
+            axislegend(ax, position=:rt, framevisible=true)
+            # Mark ceilings
+            scatterlines!(ax, [itstart, itout], [maxsOₑₓ, maxsOₑₓ], alpha=0.3, color=solidclr,marker=:rect,strokewidth=1.1); text!(ax, 0.1itout, 1.02maxsOₑₓ, text="Solid Fe³⁺ cap = $(round(maxsOₑₓ, digits=3))"*(maxsOₑₓ_uncapped>1.0 ? " ($(round(maxsOₑₓ_uncapped, digits=3)))" : ""), fontsize=12, font=:italic, color=solidclr)
+            scatterlines!(ax, [itstart, itout], [maxmOₑₓ, maxmOₑₓ], alpha=0.3, color=meltclr,marker=:rect,strokewidth=1.1); text!(ax, 0.4itout, 1.02maxmOₑₓ, text="Melt Fe³⁺ cap = $(round(maxmOₑₓ, digits=3))"*(maxmOₑₓ_uncapped>1.0 ? " ($(round(maxmOₑₓ_uncapped, digits=3)))" : ""), fontsize=12, font=:italic, color=meltclr)
+            ax2 = Axis(fig[1:2,2], ylabel=L"XCO_2", yaxisposition=:right, ylabelcolor=co2clr, ytickcolor=co2clr, yticklabelcolor=co2clr, xgridvisible=false, ygridvisible=false); hidespines!(ax2, :l, :t, :b, :r); hidexdecorations!(ax2)
+                lines!(ax2, itstart:itout, mat[itstart:itout,3,3], color=co2clr,label="In melt CO₂ ($(round(1 - x[1] - x[2], digits=3)) TOₑₓ)",linewidth=2.0)
+                scatterlines!(ax2, [itstart, itout], [maxXCO₂, maxXCO₂], alpha=0.3, color=co2clr,marker=:rect,strokewidth=1.1); text!(ax2, 0.7itout, 1.02maxXCO₂, text="Carbon limited XCO₂ = $(round(maxXCO₂, digits=3))", fontsize=12, font=:italic, color=co2clr)
+                # Limits
+                ul = max(maxmOₑₓ, maxXCO₂) # maxsOₑₓ, 
+                d = itout-itstart
+                xlims!(ax, itstart-0.05d, itout+0.05d)
+                xlims!(ax2, itstart-0.05d, itout+0.05d)
+                ylims!(ax, 0.0, 1.3ul); 
+                ylims!(ax2, 0.0, 1.3ul);
+            !isempty(savein) && GLMakie.save("./" * savein * ".png", fig)
+        end
         display(fig)
     end
 
@@ -364,10 +408,10 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{4,Float64},        
         # Evaluate current stage
         y₁, y₂, y₃, y₄ = y
         # Force boundary just after regime transition
-        Dsat && (y₃=y_highc)
-        !Dsat && (y₄=y_lowfₑₓ)
-        (switch&&Dsat)  && (y₄=x_to_y(1e-8, lowclip, fₑₓlim))
-        (switch&&!Dsat) && (y₃=0.98y_highc)
+        Dsat && (y₃=Inf)
+        !Dsat && (y₄=-Inf)
+        (switch&&Dsat)  && (y₄=x_to_y(1e-6, lowclip, fₑₓlim))
+        (switch&&!Dsat) && (y₃=0.99y_highc)
         switch = false
         # Iteration variables
         α   = evα(y_to_x(y₂, lowclip, mlim), Φₘ)
@@ -377,12 +421,12 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{4,Float64},        
         Fx, fₛ, fₗ, fᵪ, sOₑₓ, mOₑₓ, XCO₂, fₑₓ = Rx(y₁, y₂, y₃, y₄, dummy, params)
         # Store values
         Dsat ? (mat[it,:,1] .= [Fx[1], Fx[2], Fx[3], 0.0]) : (mat[it,:,1] .= Fx)
-        mat[it,1,2]  = sfO2(sOₑₓ)
-        mat[it,2,2],  = Hirsch(T, mOₑₓ, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
-        mat[it,3,2]  = XCO₂_to_fO2(XCO₂, P, T, sharpness, clim)
+        mat[it,1,2]  = fₛ
+        mat[it,2,2]  = fₗ
+        mat[it,3,2]  = fᵪ
         mat[it,:,3] .= [sOₑₓ, mOₑₓ, XCO₂, fₑₓ]
         # Check convergence
-        aR = maximum(abs.(Fx))
+        aR = maximum(abs.(Fx[1:3]))
         if aR<=ϵ
             converged = true
             itout=it
@@ -410,7 +454,7 @@ function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{4,Float64},        
         ∂x∂y₁, ∂x∂y₂, ∂x∂y₃, ∂x∂y₄ = ∂x∂y(y₁, lowclip, slim), ∂x∂y(y₂, lowclip, mlim), ∂x∂y(y₃, lowclip, clim), ∂x∂y(y₄, lowclip, fₑₓlim)
         if debugging
             @printf "Iteration %d: sOₑₓ = %.4f (%.4f), mOₑₓ = %.4f (%.4f), XCO₂ = %.4f (%.4f), fₑₓ = %.4f (%.4f)\n" it sOₑₓ slim mOₑₓ mlim XCO₂ clim fₑₓ fₑₓlim
-            @printf "\t(R₁=%.4f, R₂=%.4f, R₃=%.4f)" Fx[1] Fx[2] Fx[3]
+            @printf "\t(R₁=%.16f, R₂=%.16f, R₃=%.16f)" Fx[1] Fx[2] Fx[3]
             @printf "  (sfO₂=%.4f, mfO₂=%f, cfO₂=%.4f)\n" fₛ fₗ fᵪ
             @printf "\t(∂S=%.4f, ∂M=%f, ∂C=%.4f, ∂3=%.4f)" ∂S ∂M ∂C ∂3
             @printf "  (∂x∂y₁=%.4f, ∂x∂y₂=%f, ∂x∂y₃=%.4f, ∂x∂y₄=%.4f)\n" ∂x∂y₁ ∂x∂y₂ ∂x∂y₃ ∂x∂y₄
