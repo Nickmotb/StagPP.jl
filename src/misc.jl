@@ -571,7 +571,6 @@
     end
 #
 
-
 # ==============================================================
 # ===== Silicate melt density (Jing and Karato 2011, 2012) =====
 # ==============================================================
@@ -591,7 +590,7 @@ function ev_P(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀ᵢ, X)
 end
 ev_∂P∂V(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀, X) = ForwardDiff.derivative(V -> ev_P(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀, X), V)
 
-# X   = 1e-2SA[49.40, 1.43, 9.03, 8.50, 10.86, 0.0]
+# Xin   = 1e-2SA[49.40, 1.43, 9.03, 8.50, 10.86, 0.0]
 function Jing_Karato_silicate_melt_density(P, T, Xin; reg=1, niter=50, α₀ = 2.5e-4)
 
     # Parameters
@@ -630,6 +629,50 @@ end
 # ======================================================
 # ===== Solid H₂O density correction (Gerya, 2004) =====
 # ======================================================
+function Gₛ(P, T, Xliq)
+    # Gₛ Parameters
+        H298             = -286831.56               # J
+        S298             = 65.188                   # J K⁻¹
+        Vₛ               = 1.71382                  # J bar⁻¹
+        ϕ                = 6209                     # bar
+        c₁, c₂, c₃       = 7.23576, 0.31482, 0.0
+        ΔHₛ₁, ΔHₛ₂, ΔHₛ₃ = 4586.46, 0.0, 0.0        # J
+        ΔVₛ₁, ΔVₛ₂, ΔVₛ₃ = 0.04310884, 0.0, 0.0     # J bar⁻¹
+        ΔH⁰ₒᵣ            = -44838.80                # J
+        ΔS⁰ₒᵣ            = -122.397                 # J K⁻¹
+        ΔCₚ⁰ₒᵣ           = 21.486                   # J K⁻¹
+        ΔV⁰ₒᵣ            = 0.0                      # J bar⁻¹
+        Wh₁              = -28793.19                # J⁻¹
+        Ws₁              = -11.704                  # J K⁻¹
+        Wcp₁             = 5.086                    # J K⁻¹
+        Wv₁              = 0.0                      # J bar⁻¹
+        ΔHₛλ⁰            = 0.0                      # J 
+        ΔVₛλ⁰            = 0.0                      # J bar⁻¹
+    # Reference parameters
+        T₀ = 298.15 # K
+        P₀ = 1      # bar
+        n  = 2
+    # Auxilliaries
+        Ψ   = (5/4)*(P₀ + ϕ)^(1/5)*((P + ϕ)^(4/5) - (1 + ϕ)^(4/5))
+        e₁  = exp(-(ΔHₛ₁ + ΔVₛ₁*Ψ)/R/T)
+        e₂  = exp(-ΔHₛ₁/R/T)
+        e₀  = exp(-ΔHₛ₁/R/T₀)
+    # Gibbs free energy (J/mol)
+        G   = H298 - T*S298 + Vₛ*Ψ + R*T*(c₁*log(1-e₁)+c₂*log(1-e₂)) -
+                (c₁ + c₂)*(ΔHₛ₁*(1-T/T₀)*e₀/(1-e₀) + R*T*log(1-e₀)) +
+                R*T*((1-Xliq)*log(1-Xliq)+Xliq*log(Xliq)) +
+                (1-Xliq)*R*T*log(ϕ*(Xliq^2)+P) -
+                (1-Xliq)*(ΔH⁰ₒᵣ - T*ΔS⁰ₒᵣ + ΔCₚ⁰ₒᵣ*(T - T₀ - T*log(T/T₀))) +
+                (Wh₁ - T*Ws₁ + Wcp₁*(T - T₀ - T*log(T/T₀)))*Xliq*(1-Xliq)
+        return G
+end
+function Gₛ_minXliq(P,T)
+    Xliq = LinRange(1e-5, 0.999, 200)
+    v = Gₛ.(P, T, Xliq)
+    return Xliq[argmin(v)]
+end
+∂Gₛ∂P(P,T,Xliq)     = ForwardDiff.derivative(P -> Gₛ(P, T, Xliq), P)
+∂Gₛ∂Xliq(P,T,Xliq)  = ForwardDiff.derivative(Xliq -> Gₛ(P, T, Xliq), Xliq)
 function Gerya_solid_H2O_density_correction(P,T,X)
 
     # I believe what he is doing is:
@@ -638,5 +681,43 @@ function Gerya_solid_H2O_density_correction(P,T,X)
     # 3. Compute the molar volume of water as a Gibbs field derivative -> V_H2O = ∂G/∂P
     # 4. Recompute the solid molar volume by renormalizing -> V_corr = XH₂O*V_H₂O + (1-XH₂O)*V_anhydrous
     # 5. Retrieve corrected density -> ρ_corr = mma/V_corr
+    
+        Xox     = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "O", "H2O"]
+        X       = 1e-2*[49.40, 1.43, 9.03, 8.50, 10.86, 0.0, 0.0]
+        noWX    = @view X[1:end-1]
+    # State
+        Xliq    = 0.95
+    # Vectors
+        nP, nT  = 50, 30
+        nPnT    = nP*nT
+        P       = LinRange(0.1, 25, nP)
+        T       = LinRange(1000, 3000, nT)
+    # Vectorize arguments
+        Xv = Vector{Vector{Float64}}(undef, nPnT)
+        for i in 1:nPnT
+            Xv[i] = noWX
+        end
+        vP, vT = repeat(P, outer=nT), repeat(T, inner=nP)
+    # Map
+        Vh2o, Vanh = zeros(nP, nT), zeros(nPnT)
+    # Compute H₂O molar volume
+        for (ip, p) in enumerate(P)
+            for (it, t) in enumerate(T)
+                Xliq = Gₛ_minXliq(p,t)
+                Vh2o[ip, it] = 10∂Gₛ∂P(1e4p, t, Xliq) # 10 J bar⁻¹ mol⁻¹ = cm³ mol⁻¹
+            end 
+        end
+    # Retrieve anhydrous solid Volume
+        data   = Initialize_MAGEMin("sb24", verbose=false);
+        out    = multi_point_minimization(10vP, vT.-273.15, data, X=Xv, Xoxides=Xox[1:end-1], name_solvus=true) # kbar and K
+        Finalize_MAGEMin(data)
+        # Extract information
+        for i in 1:nPnT
+            Vanh[i] = 1e4*out[i].V # cm³/mol
+        end
+    # Reshape
+        Vanh = reshape(Vanh, nP, nT)
+
+    
 
 end
