@@ -10,4 +10,5 @@ TC = 0.05
 # partition_Oₑₓ(P, T, p, ϕ, TOex, TC, plotevo=true)
 
 
-a = solve_sH2O_fO2(50, 50)
+a = solve_sH2O_fO2(200, 200, s=false)
+plot_sf(a, interp=true)

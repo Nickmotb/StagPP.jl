@@ -215,7 +215,9 @@
         # ================================
 
         # Ensure positivity
-        um.=max.(1e-10, um); tz.=max.(1e-10, tz); lm.=max.(1e-10, lm)
+        if s
+            um.=max.(1e-10, um); tz.=max.(1e-10, tz); lm.=max.(1e-10, lm)
+        end
 
         # Return structure
         sfmap = sfstruct( um, tz, lm, fum, ftz, flm, ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm, ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm, Pum, Tum, Ptz, Ttz, Plm, Tlm, (nR>1) ? collect(Rdom) : Rv )
@@ -1661,7 +1663,7 @@
                 (i <= n/nR) && (ΔFMQ[i] = out_fO2[i].fO2 - out_fO2[i].dQFM) # Depleted (Harzburgite) FMQ surface point
             end
         end
-        (out_fO2!=0.0) && (fmap[fmap.>=-1e-10] .= 0.0)
+        #(out_fO2!=0.0) && (fmap[fmap.>=-1e-10] .= 0.0)
     end
 
     function mesh_vectorization!(P, T, Rdom, nP, nT, nR, Pv, Tv, Rvec; single=false)
@@ -1840,8 +1842,8 @@
 
         # Assign passed bulk to memory array (Correct from different Oxide list if needed)
         if !isnothing(oldXox)
-            for (i, ox) in enumerate(Xdummy.Xox)      
-                Xdummy.X[i] = (ox=="O" || ox=="Fe2O3") ? 0.0 : X[oldXox.==ox][1]
+            for (i, ox) in enumerate(Xdummy.Xox)
+                Xdummy.X[i] = ((ox=="O" && "FeO" ∈ oldXox) || ox=="Fe2O3" || !(ox ∈ oldXox)) ? 0.0 : X[oldXox.==ox][1]
             end
         else
             Xdummy.X .= Vector{Float64}(X)
@@ -1855,7 +1857,7 @@
         # Ensure passed in composition is unoxidized
         ("Fe2O3" ∈ Xoxd)    && @assert Xd[Xoxd.=="Fe2O3"][1]==0.0               "Please pass in an unoxidized composition. (XFe2O3 = 0.0)"
         ("Fe"    ∈ Xoxd)    && @assert Xd[Xoxd.=="O"][1]==Xd[Xoxd.=="Fe"][1]    "Please pass in an unoxidized composition. (XFe = XO)"
-        ("O"     ∈ Xoxd)     && @assert Xd[Xoxd.=="O"][1]==0.0                  "Please pass in an unoxidized composition. (XO = 0.0)"
+        ("O"     ∈ Xoxd)    && @assert Xd[Xoxd.=="O"][1]==0.0                   "Please pass in an unoxidized composition. (XO = 0.0)"
 
         # Convert from mass fraction → molar fraction if required and normalize
         wt_in && (Xd./=mmd)  

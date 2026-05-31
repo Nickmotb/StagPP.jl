@@ -1553,18 +1553,20 @@ function solve_point(P, T, em;
     # Minimize
     X = copy(em=="XB" ? XB : em=="XH" ? XH : em=="XP" ? 0.2XB+0.8XH : ccomp)
     H2Osat && (X[end] = 100.0) # Set H2O to 100 for saturation calculations
+    Xox24 = ["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "O"]
     if P <= DBswitchP
         data = H2Osat ? Initialize_MAGEMin("um", verbose=false, buffer="aH2O") : Initialize_MAGEMin("um", verbose=false);
         rm_list = remove_phases(phase_out, "um")
         out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Xox, B=1.0, name_solvus=true, rm_list=rm_list)
     else
-        data = Initialize_MAGEMin(P<=25. ? "sb24" : "sb24", verbose=false);
-        oxidize && (X, Xlist = oxidize_bulk(X, Xox, Rv; wt_in=false))
+        Xdummy = (X=Vector{Float64}(zeros(length(Xox24))), Xox=Vector{String}(Xox24), mm=get_Xoxmm(Xox24)) # Dummy for Stx24 oxidizing calls
+        data = Initialize_MAGEMin("sb24", verbose=false);
+        oxidize && (X = oxidize_bulk(X, Rv, Xdummy; wt_in=false, oldXox=Xox, vector=true, FeFormat="FeO_O"))
         if em=="XH"
             rm_list = remove_phases(["st"], "sb24")
-            out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Xlist, name_solvus=true, rm_list=rm_list)
+            out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Xox24, name_solvus=true, rm_list=rm_list)
         else
-            out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Xlist, name_solvus=true)
+            out = single_point_minimization(10P, T-273.15, data, X=X, Xoxides=Xox24, name_solvus=true)
         end
     end
     Finalize_MAGEMin(data);
