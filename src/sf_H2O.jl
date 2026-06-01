@@ -41,12 +41,12 @@
                             cc = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                             Prange=(1e-4, 135.0), Trange=(500.0, 4000.0), verbose=true,
                             cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"],
-                            test_path=false, sys_in="mol", unoxidized=false, melt_ints=true,
+                            test_path=false, sys_in="mol", unoxidized=false, densities=true,
                             Rv=0.01, nR=1, Rrange=(0.001, 0.2), pyr=false
                             )
 
         # Checks
-        if (!s && !fO2 && !melt_ints)
+        if (!s && !fO2 && !densities)
             verbose && println("Nothing to compute. Exiting...")
             return
         end
@@ -65,7 +65,7 @@
         # Run pyrolitic composition
         pyr && (cc .= XP)
         cflag = cc!=zeros(length(Xox))
-        cflag && (melt_ints=false)
+        cflag && (densities=false)
 
         # Vetorization size
         nPnT, nPnTnR = nP*nT, nP*nT*nR
@@ -103,21 +103,9 @@
             end
             if fO2
                 fum, ftz, flm = zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2)
-                ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm = zeros(Float64, nPnT), zeros(Float64, nPnT), zeros(Float64, nPnT)
             else
-                fum, ftz, flm, ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm = nothing, nothing, nothing, nothing, nothing, nothing
+                fum, ftz, flm = nothing, nothing, nothing
             end
-
-        # ==========================
-        # ===== Pre-Processing =====
-        # ==========================
-        # Compute ΔV of Fe³⁺ -> Fe²⁺ reduction for both endmembers
-        if melt_ints
-            println("Calculating melt ∫(ΔV/RT)dP integrals...")
-            ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm = solve_∫ΔVdP(Pum, Tum), solve_∫ΔVdP(Ptz, Ttz), solve_∫ΔVdP(Plm, Tlm)
-        else
-            ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm = nothing, nothing, nothing
-        end
 
         # ========================
         # ===== Upper Mantle =====
@@ -144,7 +132,7 @@
                 out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox24, name_solvus=true, progressbar=verbose, sys_in=sys_in)
             else; out_fO2 = 0.0; end
         # Assemble
-            sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, ΔFMQ_um, nPnTnR, nR, cflag, s=s, fO2=fO2)
+            sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, nPnTnR, nR, cflag, s=s, fO2=fO2)
             if s
                 um = cflag ? reshape(um, nP, nT, nR) : cat(reshape(um[:,1], nP, nT, nR), reshape(um[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                 verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
@@ -152,7 +140,6 @@
             end
             if fO2
                 fum = cflag ? reshape(fum, nP, nT, nR) : cat(reshape(fum[:,1], nP, nT, nR), reshape(fum[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
-                ΔFMQ_um = reshape(ΔFMQ_um[:,1], nP, nT)
             end
 
         # ===========================
@@ -177,9 +164,8 @@
             end
             if fO2 
                 verbose && println("Extracting transition zone fO₂...")
-                sᴴ²ᴼ_fO₂_assembler!(tz, ftz, 0.0, out_fO2, ΔFMQ_tz, nPnTnR, nR, cflag, s=false)
+                sᴴ²ᴼ_fO₂_assembler!(tz, ftz, 0.0, out_fO2, nPnTnR, nR, cflag, s=false)
                 ftz = cflag ? reshape(ftz, nP, nT, nR) : cat(reshape(ftz[:,1], nP, nT, nR), reshape(ftz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
-                ΔFMQ_tz = reshape(ΔFMQ_tz[:,1], nP, nT)
             end
 
         # ===========================
@@ -202,9 +188,8 @@
             end
             if fO2 
                 verbose && println("Extracting lower mantle fO₂...")
-                sᴴ²ᴼ_fO₂_assembler!(lm, flm, 0.0, out_fO2, ΔFMQ_lm, nPnTnR, nR, cflag, s=false)
+                sᴴ²ᴼ_fO₂_assembler!(lm, flm, 0.0, out_fO2, nPnTnR, nR, cflag, s=false)
                 flm = cflag ? reshape(flm, nP, nT, nR) : cat(reshape(flm[:,1], nP, nT, nR), reshape(flm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
-                ΔFMQ_lm = reshape(ΔFMQ_lm[:,1], nP, nT)
             end
         
         # Finalize sb24 MAGEMin environment
@@ -217,14 +202,20 @@
         # Ensure positivity
         if s
             um.=max.(1e-10, um); tz.=max.(1e-10, tz); lm.=max.(1e-10, lm)
+            if nR>1
+                um = um[:,:,1,:]; tz = tz[:,:,1,:]; lm = lm[:,:,1,:]
+            end
         end
 
+        # Compute solid and silicate melt H₂O density corrections
+        SΔρ, MΔρ, ρP, ρT, ρH = PT_H2O_ρ(Prange[1],50.,Trange[1],3000.,[0.0],["H2O"], nP=5, nT=5, nH=5, default=true)
+
         # Return structure
-        sfmap = sfstruct( um, tz, lm, fum, ftz, flm, ∫ΔVdP_um, ∫ΔVdP_tz, ∫ΔVdP_lm, ΔFMQ_um, ΔFMQ_tz, ΔFMQ_lm, Pum, Tum, Ptz, Ttz, Plm, Tlm, (nR>1) ? collect(Rdom) : Rv )
+        sfmap = sfstruct( um, tz, lm, fum, ftz, flm, MΔρ, SΔρ, Pum, Tum, Ptz, Ttz, Plm, Tlm, (nR>1) ? collect(Rdom) : Rv, ρP, ρT, ρH )
 
         # Export
         verbose && println("Exporting...")
-        (s || fO2 || melt_ints) && write_output(sfmap, cflag, s=s, fO2=fO2, melt_ints=melt_ints)
+        (s || fO2 || densities) && write_output(sfmap, cflag, s=s, fO2=fO2, densities=densities)
 
         # Plot
         (plt && verbose) && println("Plotting...")
@@ -1638,7 +1629,7 @@
 # ======= Others =======
 # ======================
 
-    function sᴴ²ᴼ_fO₂_assembler!(smap, fmap, out_s, out_fO2, ΔFMQ, n, nR, cflag; s=true, fO2=true)
+    function sᴴ²ᴼ_fO₂_assembler!(smap, fmap, out_s, out_fO2, n, nR, cflag; s=true, fO2=true)
         (!s && !fO2) && return
         Threads.@threads for i in 1:n
             if (s) # sᴴ²ᴼ
@@ -1660,7 +1651,6 @@
             if fO2
                 fmap[i, 1]=out_fO2[i].fO2 # Depleted (Harzburgite)
                 !cflag && (fmap[i, 2] = out_fO2[i+n].fO2) # Enriched (Basalt)
-                (i <= n/nR) && (ΔFMQ[i] = out_fO2[i].fO2 - out_fO2[i].dQFM) # Depleted (Harzburgite) FMQ surface point
             end
         end
         #(out_fO2!=0.0) && (fmap[fmap.>=-1e-10] .= 0.0)
@@ -1669,7 +1659,7 @@
     function mesh_vectorization!(P, T, Rdom, nP, nT, nR, Pv, Tv, Rvec; single=false)
         if nR>1
             vP, vT, vR = repeat(repeat(P, outer=nT), nR), repeat(repeat(T, inner=nP), nR), repeat(Rdom, inner=nP*nT)
-            Pv .= single ? vP : vcat(vP, vP); Tv .= single ? vT : vcat(vT, vT); Rvec .= vR
+            Pv .= single ? vP : vcat(vP, vP); Tv .= single ? vT : vcat(vT, vT); Rvec .= single ? vR : vcat(vR, vR);
         else
             vP, vT = repeat(P, outer=nT), repeat(T, inner=nP)
             Pv .= single ? vP : vcat(vP, vP); Tv .= single ? vT : vcat(vT, vT);
@@ -1718,7 +1708,7 @@
 # ======= Export =======
 # ======================
 
-    function write_output(sfmap, cflag; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", fname_melt_ints="StagIDVs.dat", fname_FMQ="FMQbase.dat", s=true, fO2=true, melt_ints=true)
+    function write_output(sfmap, cflag; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", fname_Mdens="StagMdens.dat", fname_Sdens="StagSdens.dat", s=true, fO2=true, densities=true)
         # Array dimensions
         nP, nT, nR = length(sfmap.Pum), length(sfmap.Tum), length(sfmap.FeR)
         pmap = zeros(Float64, nP, nT)
@@ -1729,22 +1719,15 @@
                 println(io, nP, " ", nT, "\n");
                 println(io, sfmap.Pum[1], " ", sfmap.Pum[end], " ", sfmap.Tum[1], " ", sfmap.Tum[end])
                 println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
-                println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end])
-                println(io, sfmap.FeR[1], " ", sfmap.FeR[end], "\n")
+                println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end], "\n")
                 # Data
-                for r in 1:nR
-                    for (n, slot) in enumerate(ivec)
-                        if nR==1
-                            pmap .= n>4 ? sfmap.slm[:,:,slot] : n>2 ? sfmap.stz[:,:,slot] : sfmap.sum[:,:,slot]
-                        else
-                            pmap .= n>4 ? sfmap.slm[:,:,r,slot] : n>2 ? sfmap.stz[:,:,r,slot] : sfmap.sum[:,:,r,slot]
-                        end
-                        for i in 1:nP
-                            for j in 1:nT
-                                print(io, pmap[i,j], " ")
-                            end; println(io, "")
+                for (n, slot) in enumerate(ivec)
+                    pmap .= n>4 ? sfmap.slm[:,:,slot] : n>2 ? sfmap.stz[:,:,slot] : sfmap.sum[:,:,slot]
+                    for i in 1:nP
+                        for j in 1:nT
+                            print(io, pmap[i,j], " ")
                         end; println(io, "")
-                    end
+                    end; println(io, "")
                 end
             end
         end
@@ -1774,39 +1757,44 @@
                 end
             end
 
-            open(joinpath(savedir, fname_FMQ), "w") do io
-                # Header
-                println(io, nP, " ", nT, "\n");
-                println(io, sfmap.Pum[1], " ", sfmap.Pum[end], " ", sfmap.Tum[1], " ", sfmap.Tum[end])
-                println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
-                println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end], "\n")
-                # Data
-                for n in 1:3
-                    pmap .= n>2 ? sfmap.FMQlm : n>1 ? sfmap.FMQtz : sfmap.FMQum
-                    for i in 1:nP
-                        for j in 1:nT
-                            print(io, pmap[i,j], " ")
-                        end; println(io, "")
-                    end; println(io, "")
-                end
-            end
         end
 
-        if melt_ints
-            open(joinpath(savedir, fname_melt_ints), "w") do io
+        if densities
+            nP = length(sfmap.ρP); nT = length(sfmap.ρT); nH = length(sfmap.ρH)
+            pmap = zeros(Float64, nP, nT)
+            ivec = [2, 1]
+            # Solid densities
+            open(joinpath(savedir, fname_Sdens), "w") do io
                 # Header
-                println(io, nP, " ", nT, "\n");
-                println(io, sfmap.Pum[1], " ", sfmap.Pum[end], " ", sfmap.Tum[1], " ", sfmap.Tum[end])
-                println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
-                println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end], "\n")
+                println(io, nP, " ", nT, " ", nH, "\n");
+                println(io, sfmap.ρP[1], " ", sfmap.ρP[end], " ", sfmap.ρT[1], " ", sfmap.ρT[end], " ", round(sfmap.ρH[1], digits=4), " ", round(sfmap.ρH[end], digits=4), "\n")
                 # Data
                 for (n, slot) in enumerate(ivec)
-                    pmap .= n>4 ? sfmap.DVlm[:,:,slot] : n>2 ? sfmap.DVtz[:,:,slot] : sfmap.DVum[:,:,slot]
-                    for i in 1:nP
-                        for j in 1:nT
-                            print(io, pmap[i,j], " ")
+                    for h in 1:nH
+                        pmap .= sfmap.SΔρ[:,:,h,slot]
+                        for i in 1:nP
+                            for j in 1:nT
+                                print(io, pmap[i,j], " ")
+                            end; println(io, "")
                         end; println(io, "")
-                    end; println(io, "")
+                    end
+                end
+            end
+            # Melt densities
+            open(joinpath(savedir, fname_Mdens), "w") do io
+                # Header
+                println(io, nP, " ", nT, " ", nH, "\n");
+                println(io, sfmap.ρP[1], " ", sfmap.ρP[end], " ", sfmap.ρT[1], " ", sfmap.ρT[end], " ", round(sfmap.ρH[1], digits=4), " ", round(sfmap.ρH[end], digits=4), "\n")
+                # Data
+                for (n, slot) in enumerate(ivec)
+                    for h in 1:nH
+                        pmap .= sfmap.MΔρ[:,:,h,slot]
+                        for i in 1:nP
+                            for j in 1:nT
+                                print(io, pmap[i,j], " ")
+                            end; println(io, "")
+                        end; println(io, "")
+                    end
                 end
             end
         end
@@ -1988,4 +1976,63 @@
 
         return ∫ΔVdP
 
+    end
+
+    function filter_ox_list(Xin, Xox, newXox; wt_in=false, wt_out=false)
+        # Check if newlist contains O and which format
+        Oflag1 = ("O"∈Xox)||("Fe2O3"∈Xox);
+        Oflag2 = ("O"∈newXox)||("Fe2O3"∈newXox); 
+        FeFormat1, FeFormat2 = "", ""
+        Oflag1 && (("O"∈Xox)&&("Fe"∈Xox) ? FeFormat1="Fe_O" : ("O"∈Xox)&&("FeO"∈Xox) ? FeFormat1="FeO_O" : "FeO_Fe2O3")
+        Oflag2 && (("O"∈newXox)&&("Fe"∈newXox) ? FeFormat2="Fe_O" : ("O"∈newXox)&&("FeO"∈newXox) ? FeFormat2="FeO_O" : "FeO_Fe2O3")
+        # Transform to mols
+        X = copy(Xin)
+        if wt_in
+            Xmm = get_Xoxmm(Xox)
+            X ./= Xmm
+        end
+        # iterate
+        newX = zeros(length(newXox))
+        for (i, ox) in enumerate(newXox)
+            if ox ∈ Xox
+                idx = findfirst(Xox.==ox)
+                newX[i] = X[idx]
+            else
+                newX[i] = 0.0
+            end
+        end
+        # Correct Fe and O
+        if (FeFormat1=="" && FeFormat2=="") || (FeFormat1==FeFormat2)
+            # nothing
+        elseif (FeFormat1=="Fe_O" && (FeFormat2=="FeO_O"||FeFormat2=="FeO_Fe2O3"))
+            idxF1 = findfirst(Xox.=="Fe"); idxO1 = findfirst(Xox.=="O")
+            idxF2 = findfirst(newXox.=="FeO"); idxO2 = findfirst(newXox.=="O")
+            newX[idxO2] = X[idxO1] - X[idxF1]
+            newX[idxF2] = 3X[idxF1] - 2X[idxO1]
+
+        elseif (FeFormat1=="FeO_O" && FeFormat2=="FeO_Fe2O3")
+            idxF1 = findfirst(Xox.=="FeO"); idxO1 = findfirst(Xox.=="O")
+            idxF2 = findfirst(newXox.=="FeO"); idxO2 = findfirst(newXox.=="Fe2O3")
+            newX[idxO] = X[idxO] # only O because FeO taken care of
+
+        elseif (FeFormat1=="FeO_Fe2O3"||FeFormat1=="FeO_O") && FeFormat2=="Fe_O"
+            idxF1 = findfirst(Xox.=="FeO"); idxO1 = findfirst(Xox.=="Fe2O3")
+            idxF2 = findfirst(newXox.=="Fe"); idxO2 = findfirst(newXox.=="O")
+            newX[idxF2] = X[idxF1] + 2X[idxO1]; newX[idxO2] = X[idxF1] + 3X[idxO1]
+
+        elseif (FeFormat1=="FeO_Fe2O3" && FeFormat2=="FeO_O")
+            idxF1 = findfirst(Xox.=="FeO"); idxO1 = findfirst(Xox.=="Fe2O3")
+            idxF2 = findfirst(newXox.=="FeO"); idxO2 = findfirst(newXox.=="O")
+            newX[idxO2] = X[idxO1] # only Fe2O3 because FeO taken care of
+        end
+
+        # Convert to wt%
+        if wt_out
+            XmmN = get_Xoxmm(newXox)
+            newX .*= XmmN
+        end
+
+        # Normalize
+        newX ./= sum(newX)
+        return newX
     end
