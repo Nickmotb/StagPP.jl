@@ -591,14 +591,23 @@ end
 ev_∂P∂V(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀, X) = ForwardDiff.derivative(V -> ev_P(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀, X), V)
 
 # Xin   = 1e-2SA[49.40, 1.43, 9.03, 8.50, 10.86, 0.0]
-function Jing_Karato_silicate_melt_density(P, T, Xin; reg=1, niter=50, α₀ = 2.5e-4)
+function Jing_Karato_silicate_melt_density(P, T, Xin, Xoxin; reg=1, niter=50, α₀ = 2.5e-4, MM=nothing, verbose=false)
+
+    # Force Xox list
+    Xox = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "H2O"]
+    X   = zeros(length(Xox))
+    MM  = [getfield(mm, Symbol(ox)) for ox in Xox]
+    for i in eachindex(Xox)
+        idx = findfirst(Xoxin.==Xox[i])
+        X[i] = isnothing(idx) ? 0.0 : Xin[idx]
+    end
 
     # Parameters
     mma = X[1]*mm.SiO2 + X[2]*mm.Al2O3 + X[3]*mm.FeO + X[4]*mm.MgO + X[5]*mm.CaO + X[6]*mm.H2O # g/mol (Molar mass of the mixture)
-    X   = Xin/sum(Xin)
+    X   = X/sum(X)
     Tᵣ  = 1673.          # K (Reference temperature)
     V₀ᵢ = SA[26.86, 37.11, 13.65, 11.69, 16.57, 22.90] # cm³/mol (Reference liquid component volume)
-    V₀  = sum(V₀ᵢ.*X)   # cm³/mol (Reference liquid volume)
+    V₀  = sum(V₀ᵢ.*X)    # cm³/mol (Reference liquid volume)
     V   = 10.0           # cm³/mol (Initial V guess)
 
     # Regression parameters [SiO2, Al2O3, FeO, MgO, CaO, H2O]
@@ -617,10 +626,10 @@ function Jing_Karato_silicate_melt_density(P, T, Xin; reg=1, niter=50, α₀ = 2
         P_calc = ev_P(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀, X) # Pa
         ρ      = mma/V                                  # g/cm³ (Density)
         # Status
-        @printf "Iteration %d: V = %.4f cm³/mol, ρ = %.4f g/cm³, P_calc = %.4f GPa, P_target = %.4f GPa\n" it V ρ P_calc P
+        verbose && (@printf "Iteration %d: V = %.4f cm³/mol, ρ = %.4f g/cm³, P_calc = %.4f GPa, P_target = %.4f GPa\n" it V ρ P_calc P)
         # Newton-Rhapson step
         dP = P_calc - P
-        (abs(dP) < 1e-3) && break
+        (abs(dP) < 1e-3) && (return ρ)
         ∂P∂V = ev_∂P∂V(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀, X)
         V -= dP/∂P∂V
     end
@@ -666,14 +675,20 @@ function Gₛ(P, T, Xliq)
                 (Wh₁ - T*Ws₁ + Wcp₁*(T - T₀ - T*log(T/T₀)))*Xliq*(1-Xliq)
         return G
 end
+
 function Gₛ_minXliq(P,T)
     Xliq = LinRange(1e-5, 0.999, 200)
     v = Gₛ.(P, T, Xliq)
     return Xliq[argmin(v)]
 end
+
 ∂Gₛ∂P(P,T,Xliq)     = ForwardDiff.derivative(P -> Gₛ(P, T, Xliq), P)
 ∂Gₛ∂Xliq(P,T,Xliq)  = ForwardDiff.derivative(Xliq -> Gₛ(P, T, Xliq), Xliq)
-function Gerya_solid_H2O_density_correction(P,T,X)
+
+# Xin   = 1e-2SA[49.40, 1.43, 9.03, 8.50, 10.86, 0.0, 6.0]
+# Xox     = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "O", "H2O"]
+
+function Gerya_solid_H2O_density_correction_interpolator(Xin,Xox; nP=100, nT=100, out=nothing)
 
     # I believe what he is doing is:
     # 1. Compute the anhydrous volume of the solid through MAGEMin
@@ -681,16 +696,13 @@ function Gerya_solid_H2O_density_correction(P,T,X)
     # 3. Compute the molar volume of water as a Gibbs field derivative -> V_H2O = ∂G/∂P
     # 4. Recompute the solid molar volume by renormalizing -> V_corr = XH₂O*V_H₂O + (1-XH₂O)*V_anhydrous
     # 5. Retrieve corrected density -> ρ_corr = mma/V_corr
-    
-        Xox     = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "O", "H2O"]
-        X       = 1e-2*[49.40, 1.43, 9.03, 8.50, 10.86, 0.0, 0.0]
+        @assert Xox[end]=="H2O" "Last oxide entry must be H2O"
+        X = sum(Xin)>1.0 ? 1e-2Xin : Xin
+        X = X./sum(X)
         noWX    = @view X[1:end-1]
-    # State
-        Xliq    = 0.95
     # Vectors
-        nP, nT  = 50, 30
         nPnT    = nP*nT
-        P       = LinRange(0.1, 25, nP)
+        P       = LinRange(0.1, 75, nP)
         T       = LinRange(1000, 3000, nT)
     # Vectorize arguments
         Xv = Vector{Vector{Float64}}(undef, nPnT)
@@ -699,25 +711,118 @@ function Gerya_solid_H2O_density_correction(P,T,X)
         end
         vP, vT = repeat(P, outer=nT), repeat(T, inner=nP)
     # Map
-        Vh2o, Vanh = zeros(nP, nT), zeros(nPnT)
+        Vh2o, Vanh, α = zeros(nP, nT), zeros(nPnT), zeros(nPnT)
     # Compute H₂O molar volume
         for (ip, p) in enumerate(P)
             for (it, t) in enumerate(T)
-                Xliq = Gₛ_minXliq(p,t)
+                Xliq = 1.0#Gₛ_minXliq(p,t)
                 Vh2o[ip, it] = 10∂Gₛ∂P(1e4p, t, Xliq) # 10 J bar⁻¹ mol⁻¹ = cm³ mol⁻¹
             end 
         end
     # Retrieve anhydrous solid Volume
-        data   = Initialize_MAGEMin("sb24", verbose=false);
-        out    = multi_point_minimization(10vP, vT.-273.15, data, X=Xv, Xoxides=Xox[1:end-1], name_solvus=true) # kbar and K
-        Finalize_MAGEMin(data)
+        if isnothing(out)
+            data   = Initialize_MAGEMin("sb24", verbose=false);
+            out    = multi_point_minimization(10vP, vT.-273.15, data, X=Xv, Xoxides=Xox[1:end-1], name_solvus=true) # kbar and K
+            Finalize_MAGEMin(data)
+        end
         # Extract information
         for i in 1:nPnT
-            Vanh[i] = 1e4*out[i].V # cm³/mol
+            Vanh[i] = out[i].V # cm³/mol
+            α[i]    = out[i].alpha[1] # 1/K
         end
     # Reshape
         Vanh = reshape(Vanh, nP, nT)
+        α = reshape(α, nP, nT)
 
-    
+    # Construct bulk anhydrous V | H₂O V interpolator opbject
+        VVρ = [Interpolations.interpolate((P,T),Vanh,Gridded(Linear())), Interpolations.interpolate((P,T),Vh2o,Gridded(Linear())), Interpolations.interpolate((P,T),α,Gridded(Linear()))]
+        return VVρ
 
+end
+
+function Gerya_solid_H2O_density_correction(P::Float64,T::Float64,Xin::Vector{Float64},Xox::Vector{String}; nP=50, nT=30, VVρ=nothing, MM=nothing)
+    # Construct interpolator if not passed in
+        isnothing(VVρ) && (VVρ = Gerya_solid_H2O_density_correction_interpolator(Xin,Xox; nP=nP, nT=nT))
+        Vanh = VVρ[1]; Vh2o = VVρ[2];
+    # Recompute molar density
+        X       = sum(Xin)>1.0 ? 1e-2Xin : Xin
+        XH      = X./sum(X)
+        XA      = @views X[1:end-1]./sum(X[1:end-1])
+        VA      = Vanh(P,T)
+        VH      = Vh2o(P,T)
+        rV      = (1-XH[end])*VA + XH[end]*VH
+    # Retrieve density correction
+        massA, massH    = 0.0, 0.0
+        MMA     = @view MM[1:end-1]
+        if isnothing(MM)
+            for i in eachindex(Xox)
+                i<length(Xox) && (massA += XA[i]*getfield(mm, Symbol(Xox[i])))
+                massH += XH[i]*getfield(mm, Symbol(Xox[i]))
+            end
+        else
+            massA = sum(XA.*MMA)
+            massH = sum(XH.*MM)
+        end
+    # Absolute ρ
+        ρH       = massH/rV
+        ρA       = massA/VA
+    # ρ decrease in %
+        return Δρ       = 1e2(1 - ρH/ρA)
+end
+
+# =============================
+# ===== Table constructor =====
+# =============================
+# Xin   = 1e-2SA[49.40, 1.43, 9.03, 8.50, 10.86, 0.0, 6.0]
+# Xox = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "O", "H2O"]
+function PT_H2O_ρ(P,T,Xin,Xox; nH=250)
+    # Grid
+        dP  = step(P);   dT = step(T)
+        nP  = length(P); nT = length(T)
+    # Water vector
+        H   = LinRange(1e-2, 0.5, nH)
+    # Result matrix
+        SΔρ = zeros(nP, nT, nH);
+        MΔρ = zeros(nP, nT, nH);
+    # Ordered MM vector
+        MM = [getfield(mm, Symbol(ox)) for ox in Xox]
+    # wt% H₂O vector
+        Hwt = zeros(nH)
+    # VVρ pre-computation
+        VVρ = Gerya_solid_H2O_density_correction_interpolator(Xin,Xox; nP=nP, nT=nT)
+    # Normalize composition
+        Xl = copy(Xin)
+        Xl = sum(Xl)>1.0 ? 1e-2Xl : Xl
+    # Initiate costructor
+        for iH in 1:nH
+            @printf "Currently running iH = %d/%d...\n" iH nH
+            X   = Xl;       X[end] = H[iH];     X .= X./sum(X)
+            Xw  = Xl.*MM;   Xw .= Xw./sum(Xw)
+            Hwt[iH] = 1e2Xw[end]
+            for ip in 1:nP
+                for it in 1:nT
+                    # Retrieve thermal expansivity of bulk at P-T
+                        α₀ = VVρ[3]
+                    # Compute solid H₂O density correction
+                        SΔρ[ip, it, iH] = Gerya_solid_H2O_density_correction(P[ip], T[it], Xl, Xox; VVρ=VVρ, MM=MM)
+                    # Compute Melt H₂O density correction
+                        MΔρ[ip, it, iH] = Jing_Karato_silicate_melt_density(P[ip], T[it], Xin, Xox; reg=1, niter=50, α₀ = α₀(P[ip], T[it]), verbose=false)
+                end
+            end
+        end
+    # Plot if needed
+        fig = Figure(size=(1000, 700))
+        ax = Axis(fig[1,1], xlabel="T[K]", ylabel="P[GPa]")
+        ax1 = Axis(fig[2,1], xlabel="T[K]", ylabel="P[GPa]")
+        ax2 = Axis(fig[1,3], xlabel="T[K]", ylabel="P[GPa]")
+        ax3 = Axis(fig[2,3], xlabel="T[K]", ylabel="P[GPa]")
+        hm = heatmap!(ax, T, P, SΔρ[:,:,1]', colormap=:vik100)
+        hm2 = heatmap!(ax1, T, P, MΔρ[:,:,2]'.-MΔρ[:,:,1]', colormap=:vik100)
+        hm3 = heatmap!(ax2, T, P, SΔρ[:,:,79]', colormap=:vik100)
+        hm4 = heatmap!(ax3, T, P, MΔρ[:,:,79]'.-MΔρ[:,:,78]', colormap=:vik100)
+        Colorbar(fig[1,2], hm, label="ρ decrease [%]")
+        Colorbar(fig[2,2], hm2, label="ρ decrease [%]")
+        Colorbar(fig[1,4], hm3, label="ρ decrease [%]")
+        Colorbar(fig[2,4], hm4, label="ρ decrease [%]")
+        display(fig)
 end
