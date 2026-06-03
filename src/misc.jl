@@ -596,15 +596,11 @@ function Jing_Karato_silicate_melt_density(P, T, Xin, Xoxin; reg=1, niter=50, α
     # Force Xox list
     Xox = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "H2O"]
     X   = zeros(length(Xox))
-    MM  = [getfield(mm, Symbol(ox)) for ox in Xox]
-    for i in eachindex(Xox)
-        idx = findfirst(Xoxin.==Xox[i])
-        X[i] = isnothing(idx) ? 0.0 : Xin[idx]
-    end
+    MM  = get_Xoxmm(Xox)
+    X   .= filter_ox_list(Xin, Xoxin, Xox)
 
     # Parameters
     mma = X[1]*mm.SiO2 + X[2]*mm.Al2O3 + X[3]*mm.FeO + X[4]*mm.MgO + X[5]*mm.CaO + X[6]*mm.H2O # g/mol (Molar mass of the mixture)
-    X   = X/sum(X)
     Tᵣ  = 1673.          # K (Reference temperature)
     V₀ᵢ = SA[26.86, 37.11, 13.65, 11.69, 16.57, 22.90] # cm³/mol (Reference liquid component volume)
     V₀  = sum(V₀ᵢ.*X)    # cm³/mol (Reference liquid volume)
@@ -775,15 +771,18 @@ end
 # =============================
 # ===== Table constructor =====
 # =============================
-# Xin   = 1e-2SA[49.40, 1.43, 9.03, 8.50, 10.86, 0.0, 6.0]
+# Xin   = 1e-2SA[49.40, 1.43, 9.03, 8.50, 10.86, 0.0, 0.0]
 # Xox = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "O", "H2O"]
 function PT_H2O_ρ(Pi,Pf,Ti,Tf,Xin,Xox; nH=50, nP=50, nT=50, default=false)
 
     # Default --> computes with predefined compositions (MORB + HARZ)
         if default
+            XoxRaw=["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "H2O"]
+            XH=[43.43, 45.93, 8.34, 0.9, 1.0, 0.01, 0.3, 10.0] # From stxirtude & Bertelloni 2024
+            XB=[50.42, 9.77, 7.1, 12.54, 16.8, 2.23, 0.07, 10.0] # From stxirtude & Bertelloni 2024
             Xox = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "O", "H2O"]
-            Xin  = 1e-2.*[50.42, 16.8, 7.1, 9.77, 12.54, 0.0, 0.0] # MORB
-            XinH = 1e-2.*[43.43, 1.0, 8.34, 45.93, 0.9, 0.0, 0.0] # Harz
+            Xin  = 1e-2.*filter_ox_list(XB, XoxRaw, Xox)
+            XinH = 1e-2.*filter_ox_list(XH, XoxRaw, Xox) # Harz
         else
             # Start Anhydrous
             @assert Xox[end]=="H2O" "Last oxide entry must be H2O"
@@ -799,7 +798,7 @@ function PT_H2O_ρ(Pi,Pf,Ti,Tf,Xin,Xox; nH=50, nP=50, nT=50, default=false)
         MΔρ = default ? zeros(nP, nT, nH, 2) : zeros(nP, nT, nH);
         anhM = default ? zeros(nP, nT, 2) : zeros(nP, nT)
     # Ordered MM vector
-        MM = [getfield(mm, Symbol(ox)) for ox in Xox]
+        MM = get_Xoxmm(Xox)
     # wt% H₂O vector
         Hwt = zeros(nH)
     # VVρ pre-computation
@@ -822,7 +821,9 @@ function PT_H2O_ρ(Pi,Pf,Ti,Tf,Xin,Xox; nH=50, nP=50, nT=50, default=false)
         for iH in 1:nH
             @printf "Currently running iH = %d/%d...\n" iH nH
             X   .= Xl;       X[end] = H[iH];     X .= X./sum(X)
-            XH   .= XlH;     XH[end] = H[iH];    XH .= XH./sum(XH)
+            if default
+                XH   .= XlH;     XH[end] = H[iH];    XH .= XH./sum(XH)
+            end
             Xw  = X.*MM;   Xw .= Xw./sum(Xw)
             Hwt[iH] = 1e2Xw[end]
             for ip in 1:nP
@@ -846,7 +847,7 @@ function PT_H2O_ρ(Pi,Pf,Ti,Tf,Xin,Xox; nH=50, nP=50, nT=50, default=false)
                         # Compute solid H₂O density correction (% decrease)
                             SΔρ[ip, it, iH] = Gerya_solid_H2O_density_correction(P[ip], T[it], X, Xox; VVρ=VVρ, MM=MM)
                         # Compute Hydrous Melt density (g/cm³)
-                            MΔρ[ip, it, iH] = Jing_Karato_silicate_melt_density(P[ip], T[it], X, Xox; reg=1, niter=50, α₀=α, verbose=false)
+                            MΔρ[ip, it, iH] = Jing_Karato_silicate_melt_density(P[ip], T[it], X, Xox; reg=2, niter=50, α₀=α, verbose=false)
                         # Compute Anhydrous Melt density
                             (iH==1) && (anhM[ip, it] = Jing_Karato_silicate_melt_density(P[ip], T[it], Xl, Xox; reg=1, niter=50, α₀=α, verbose=false))
                     end
