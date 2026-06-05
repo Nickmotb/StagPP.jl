@@ -184,3 +184,9 @@ function Cbulk(;
 )
     Cbulk(SiO2, MgO, FeO, Fe, CaO, Al2O3, Na2O, Cr2O3, Fe2O3, O, TiO2, K2O, H2O, CO2, C)
 end
+
+struct defaultHB{T1, T2}
+    Xox :: T1
+    XH  :: T2
+    XB  :: T2
+end

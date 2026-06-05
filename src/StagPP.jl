@@ -18,6 +18,9 @@ module StagPP
     # Molar masses (g/mol)
     const mm = Cbulk(60.08, 101.96, 71.85, 55.85, 56.08, 101.96, 61.98, 151.99, 159.69, 16.0, 79.88, 94.2, 18.015, 44.009, 12.011)
     const Cbulk_iterator = String.(fieldnames(Cbulk))
+    const defHB = defaultHB(SA["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "H2O"],
+                            SA[43.43, 45.93, 8.34, 0.9, 1.0, 0.01, 0.3, 0.0],
+                            SA[50.42, 9.77, 7.1, 12.54, 16.8, 2.23, 0.07, 0.0])
     # Numerical Constants
     const ocD2toD3 = 244.45 # Conversion factor of surface budgets from 2D to 3D
     const rootdir = @__DIR__

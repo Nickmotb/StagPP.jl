@@ -208,7 +208,7 @@
         end
 
         # Compute solid and silicate melt H₂O density corrections
-        SΔρ, MΔρ, ρP, ρT, ρH = PT_H2O_ρ(Prange[1],50.,Trange[1],3000.,[0.0],["H2O"], nP=5, nT=5, nH=5, default=true)
+        SΔρ, MΔρ, ρP, ρT, ρH = PT_H2O_ρ(Prange[1],50.,Trange[1],3000.,[0.0],["H2O"], nP=50, nT=50, nH=50, default=true)
 
         # Return structure
         sfmap = sfstruct( um, tz, lm, fum, ftz, flm, MΔρ, SΔρ, Pum, Tum, Ptz, Ttz, Plm, Tlm, (nR>1) ? collect(Rdom) : Rv, ρP, ρT, ρH )

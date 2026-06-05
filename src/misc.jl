@@ -2,48 +2,103 @@
 # ================ Excess oxygen partitioning ================
 # ============================================================
 
-    # Model:
-    # Assess partitioning of TOₑₓ into solid and molten tracer + oxidation reduction of parcel carbon through equilibrium XCO₂
-    # Starts as a root-find solve in 3 dimensions. If XCO₂ touches a boundary, the problems loses an independent variable, and a 2D root-finding solve insues.
-    #
-    # Inputs:
-    # - Pressure (P)
-    # - Temperature (T)
-    # - Total oxygen budget either as wt% of solid (TOₑₓ) or solid and melt Fe³⁺/Feᵀ ratios (Rs, Rf)
-    # - Final melt fraction (ϕ)
-    # - Available reduced carbon in the parcel as wt% of solid tracer (TC)
-    #
-    # =================================
-    # ========= 3D root-find ==========
-    # =================================
-    #
-    # Independent variables:
-    # - Equilibrium mass fraction of TOₑₓ in the solid (sOₑₓ)
-    # - Equilibrium mass fraction of TOₑₓ in the melt  (mOₑₓ)
-    # - Equilibrium molar XCO₂ in the melt (XCO₂)
-    # - Excess fₑₓ
-    #
-    # Equations:
-    # (1) Equilibrium constraint    :  solid fO₂(P,T,sOₑₓ) - melt fO₂(P,T,mOₑₓ) = 0
-    # (2) Equilibrium constraint    :  melt fO₂(P,T,mOₑₓ) - EDDOG fO₂(P,T,XCO₂) = 0
-    # (3) Mass conservation         :  1 - sOₑₓ - mfOₑₓ - Φ*XCO₂/(1-XCO₂) - fₑₓ = 0
-    # (4)                              fₑₓ = 0
-    #
-    # Jacobian : [∂(1)∂sOₑₓ ∂(1)∂mOₑₓ ∂(1)∂XCO₂         [∂S∂sOₑₓ     -∂M∂mOₑₓ        0
-    #             ∂(2)∂sOₑₓ ∂(2)∂mOₑₓ ∂(2)∂XCO₂    =        0         ∂M∂mOₑₓ       -∂C∂XCO₂
-    #             ∂(3)∂sOₑₓ ∂(3)∂mOₑₓ ∂(3)∂XCO₂]           -1           -1      -∂(Φ*XCO₂/(1-XCO₂))∂XCO₂]
-    #
-    # Variable extentions:
-    # Φ          = 2*mm.O*molMf/TOₑₓ
-    # Φcac       = mmCaCO3*TOₑₓ/(3mmO)
-    # sw, s      = ∑(oxᵢ*mmᵢ), ∑(oxᵢ/mmᵢ)
-    # Mcaco3     = Φcac*fₑₓ
-    # aᵪ         = (1 - fₑₓ/(fₑₓ+eps))
-    #
-    # Tools:
-    # - Hirschmann 2022 melt mapping from XFe₂O₃ (Oₑₓ) ↔ fO₂
-    # - Stixrude and Bertelloni 2024 (MAGEMin) solid mapping from XFe₂O₃ (Oₑₓ) ↔ fO₂
-    # - Stagno and Frost 2010 parameterization of melt EDDOG2 buffer fO₂ ↔ XCO₂
+        # Model:
+        # Assess partitioning of TOₑₓ into solid, molten and fluid tracer + oxidation reduction of parcel carbon through equilibrium XCO₂.
+        #
+        # Inputs:
+        # - Pressure (P)
+        # - Temperature (T)
+        # - Total oxygen budget either as wt% of solid (TOₑₓ) or solid and melt Fe³⁺/Feᵀ ratios (Rs, Rf)
+        # - Equilibrium melt fraction (ϕ)
+        # - Available reduced carbon in the parcel as wt% of solid tracer (TC)
+        #
+    # ================================
+    # ========== Core idea  ==========
+    # ================================
+        #
+        #   To fully couple the evolution fo the redox state in geodynamical simulations with thermodynamics we quantify the partitioning of a
+        #   virtual excess oxygen budget representative of the oxidation potential of a parcel, into solid, molten, and fluid material.
+        #   We couple the mass partitioning through the system's fO₂ which acts as a master variable, according to the thermodynamic equilibrium
+        #   constraint → μO_solid = μO_melt = μO_COH
+        #
+        #   Quantifying solid and melt Oₑₓ contributions is straight forward once the governing fO₂ is known, as it fO₂ can be mapped to XFe₂O₃ in
+        #   both phases through either Gibbs Free Energy minimization or separate oxidation models for melt. The remaining sink of Oₑₓ required to
+        #   properly solve the system at very high fO₂ lies in the COH fluid which has to be treated separately, through an second inner iterative
+        #   solve.
+        #
+    # ==============================================
+    # ========== C-O-H fluid description  ==========
+    # ==============================================
+        #
+        #   A mapping must be found between the oxidation state of the C-O-H fluid and the actual contribution to the Oₑₓ mass sink in order
+        #   to balance the conservation constraint. Because of this, we define C-O-H fluids as a mixture of 6 different components (more can be easily added):
+        #       
+        #       • H₂ - C - H₂O - CH₄ - CO₂ - CO
+        #
+        #   We know the oxidation reactions that govern these compounds
+        #
+        #       • H₂  +  1/2 O₂  → H₂O  ==>  K₁ = fH₂O / (√fO₂ × fH₂)
+        #       • C   +  2 H₂    → CH₄  ==>  K₂ = fH₄  / (aC × fH₂²)        ;   aC being 1 when below the buffer (g/d present)
+        #       • C   +  O₂      → CO₂  ==>  K₃ = fCO₂ / (aC × fO₂)
+        #       • C   +  1/2 O₂  → CO   ==>  K₄ = fCO  / (aC × √fO₂)
+        #
+        #   Knowing therefore the molar proportions of all these components (Xᵢ) yields a direct link to the mass of Oₑₓ retained.
+        #   In order to find Xᵢ, we must define the problem in a closed form. We can do this by using component partial pressures (Pᵢ).
+        #   Partial pressures can be rewritten in terms of component fugacities (fᵢ) and ideality coefficients (γᵢ):
+        #
+        #       • Pₜₒₜ = ∑ Pᵢ = ∑ fᵢ / γᵢ
+        #
+        #   One can then find a way to obtain values for the component fugacities, for example by redefining them in terms of known variables like fO₂ and aC.
+        #   If the equilibrium constants [Kᵢ(P,T)] are known, this leaves only one unknown fH₂ that must be solved for in order to satisfy the pressure constraint.
+        #   Retrieving fugacities and indeality coefficients fully speciates the COH fluid, leading to fOₑₓ being constrained, that can be passed one level above
+        #   to assess the convergence of the global mass balance condition (equation 3.).
+        #
+    # ===========================================
+    # ========= Mathematical framework ==========
+    # ===========================================
+        #
+        # Independent variables:
+        # - Equilibrium mass fraction of TOₑₓ in the solid (sOₑₓ)
+        # - Equilibrium mass fraction of TOₑₓ in the melt  (mOₑₓ)
+        # - Equilibrium mass fraction of TOₑₓ in the fluid (fOₑₓ)
+        # - Equilibrium molar XCO₂ in the silicate melt (XCO₂)
+        #
+        # Mathematical framework:
+        #
+        #   • Enstatite - Magnesite - Olivine - Graphite buffer (EMOG) → Stagno et al. (2010) ↔ fO₂(P,T)  => graphite/diamond present only when below EMOG.
+        #
+        #   • Buffered regime (fO₂ < fO₂_EMOG):
+        #
+        #       (1) sfO₂(P,T,sOₑₓ) - mfO₂(P,T,mOₑₓ) = 0                 <--- Chemical potential constraint
+        #       (2) mfO₂(P,T,mOₑₓ) - fO₂(P,T,XCO₂_solubility_law) = 0   <--- Buffered XCO₂ solubility law 
+        #       (3) 1 - sOₑₓ - mOₑₓ - fOₑₓ = 0                          <--- Global mass balance
+        #       (4) fOₑₓ - n_COH * Oₑₓ_per_mol(P,T,sfO₂) = 0            <--- C-O-H contribution (Constrained through second solver)
+        #
+        #   • Un-buffered regime (fO₂ > fO₂_EMOG):
+        #
+        #       (1) sfO₂(P,T,sOₑₓ) - mfO₂(P,T,mOₑₓ) = 0
+        #       (2) 1 - sOₑₓ - mOₑₓ - fOₑₓ = 0
+        #       (3) fOₑₓ - n_COH * Oₑₓ_per_mol(P,T,sfO₂) = 0
+        #
+        #
+        # Jacobian : [∂(1)∂sOₑₓ ∂(1)∂mOₑₓ ∂(1)∂XCO₂         [∂S∂sOₑₓ     -∂M∂mOₑₓ        0
+        #             ∂(2)∂sOₑₓ ∂(2)∂mOₑₓ ∂(2)∂XCO₂    =        0         ∂M∂mOₑₓ       -∂C∂XCO₂
+        #             ∂(3)∂sOₑₓ ∂(3)∂mOₑₓ ∂(3)∂XCO₂]           -1           -1      -∂(Φ*XCO₂/(1-XCO₂))∂XCO₂]
+        #
+        # Variable extentions:
+        # Φ          = 2*mm.O*molMf/TOₑₓ
+        # Φcac       = mmCaCO3*TOₑₓ/(3mmO)
+        # sw, s      = ∑(oxᵢ*mmᵢ), ∑(oxᵢ/mmᵢ)
+        # Mcaco3     = Φcac*fₑₓ
+        # aᵪ         = (1 - fₑₓ/(fₑₓ+eps))
+        #
+        # Tools:
+        # - Hirschmann 2022 melt mapping from XFe₂O₃ (Oₑₓ) ↔ fO₂
+        # - Stixrude and Bertelloni 2024 (MAGEMin) solid mapping from XFe₂O₃ (Oₑₓ) ↔ fO₂
+        # - Stagno and Frost 2010 parameterization for silicate melt XCO₂ solubility as a function of P-T-fO₂
+    
+    # ===
+
     function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, Rf::K=-1.0, nr=25, niter=1000, 
                             verbose=false, data=nothing, Rspace=false, plotevo=false, damp=0.25, debugging=false, saveplotevery=false, savein="") where {K <: Real}
 
