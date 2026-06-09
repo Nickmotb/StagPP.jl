@@ -42,7 +42,7 @@
                             Prange=(1e-4, 135.0), Trange=(500.0, 4000.0), verbose=true,
                             cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, phase_out=["chl"],
                             test_path=false, sys_in="mol", unoxidized=false, densities=true,
-                            Rv=0.01, nR=1, Rrange=(0.001, 0.2), pyr=false
+                            Rv=0.01, nR=1, Rrange=(0.001, 0.2), pyr=false, exprt=true
                             )
 
         # Checks
@@ -208,14 +208,15 @@
         end
 
         # Compute solid and silicate melt H₂O density corrections
-        SΔρ, MΔρ, ρP, ρT, ρH = PT_H2O_ρ(Prange[1],50.,Trange[1],3000.,[0.0],["H2O"], nP=50, nT=50, nH=50, default=true)
+        verbose && println("Quantifying solid | melt density deviations...")
+        SΔρ, MΔρ, ρP, ρT, ρH = PT_H2O_ρ(Prange[1],50.,Trange[1],3000.,[0.0],["H2O"], nP=50, nT=50, nH=50, default=true, verbose=false)
 
         # Return structure
         sfmap = sfstruct( um, tz, lm, fum, ftz, flm, MΔρ, SΔρ, Pum, Tum, Ptz, Ttz, Plm, Tlm, (nR>1) ? collect(Rdom) : Rv, ρP, ρT, ρH )
 
         # Export
         verbose && println("Exporting...")
-        (s || fO2 || densities) && write_output(sfmap, cflag, s=s, fO2=fO2, densities=densities)
+        (exprt && (s || fO2 || densities)) && write_output(sfmap, cflag, s=s, fO2=fO2, densities=densities)
 
         # Plot
         (plt && verbose) && println("Plotting...")

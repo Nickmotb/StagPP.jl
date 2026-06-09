@@ -738,7 +738,7 @@
     # Xin   = 1e-2SA[49.40, 1.43, 9.03, 8.50, 10.86, 0.0, 6.0]
     # Xox     = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "O", "H2O"]
 
-    function Gerya_solid_H2O_density_correction_interpolator(Xin,Xox; nP=100, nT=100, out=nothing)
+    function Gerya_solid_H2O_density_correction_interpolator(Xin,Xox; nP=100, nT=100, out=nothing, verbose=false)
 
         # I believe what he is doing is:
         # 1. Compute the anhydrous volume of the solid through MAGEMin
@@ -772,7 +772,7 @@
         # Retrieve anhydrous solid Volume
             if isnothing(out)
                 data   = Initialize_MAGEMin("sb24", verbose=false);
-                out    = multi_point_minimization(10vP, vT.-273.15, data, X=Xv, Xoxides=Xox[1:end-1], name_solvus=true) # kbar and K
+                out    = multi_point_minimization(10vP, vT.-273.15, data, X=Xv, Xoxides=Xox[1:end-1], name_solvus=true, progressbar=verbose) # kbar and K
                 Finalize_MAGEMin(data)
             end
             # Extract information
@@ -792,9 +792,9 @@
 
     end
 
-    function Gerya_solid_H2O_density_correction(P::Float64,T::Float64,Xin::Vector{Float64},Xox::Vector{String}; nP=50, nT=30, VVρ=nothing, MM=nothing)
+    function Gerya_solid_H2O_density_correction(P::Float64,T::Float64,Xin::Vector{Float64},Xox::Vector{String}; nP=50, nT=30, VVρ=nothing, MM=nothing, verbose=false)
         # Construct interpolator if not passed in
-            isnothing(VVρ) && (VVρ = Gerya_solid_H2O_density_correction_interpolator(Xin,Xox; nP=nP, nT=nT))
+            isnothing(VVρ) && (VVρ = Gerya_solid_H2O_density_correction_interpolator(Xin,Xox; nP=nP, nT=nT, verbose=verbose))
             Vanh = VVρ[1]; Vh2o = VVρ[2];
         # Recompute molar density
             X       = sum(Xin)>1.0 ? 1e-2Xin : Xin
@@ -827,7 +827,7 @@
 # =============================
     # Xin   = 1e-2SA[49.40, 1.43, 9.03, 8.50, 10.86, 0.0, 0.0]
     # Xox = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "O", "H2O"]
-    function PT_H2O_ρ(Pi,Pf,Ti,Tf,Xin,Xox; nH=50, nP=50, nT=50, default=false)
+    function PT_H2O_ρ(Pi,Pf,Ti,Tf,Xin,Xox; nH=50, nP=50, nT=50, default=false, verbose=true)
 
         # Default --> computes with predefined compositions (MORB + HARZ)
             if default
@@ -856,7 +856,7 @@
         # wt% H₂O vector
             Hwt = zeros(nH)
         # VVρ pre-computation
-            VVρ = Gerya_solid_H2O_density_correction_interpolator(Xin,Xox; nP=nP, nT=nT)
+            VVρ = Gerya_solid_H2O_density_correction_interpolator(Xin,Xox; nP=nP, nT=nT, verbose=verbose)
             α₀ = VVρ[3]
         # Normalize composition
             Xl = copy(Xin)
@@ -864,7 +864,7 @@
             Xl = Xl./sum(Xl)
             X  = copy(Xl)
             if default
-                VVρH = Gerya_solid_H2O_density_correction_interpolator(XinH,Xox; nP=nP, nT=nT)
+                VVρH = Gerya_solid_H2O_density_correction_interpolator(XinH,Xox; nP=nP, nT=nT, verbose=verbose)
                 α₀H = VVρH[3]
                 XlH = copy(Xin)
                 XlH = sum(XlH)>1.0 ? 1e-2XlH : XlH
@@ -873,7 +873,7 @@
             end
         # Initiate costructor
             for iH in 1:nH
-                @printf "Currently running iH = %d/%d...\n" iH nH
+                verbose && (@printf "Currently running iH = %d/%d...\n" iH nH)
                 X   .= Xl;       X[end] = H[iH];     X .= X./sum(X)
                 if default
                     XH   .= XlH;     XH[end] = H[iH];    XH .= XH./sum(XH)

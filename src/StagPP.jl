@@ -51,7 +51,7 @@ module StagPP
             mantle_water, mantle_water_at_t, plot_sf, minmap, time_vs_ratio,
             snapshot, IOplot, H2O_sector_ACF, H2O_PCA,
     # Auxilliaries
-            idx_ph_transitions, t_avg, oxidize_bulk, c2k, k2c, km2GPa, GPa2km,
+            idx_ph_transitions, t_avg, oxidize_bulk, c2k, k2c, km2GPa, GPa2km, cpalette,
     # Densities
             PT_H2O_ρ, Gerya_solid_H2O_density_correction, Gerya_solid_H2O_density_correction_interpolator, Jing_Karato_silicate_melt_density
 end
