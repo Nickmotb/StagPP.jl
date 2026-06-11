@@ -56,12 +56,13 @@
     # ===========================================
     # ========= Mathematical framework ==========
     # ===========================================
-        #
-        # Independent variables:
-        # - Equilibrium mass fraction of TOₑₓ in the solid (sOₑₓ)
-        # - Equilibrium mass fraction of TOₑₓ in the melt  (mOₑₓ)
-        # - Equilibrium mass fraction of TOₑₓ in the fluid (fOₑₓ)
-        # - Equilibrium molar XCO₂ in the silicate melt (XCO₂)
+        #                                                                       
+        # Independent variables:                                    
+        # - Equilibrium mass fraction of TOₑₓ in the solid (sOₑₓ)   
+        # - Equilibrium mass fraction of TOₑₓ in the melt  (mOₑₓ)   
+        # - Equilibrium molar XCO₂ in the silicate melt (XCO₂)              
+        # - Di-hydrogen fugacity (fH₂) → leads to fOₑₓ (Equilibrium mass fraction of TOₑₓ in the fluid)
+        #                                                                       
         #
         # Mathematical framework:
         #
@@ -69,21 +70,23 @@
         #
         #   • Buffered regime (fO₂ < fO₂_EMOG):
         #
-        #       (1) sfO₂(P,T,sOₑₓ) - mfO₂(P,T,mOₑₓ) = 0                 <--- Chemical potential constraint
-        #       (2) mfO₂(P,T,mOₑₓ) - fO₂(P,T,XCO₂_solubility_law) = 0   <--- Buffered XCO₂ solubility law 
-        #       (3) 1 - sOₑₓ - mOₑₓ - fOₑₓ = 0                          <--- Global mass balance
-        #       (4) fOₑₓ - n_COH * Oₑₓ_per_mol(P,T,sfO₂) = 0            <--- C-O-H contribution (Constrained through second solver)
+        #       (1) sfO₂(P,T,sOₑₓ) - mfO₂(P,T,mOₑₓ) = 0                                                    <--- Chemical potential constraint
+        #       (2) mfO₂(P,T,mOₑₓ) - fO₂(P,T,XCO₂_solubility_law) = 0                                      <--- Buffered XCO₂ solubility law 
+        #       (3) 1 - sOₑₓ - mOₑₓ - fOₑₓ(fH₂,sfO₂) = 0                                                   <--- Global mass balance
+        #       (4) Pₜₒₜ = K₁(√sfO₂ × fH₂)/γ₁ + K₂(aC × fH₂²)/γ₂ + K₃(aC × sfO₂)/γ₃ + K₄(aC × √sfO₂)/γ₄    <--- C-O-H contribution
+        #
+        #   • Jacobian : [∂(1)∂sOₑₓ ∂(1)∂mOₑₓ ∂(1)∂XCO₂ ∂(1)∂fH₂        [       ∂(1)∂sOₑₓ           ∂(1)∂mOₑₓ        0           0
+        #                 ∂(2)∂sOₑₓ ∂(2)∂mOₑₓ ∂(2)∂XCO₂ ∂(2)∂fH₂                    0               ∂(2)∂mOₑₓ    ∂(2)∂XCO₂       0
+        #                 ∂(3)∂sOₑₓ ∂(3)∂mOₑₓ ∂(3)∂XCO₂ ∂(3)∂fH₂    =    ∂(3)/∂sfO₂ * ∂(1)∂sOₑₓ        -1            0        ∂(3)∂fH₂
+        #                 ∂(4)∂sOₑₓ ∂(4)∂mOₑₓ ∂(4)∂XCO₂ ∂(4)∂fH₂]        ∂(4)/∂sfO₂ * ∂(1)∂sOₑₓ         0            0        ∂(4)∂fH₂
+        #
         #
         #   • Un-buffered regime (fO₂ > fO₂_EMOG):
         #
         #       (1) sfO₂(P,T,sOₑₓ) - mfO₂(P,T,mOₑₓ) = 0
         #       (2) 1 - sOₑₓ - mOₑₓ - fOₑₓ = 0
-        #       (3) fOₑₓ - n_COH * Oₑₓ_per_mol(P,T,sfO₂) = 0
+        #       (3) Pₜₒₜ = K₁(√fO₂ × fH₂) + K₂(aC × fH₂²) + K₃(aC × fO₂) + K₄(aC × √fO₂)
         #
-        #
-        # Jacobian : [∂(1)∂sOₑₓ ∂(1)∂mOₑₓ ∂(1)∂XCO₂         [∂S∂sOₑₓ     -∂M∂mOₑₓ        0
-        #             ∂(2)∂sOₑₓ ∂(2)∂mOₑₓ ∂(2)∂XCO₂    =        0         ∂M∂mOₑₓ       -∂C∂XCO₂
-        #             ∂(3)∂sOₑₓ ∂(3)∂mOₑₓ ∂(3)∂XCO₂]           -1           -1      -∂(Φ*XCO₂/(1-XCO₂))∂XCO₂]
         #
         # Variable extentions:
         # Φ          = 2*mm.O*molMf/TOₑₓ
@@ -99,7 +102,7 @@
     
     # ===
 
-    function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K; Rs::K=-1.0, Rf::K=-1.0, nr=25, niter=1000, 
+    function partition_Oₑₓ(P::K, T::K, p::K, ϕ::K, TOex::K, TC::K, H::K; Rs::K=-1.0, Rf::K=-1.0, nr=25, niter=1000, 
                             verbose=false, data=nothing, Rspace=false, plotevo=false, damp=0.25, debugging=false, saveplotevery=false, savein="") where {K <: Real}
 
         # Hirschmann
@@ -115,9 +118,9 @@
         molXB   = XB./mmXox; molXB = molXB ./ sum(molXB)
         molX    = X./mmXox;  molX  = molX ./sum(molX)
 
-        # Solid / Molten tracer mass [kg]
+        # Cell mass [kg] → solid | molten tracer + COH mass
         Mt = 1e3 # 1 kg
-        Mf=ϕ*Mt; Ms=Mt*(1-ϕ); Mc=TC*Mt
+        Mf=ϕ*Mt; Ms=Mt*(1-ϕ); Mc=TC*Mt; Mh=H*Mt
         molMf = sum(Mf.*molXB)   # Mf in mols (unoxidized)
 
         # Carbon constraints
@@ -151,7 +154,7 @@
             verb_flag = 1; TOₑₓ = TOex*Mt # If TOex passed, a fraction of the total mass becomes the Oₑₓ budget
         end
         if TOₑₓ==0.0 && verbose
-            println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | Rs=$(Rs) | Rf=$(Rf) | Source mix = $p) ----")
+            println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | Rs=$(Rs) | Rf=$(Rf) | H₂O=($H) | Source mix = $p) ----")
             println("Total Oₑₓ budget = 0.0 kg")
             println("TOₑₓ partitioning → [0.0% solid, 0.0% melt]")
             return
@@ -195,16 +198,16 @@
         # -- Compute independent boundaries
         maxmOₑₓ_uncapped  = (0.5molXB[3]*mm.O)/(sum(XB) + 0.5molXB[3]*mm.O)*(Mf/TOₑₓ)
         maxmOₑₓ, maxXCO₂  = min(maxmOₑₓ_uncapped, 1.0), max(min(1.0, maxXCO₂_raw), 0.0)
-        maxfₑₓ            = 1.0 
-        # -- Initialise (static)solution vector
-        y = sol + [x_to_y(5e-4maxsOₑₓ, lowclip, maxsOₑₓ), x_to_y(0.5maxmOₑₓ, lowclip, maxmOₑₓ), x_to_y(0.01maxXCO₂, lowclip, maxXCO₂), x_to_y(lowclip, lowclip, maxfₑₓ)]
+        minfH₂, maxfH₂ = 1e-9, 1e9
+        # -- Initialise (static)solution vector → y = [sOₑₓ, mOₑₓ, XCO₂, fH₂]
+        y = sol + [x_to_y(5e-4maxsOₑₓ, lowclip, maxsOₑₓ), x_to_y(0.5maxmOₑₓ, lowclip, maxmOₑₓ), x_to_y(0.01maxXCO₂, lowclip, maxXCO₂), x_to_y(0.0, minfH₂, maxfH₂)]
         # -- Define convergence tolerance (ϵ)
         ϵ = 2e-15          
         # -- Wrap parameters and call solver
-        params = (; verb_flag, P, T, ϕ, Rs, Rf, TOex, TOₑₓ, p, TC, Φ, s, Φₘ,
+        params = (; verb_flag, P, T, ϕ, Rs, Rf, TOex, TOₑₓ, p, TC, H, Φ, s, Φₘ,
                         IDV, SymXox, dummy, idxO, _ln10, _T, molXB, a,
                             Ys1, Ys2, plotevo, verbose, lowclip, Mt, sharpness, debugging)
-        converged, mat, itout = constrained_smOₑₓ_XCO₂_solver(y, maxsOₑₓ, maxmOₑₓ, maxXCO₂, maxfₑₓ, sfO2, ∂Sᵢ, ϵ, damp, niter; params...)
+        converged, mat, itout = constrained_smOₑₓ_XCO₂_solver(y, maxsOₑₓ, maxmOₑₓ, maxXCO₂, minfH₂, maxfH₂, sfO2, ∂Sᵢ, ϵ, damp, niter; params...)
         # -- Plot evolution if requested
         x = mat[itout, :, 3]
         if plotevo
@@ -406,29 +409,35 @@
 
     function Rx(y₁, y₂, y₃, y₄, dummy, params)
         (;sfO2, P, T, IDV, SymXox, idxO, _ln10, _T, s, Φ, Φₘ, molXB, sharpness, Dsat, lowclip, slim, mlim, clim, fₑₓlim) = params
-        sOₑₓ, mOₑₓ, XCO₂, fₑₓ = y_to_x(y₁, lowclip, slim), y_to_x(y₂, lowclip, mlim), y_to_x(y₃, lowclip, clim), y_to_x(y₄, lowclip, fₑₓlim)
+        sOₑₓ, mOₑₓ, XCO₂, fH₂ = y_to_x(y₁, lowclip, slim), y_to_x(y₂, lowclip, mlim), y_to_x(y₃, lowclip, clim), y_to_x(y₄, minfH₂, maxfH₂)
         fₛ = sfO2(sOₑₓ)
         fₗ = Hirsch(T, mOₑₓ, IDV, SymXox, dummy, idxO, _ln10, _T, s, Φₘ, molXB)
-        if Dsat
-            fᵪ = XCO₂_to_fO2(clim, P, T, sharpness, clim)
-            return SA[  fₛ - fᵪ
-                        fₗ - fᵪ
-                        1 - sOₑₓ - mOₑₓ - Φ*clim/(1-clim) - fₑₓ], fₛ, fₗ, fᵪ, sOₑₓ, mOₑₓ, XCO₂, fₑₓ
-        else
-            fᵪ = XCO₂_to_fO2(XCO₂, P, T, sharpness, clim)
-            return SA[  fₛ - fₗ
-                        fₗ - fᵪ
-                        1 - sOₑₓ - mOₑₓ - Φ*XCO₂/(1-XCO₂)], fₛ, fₗ, fᵪ, sOₑₓ, mOₑₓ, XCO₂, fₑₓ
-        end
+        fᵪ = XCO₂_to_fO2(XCO₂, P, T, sharpness, clim)
+        # if Dsat
+        #     fᵪ = XCO₂_to_fO2(clim, P, T, sharpness, clim)
+        #     return SA[  fₛ - fᵪ
+        #                 fₗ - fᵪ
+        #                 1 - sOₑₓ - mOₑₓ - Φ*clim/(1-clim) - fₑₓ], fₛ, fₗ, fᵪ, sOₑₓ, mOₑₓ, XCO₂, fₑₓ
+        # else
+        #     fᵪ = XCO₂_to_fO2(XCO₂, P, T, sharpness, clim)
+        #     return SA[  fₛ - fₗ
+        #                 fₗ - fᵪ
+        #                 1 - sOₑₓ - mOₑₓ - Φ*XCO₂/(1-XCO₂)], fₛ, fₗ, fᵪ, sOₑₓ, mOₑₓ, XCO₂, fₑₓ
+        # end
+        return SA[  fₛ - fₗ                             # Equation (1)
+                    fₗ - fᵪ                             # Equation (2)
+                    1 - sOₑₓ - mOₑₓ - Φ*XCO₂/(1-XCO₂)   # Equation (3)
+                    P - COH_P(y₄, fₛ)],                 # Equation (4) 
+                    fₛ, fₗ, fᵪ, sOₑₓ, mOₑₓ, XCO₂, fH₂O  # Extras
     end
 
-    function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{4,Float64},                     # Initial transformed solution vector
-                                        slim :: K, mlim :: K, clim :: K, fₑₓlim :: K, # Limits for smOₑₓ, mOₑₓ and XCO₂
-                                        sfO2, ∂Sᵢ,                                      # Solid fO₂ and numerical derivative (MAGEMin)
-                                        ϵ    :: K, damp :: K, niter :: Int64;           # Solver tolerance, dampening factor, and maximum iterations
+    function constrained_smOₑₓ_XCO₂_solver(y    :: SVector{4,Float64},                              # Initial transformed solution vector
+                                        slim :: K, mlim :: K, clim :: K, minfH₂ :: K, maxfH₂ :: K,  # Limits for smOₑₓ, mOₑₓ, XCO₂ and fH₂
+                                        sfO2, ∂Sᵢ,                                                  # Solid fO₂ and numerical derivative (MAGEMin)
+                                        ϵ    :: K, damp :: K, niter :: Int64;                       # Solver tolerance, dampening factor, and maximum iterations
                                         # Verbose parameters
                                         verb_flag::Int64,P::K,T::K,ϕ::K,Rs::K,Rf::K,
-                                        TOex::K,TOₑₓ::K,p::K,TC::K,Mt::K,
+                                        TOex::K,TOₑₓ::K,p::K,TC::K,Mt::K,H::K,
                                         # Pre-computed parameters
                                         s::K,Φ::K,Φₘ::K,lowclip::K,IDV::K,_ln10::K,_T::K,Ys1::K,Ys2::K,sharpness::K,a::K,
                                         idxO::Int64, plotevo::Bool,SymXox::SVector{N, Symbol},verbose::Bool,debugging::Bool,
@@ -438,25 +447,26 @@
         mat = zeros(niter, 4, 3) # [Residuals, fO₂, Partitioning]
 
         # y margins
-        y_lows = x_to_y(lowclip, lowclip, slim)
-        y_highs = x_to_y(slim-lowclip, lowclip, slim)
-        y_lowm = x_to_y(lowclip, lowclip, mlim)
-        y_highm = x_to_y(mlim-lowclip, lowclip, mlim)
-        y_lowc = x_to_y(lowclip, lowclip, clim)
-        y_highc = x_to_y(clim-lowclip, lowclip, clim)
-        y_lowfₑₓ = x_to_y(lowclip, lowclip, fₑₓlim)
-        y_highfₑₓ = x_to_y(fₑₓlim-lowclip, lowclip, fₑₓlim)
+        y_lows      = x_to_y(lowclip, lowclip, slim)
+        y_highs     = x_to_y(slim-lowclip, lowclip, slim)
+        y_lowm      = x_to_y(lowclip, lowclip, mlim)
+        y_highm     = x_to_y(mlim-lowclip, lowclip, mlim)
+        y_lowc      = x_to_y(lowclip, lowclip, clim)
+        y_highc     = x_to_y(clim-lowclip, lowclip, clim)
+        y_lowH2     = x_to_y(lowclip, minfH₂, maxfH₂)
+        y_highH2    = x_to_y(maxfH₂-lowclip, minfH₂, maxfH₂)
 
         # Converged flag
-        converged = false
+        converged   = false
 
-        itout    = 0
-        Dsat     = false
-        switch   = false
-        SM3      = @SMatrix zeros(3,3) # Static Matrix 3 × 3
-        SM4      = @SMatrix zeros(4,4) # Static Matrix 4 × 4
-        ac       = 1.0
-        αᵢ       = 1.0
+        itout       = 0
+        Dsat        = false
+        switch      = false
+        # SM3       = @SMatrix zeros(3,3) # Static Matrix 3 × 3
+        SM4         = @SMatrix zeros(4,4) # Static Matrix 4 × 4
+        ac          = 1.0
+        αᵢ          = 1.0
+
         for it in 1:niter
             # Evaluate current stage
             y₁, y₂, y₃, y₄ = y
@@ -470,14 +480,14 @@
             α   = evα(y_to_x(y₂, lowclip, mlim), Φₘ)
             θₘ  = evθₘ(α, s)
             # Compute residual
-            params = (;sfO2, P, T, IDV, SymXox, idxO, _ln10, _T, s, Φ, Φₘ, molXB, sharpness, Dsat, lowclip, slim, mlim, clim, fₑₓlim)
-            Fx, fₛ, fₗ, fᵪ, sOₑₓ, mOₑₓ, XCO₂, fₑₓ = Rx(y₁, y₂, y₃, y₄, dummy, params)
+            params = (;sfO2, P, T, IDV, SymXox, idxO, _ln10, _T, s, Φ, Φₘ, molXB, sharpness, Dsat, lowclip, slim, mlim, clim, minfH₂, maxfH₂)
+            Fx, fₛ, fₗ, fᵪ, sOₑₓ, mOₑₓ, XCO₂, fH₂ = Rx(y₁, y₂, y₃, y₄, dummy, params)
             # Store values
-            mat[it,:,1] .= [Fx[1], Fx[2], Fx[3], 0.0]
+            mat[it,:,1] .= [Fx[1], Fx[2], Fx[3], Fx[4]]
             mat[it,1,2]  = fₛ
             mat[it,2,2]  = fₗ
             mat[it,3,2]  = fᵪ
-            mat[it,:,3] .= [sOₑₓ, mOₑₓ, XCO₂, fₑₓ]
+            mat[it,:,3] .= [sOₑₓ, mOₑₓ, XCO₂, fH₂]
             # Check convergence
             aR = maximum(abs.(Fx))
             if aR<=ϵ
@@ -486,9 +496,9 @@
                 if verbose
                     println("")
                     if verb_flag==-1
-                        println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | Rs=$(Rs) | Rf=$(Rf) | Mix=$p | TCarbon=$TC) ----")
+                        println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | Rs=$(Rs) | Rf=$(Rf) | Mix=$p | TCarbon=$TC | H₂O=($H)) ----")
                     else
-                        println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | TOₑₓ=$TOex | Mix=$p | TC=$TC) ----")
+                        println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | TOₑₓ=$TOex | Mix=$p | TC=$TC | H₂O=($H)) ----")
                     end
                     println("Shared fO₂ = $(sfO2(sOₑₓ)) |  residual = $aR")
                     println("Total Oₑₓ budget = $(round((1e2TOₑₓ/Mt), digits=4))% of total mass")
@@ -498,13 +508,25 @@
                 end
                 return converged, mat, itout
             end
-            # Partial derivatives
-            ∂S  = ∂Sᵢ(sOₑₓ)
-            ∂M  = ∂M∂mOₑₓ(Φₘ, Ys1, Ys2, α, θₘ, _ln10, a, molXB[3])
-            ∂C  = sharpness==0.0 ? ∂C∂XCO₂_noedge(XCO₂, _ln10) : ∂C∂XCO₂(XCO₂, _ln10, sharpness, clim)
-            ∂3  = ∂3∂XCO₂(Φ, XCO₂)
             # Jacobian inverse (Chain rule)
             ∂x∂y₁, ∂x∂y₂, ∂x∂y₃, ∂x∂y₄ = ∂x∂y(y₁, lowclip, slim), ∂x∂y(y₂, lowclip, mlim), ∂x∂y(y₃, lowclip, clim), ∂x∂y(y₄, lowclip, fₑₓlim)
+            # Partial derivatives
+            #   ∂(1)
+                ∂1∂sOₑₓ = ∂Sᵢ(sOₑₓ)*∂x∂y₁
+                ∂1∂mOₑₓ = -∂M∂mOₑₓ(Φₘ, Ys1, Ys2, α, θₘ, _ln10, a, molXB[3])*∂x∂y₁
+                ∂1∂XCO₂ = 0.0; ∂1∂fH₂  = 0.0
+            #   ∂(2)
+                ∂2∂mOₑₓ = ∂1∂mOₑₓ*∂x∂y₂
+                ∂2∂XCO₂ = sharpness==0.0 ? -∂C∂XCO₂_noedge(XCO₂, _ln10)*∂x∂y₂ : -∂C∂XCO₂(XCO₂, _ln10, sharpness, clim)*∂x∂y₂
+                ∂2∂sOₑₓ = 0.0; ∂2∂fH₂  = 0.0
+            #   ∂(3)
+                ∂3∂sOₑₓ = 1.0 # TO DO
+                ∂3∂fH₂  = 1.0 # TO DO
+                ∂3∂mOₑₓ = -1.0; ∂3∂XCO₂ = 0.0
+            #   ∂(4)
+                ∂4∂sOₑₓ = ∂COH_P∂fO₂(fH₂, fₛ)*∂1∂sOₑₓ*∂x∂y₄
+                ∂4∂fH₂  = ∂COH_P∂fH₂(fH₂, fₛ)*∂x∂y₄
+                ∂4∂mOₑₓ = 0.0; ∂4∂XCO₂ = 0.0
             if debugging
                 @printf "Iteration %d: sOₑₓ = %.4f (%.4f), mOₑₓ = %.4f (%.4f), XCO₂ = %.4f (%.4f), fₑₓ = %.4f (%.4f)\n" it sOₑₓ slim mOₑₓ mlim XCO₂ clim fₑₓ fₑₓlim
                 @printf "\t(R₁=%.16f, R₂=%.16f, R₃=%.16f)" Fx[1] Fx[2] Fx[3]
@@ -512,16 +534,11 @@
                 @printf "\t(∂S=%.4f, ∂M=%f, ∂C=%.4f, ∂3=%.4f)" ∂S ∂M ∂C ∂3
                 @printf "  (∂x∂y₁=%.4f, ∂x∂y₂=%f, ∂x∂y₃=%.4f, ∂x∂y₄=%.4f)\n" ∂x∂y₁ ∂x∂y₂ ∂x∂y₃ ∂x∂y₄
             end
-            # println("")
-            if Dsat
-                J⁻¹  = SM3 + inv([   ∂S*∂x∂y₁       0.0         0.0  
-                                    0.0        ∂M*∂x∂y₂      0.0   
-                                    -∂x∂y₁        -∂x∂y₂      -∂x∂y₄ ]) # J = ∂Rᵢ∂yᵢ =  ∂Rᵢ∂xᵢ * ∂xᵢ∂yᵢ
-            else
-                J⁻¹  = SM3 + inv([   ∂S*∂x∂y₁    -∂M*∂x∂y₂      0.0   
-                                    0.0        ∂M*∂x∂y₂   -∂C*∂x∂y₃
-                                    -∂x∂y₁       -∂x∂y₂     -∂3*∂x∂y₃]) # J = ∂Rᵢ∂yᵢ =  ∂Rᵢ∂xᵢ * ∂xᵢ∂yᵢ
-            end
+            # Jacobian
+            J⁻¹  = SM4 + inv([  ∂1∂sOₑₓ ∂1∂mOₑₓ ∂1∂XCO₂ ∂1∂fH₂
+                                ∂2∂sOₑₓ ∂2∂mOₑₓ ∂2∂XCO₂ ∂2∂fH₂
+                                ∂3∂sOₑₓ ∂3∂mOₑₓ ∂3∂XCO₂ ∂3∂fH₂
+                                ∂4∂sOₑₓ ∂4∂mOₑₓ ∂4∂XCO₂ ∂4∂fH₂])
             # Newton step
             dn = J⁻¹*Fx
             
@@ -530,30 +547,31 @@
             (y[1]-dn[1]>y_highs)               && (α = min(α, 0.5*(y[1]-y_highs)/dn[1]))
             (y[2]-dn[2]<y_lowm)                && (α = min(α, 0.5*(y[2]-y_lowm)/dn[2]))
             (y[2]-dn[2]>y_highm)               && (α = min(α, 0.5*(y[2]-y_highm)/dn[2]))
-            if Dsat
-                (y[4]-dn[3]<y_lowfₑₓ)          && (switch=true; Dsat=false; ac=1)
-                (debugging && !Dsat)             && println("\t • De-Saturating. Releasing XCO₂ constraint.")
-                (y[4]-dn[3]>y_highfₑₓ)         && (α = min(α, 0.5*(y[4]-y_highfₑₓ)/dn[3]))
-                # Take step
-                α  = 0.7αᵢ*(ac/150)
-                y = y - α*[dn[1], dn[2], 0.0, dn[3]]
-            else
+            # if Dsat
+            #     (y[4]-dn[3]<y_lowfₑₓ)          && (switch=true; Dsat=false; ac=1)
+            #     (debugging && !Dsat)             && println("\t • De-Saturating. Releasing XCO₂ constraint.")
+            #     (y[4]-dn[3]>y_highfₑₓ)         && (α = min(α, 0.5*(y[4]-y_highfₑₓ)/dn[3]))
+            #     # Take step
+            #     α  = 0.7αᵢ*(ac/150)
+            #     y = y - α*[dn[1], dn[2], 0.0, dn[3]]
+            # else
                 (y[3]-dn[3]<y_lowc)            && (α = min(α, 0.5*(y[3]-y_lowc)/dn[3]))
-                (!Dsat && y[3]-dn[3]>y_highc)  && (switch=true; Dsat=true; ac=1)
-                (debugging && Dsat)              && println("\t • Saturating. Locking XCO₂ to $clim .")
+                (y[3]-dn[3]>y_highc)           && (α = min(α, 0.5*(y[3]-y_lowc)/dn[3]))
+                # (!Dsat && y[3]-dn[3]>y_highc)  && (switch=true; Dsat=true; ac=1)
+                # (debugging && Dsat)            && println("\t • Saturating. Locking XCO₂ to $clim .")
                 # Take step
                 α  = αᵢ*(ac/150)
                 y = y - α*[dn[1], dn[2], dn[3], 0.0]
-            end
+            # end
             debugging && @printf "\t(α = %.3f)\n\n" α
             ac += 1
 
             # Output if not converged
             if verbose && (it==niter)
                 if verb_flag==-1
-                    println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | Rs=$(Rs) | Rf=$(Rf) | Mix=$p | TCarbon=$TC) ----")
+                    println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | Rs=$(Rs) | Rf=$(Rf) | Mix=$p | TCarbon=$TC | H₂O=($H)) ----")
                 else
-                    println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | TOₑₓ=$TOex | Mix=$p | TC=$TC) ----")
+                    println("---- Solution (P=$(P)GPa | T=$(T)K | ϕ=$(ϕ) | TOₑₓ=$TOex | Mix=$p | TC=$TC | H₂O=($H)) ----")
                 end
                 println("Shared fO₂ = $(sfO2(sOₑₓ)) |  residual = $aR")
                 println("Total Oₑₓ budget = $(round((1e2TOₑₓ/Mt), digits=4))% of total mass")
@@ -582,47 +600,62 @@
     @inline ∂C∂XCO₂_noedge(XCO₂, _ln10)                  = _ln10*(1/XCO₂)
     @inline ∂M∂mOₑₓ(Φₘ, Ys1, Ys2, α, θₘ, _ln10, a, XFeO) = -Φₘ/a * ( θₘ^(-2)*(Ys1 + 2Ys2/θₘ) - _ln10*(1/α + 2/(XFeO - 2α)))
     @inline ∂3∂XCO₂(Φ, XCO₂)                             = Φ*(1/(1-XCO₂)^2)
+    function COH_P(fH₂, fO₂)
+        # Equilibrium constants
+            K₁, K₂, K₃, K₄ = 1.0, 1.0, 1.0, 1.0
+        # Ideality coefficients
+            γ₁, γ₂, γ₃, γ₄ = 1.0, 1.0, 1.0, 1.0
+        # Carbon activity
+            aC = 1.0
+        # Pₜₒₜ = ∑ fᵢ/γᵢ
+            return K₁*(√fO₂*fH₂)/γ₁ + K₂*(aC*fH₂^2)/γ₂ + K₃*(aC*fO₂)/γ₃ + K₄*(aC*√fO₂)/γ₄
+        #               |                   |                 |                 |
+        #             fH₂O                 fCH₄              fCO₂              fCO
+    end
+    ∂COH_P∂fH₂(fH₂, fO₂) = ForwardDiff.derivative(fH₂ -> COH_P(fH₂, fO₂), fH₂)
+    ∂COH_P∂fO₂(fH₂, fO₂) = ForwardDiff.derivative(fO₂ -> COH_P(fH₂, fO₂), fO₂)
+
     # Dampening
-    function bt_line_search(Δx, y₁, y₂, y₃, y₄, r, dummy, params; α = 1.0, ρ = 0.5, lstol = 0.9, α_min = 1.0e-8)
+    # function bt_line_search(Δx, y₁, y₂, y₃, y₄, r, dummy, params; α = 1.0, ρ = 0.5, lstol = 0.9, α_min = 1.0e-8)
 
-        x = SA[y₁, y₂, y₃, y₄]
-        perturbed_x = @. x + α * Δx
-        r, = Rx(x.data..., dummy, params)
-        rnorm = mynorm(r, x)
+    #     x = SA[y₁, y₂, y₃, y₄]
+    #     perturbed_x = @. x + α * Δx
+    #     r, = Rx(x.data..., dummy, params)
+    #     rnorm = mynorm(r, x)
 
-        # Iterate unless step length becomes too small
-        while α > α_min
-            # Apply scaled update
-            perturbed_x = @. x + α * Δx
+    #     # Iterate unless step length becomes too small
+    #     while α > α_min
+    #         # Apply scaled update
+    #         perturbed_x = @. x + α * Δx
 
-            # Get updated residual
-            perturbed_r, = Rx(perturbed_x.data..., dummy, params)
-            perturbed_rnorm = mynorm(perturbed_r, x)
+    #         # Get updated residual
+    #         perturbed_r, = Rx(perturbed_x.data..., dummy, params)
+    #         perturbed_rnorm = mynorm(perturbed_r, x)
 
-            # Check whether residual is sufficiently reduced
-            if perturbed_rnorm ≤ lstol * rnorm
-                break
-            end
+    #         # Check whether residual is sufficiently reduced
+    #         if perturbed_rnorm ≤ lstol * rnorm
+    #             break
+    #         end
 
-            # Bisect step length
-            α *= ρ
-        end
+    #         # Bisect step length
+    #         α *= ρ
+    #     end
 
-        return α
-    end
+    #     return α
+    # end
+    # @generated function mynorm(x::SVector{N, T}, y::SVector{N}) where {N, T}
+    #     return quote
+    #         @inline
+    #         v = zero(T)
+    #         Base.@nexprs $N i -> begin
+    #             xi = @inbounds x[i]
+    #             yi = @inbounds y[i]
+    #             v += !iszero(yi) * abs(xi / yi)
+    #         end
+    #         return v
+    #     end
+    # end
 
-    @generated function mynorm(x::SVector{N, T}, y::SVector{N}) where {N, T}
-        return quote
-            @inline
-            v = zero(T)
-            Base.@nexprs $N i -> begin
-                xi = @inbounds x[i]
-                yi = @inbounds y[i]
-                v += !iszero(yi) * abs(xi / yi)
-            end
-            return v
-        end
-    end
 #
 
 # ==============================================================
