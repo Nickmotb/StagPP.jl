@@ -1,4 +1,4 @@
-using StagPP, GLMakie
+using StagPP, LaTeXStrings, GLMakie
 
 function f()
     nlines = 7
@@ -8,7 +8,7 @@ function f()
     a = solve_sH2O_fO2(5, 5, exprt=false, s=false, fO2=false, verbose=false)
 
     # do stuff
-    fig = Figure(size=(1100,550))
+    fig = Figure(size=(1000,800))
     ax = Axis(fig[2,1], 
                 xlabelsize=20, ylabelsize=20,
                 xlabel=L"Pressure\;\mathrm{[GPa]}", ylabel=L"\Delta \rho - decrease\;\mathrm{[\%]}",
@@ -39,10 +39,10 @@ function f()
         scatterlines!(ax4, a.ρP, a.MΔρ[:,it[2],i,1], strokewidth=0.9, color=clr[i], marker=:rect)
 
     end
-    text!(ax, (0.7, 0.8), text="Solid ($T)", font=:bold_italic, space=:relative, fontsize=17)
-    text!(ax2, (0.58, 0.8), text="Hydrous Melt ($T)", font=:bold_italic, space=:relative, fontsize=17)
-    text!(ax3, (0.7, 0.8), text="Solid ($T2)", font=:bold_italic, space=:relative, fontsize=17)
-    text!(ax4, (0.58, 0.8), text="Hydrous Melt ($T2)", font=:bold_italic, space=:relative, fontsize=17)
+    text!(ax, (0.68, 0.8), text="Solid ($T)", font=:bold_italic, space=:relative, fontsize=17)
+    text!(ax2, (0.5, 0.8), text="Hydrous Melt ($T)", font=:bold_italic, space=:relative, fontsize=17)
+    text!(ax3, (0.68, 0.8), text="Solid ($T2)", font=:bold_italic, space=:relative, fontsize=17)
+    text!(ax4, (0.5, 0.8), text="Hydrous Melt ($T2)", font=:bold_italic, space=:relative, fontsize=17)
     Legend(fig[1,:], ax, orientation=:horizontal, L"\textbf{H_2O\;Concentration\;(wt\%)}", labelsize=14, titlesize=20)
 
     idx = argmin(abs.(a.MΔρ[:,it[1],1,1]))
