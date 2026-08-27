@@ -37,6 +37,8 @@ module StagPP
         include("sf_H2O.jl")
     # === Misc
         include("misc.jl")
+    # === Misc (ground-up rewrite, WIP — see misc_corrected.jl header)
+        include("misc_corrected.jl")
 
     # Structure export
     export DataBlock, sᴴ²ᴼ, min_sᴴ²ᴼ
@@ -49,7 +51,7 @@ module StagPP
     # Plot exports
     export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, ta_series_vs_field, 
             mantle_water, mantle_water_at_t, plot_sf, minmap, time_vs_ratio,
-            snapshot, IOplot, H2O_sector_ACF, H2O_PCA,
+            snapshot, IOplot, H2O_sector_ACF, H2O_PCA, regime
     # Auxilliaries
             idx_ph_transitions, t_avg, oxidize_bulk, c2k, k2c, km2GPa, GPa2km, cpalette,
     # Densities

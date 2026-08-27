@@ -17,13 +17,15 @@ LTN = Dict(
     "influxH2O" => L"H_2O\;intake\;[\mathrm{Tg/Myr}]",
     "IngassedH2O" => L"TH_2O^{in}\;[\mathrm{kg}]", "IngassedH2O_norm" => L"Normalized\;total\;ingassed\;H_2O",
     "OutgassedH2O" => L"TH_2O^{out}\;[\mathrm{kg}]", "OutgassedH2O_norm" => L"Normalized\;total\;outgassed\;H_2O",
-    "SaturationOutgasH2O" => L"Saturation\;outgassed\;H_2O\;[\mathrm{kg}]", "SaturationOutgassH2O_norm" => L"Normalized\;saturation\;outgassed\;H_2O",
+    "LostH2O" => L"Permanently\;lost\;H_2O\;[\mathrm{kg}]", "LostH2O_norm" => L"Normalized\;permanently\;lost\;H_2O",
+    "SatH2O" => L"Saturation\;outgassed\;H_2O\;[\mathrm{kg}]", "SatH2O_norm" => L"Normalized\;saturation\;outgassed\;H_2O",
     "EruptedH2O" => L"Erupted\;H_2O\;[\mathrm{kg}]", "EruptedH2O_norm" => L"Normalized\;erupted\;H_2O",
     "SurfOceanMass3D" => L"Surface\;ocean\;mass\;[\mathrm{OM}]", "SurfOceanMass3D_norm" => L"Normalized\;surface\;ocean\;mass",
     "TotH2OMassOceanPlusMantle" => L"Total\;system\;H_2O\;[\mathrm{kg}]", "TotH2OMassOceanPlusMantle_norm" => L"Normalized\;total\;system\;H_2O",
     "Mob" => L"Lithosphere\;mobility\;[\mathrm{v_{surf}/v_{rms}}]", "Mob_norm" => L"Normalized\;lithosphere\;mobility",
     "Vsurf" => L"Surface\;velocity\;[\mathrm{cm/yr}]", "Vsurf_norm" => L"Normalized\;surface\;velocity",
-
+    "SaturationOutgasH2O" => L"Saturation\;outgassed\;H_2O\;[\mathrm{kg}]", "SaturationOutgassH2O_norm" => L"Normalized\;saturation\;outgassed\;H_2O",
+    "cH2Oerupt" => L"Lava\;H_2O\;content\;[\mathrm{wt%}]"
 )
 
 # rprof.dat field --> String
@@ -36,7 +38,7 @@ LRN = Dict(
     "boundH2O" => L"Bound\;H_2O\;[\mathrm{wt%}]",
     "freeH2O" => L"Free\;H_2O\;[\mathrm{wt%}]",
     "Wsol" => L"s^{H_2O}\;[\mathrm{wt%}]",
-    "satH2O" => L"H_2O\;saturation\;[\mathrm{%}]",
+    "H2Osat" => L"H_2O\;saturation\;[\mathrm{kg}]",
     "fO2" => L"fO_2\;[log_{10}FMQ]",
     "rhomean" => L"Mean\;density\;[\mathrm{kg/m^3}]",
     "bsmean" => L"Mean\;basalt\;fraction",
@@ -139,6 +141,26 @@ function aggregate_StagData(Sname::String, filename::String, timevec::Union{Arra
                         T_tracked, H₂O_tracked, Crb_tracked, outdir, sroot)
 end
 
+# Some Fortran compilers drop the E/D exponent marker when a 3-digit exponent would overflow the
+# fixed field width, e.g. "3.994245715002-123" instead of "3.994245715002E-123". Detect and repair
+# this before parsing, falling back to the fast path in the (overwhelmingly common) well-formed case.
+function tryparse_stagyy_float(s::Union{AbstractString,SubString{String}})
+    v = Parsers.tryparse(Float64, s)
+    !isnothing(v) && return v
+    for i in lastindex(s):-1:2
+        c = s[i]
+        if (c == '+' || c == '-') && isdigit(s[i-1]) && !(s[i-1] in ('E', 'e', 'D', 'd'))
+            return Parsers.tryparse(Float64, string(SubString(s, 1, i-1), 'E', SubString(s, i, lastindex(s))))
+        end
+    end
+    return nothing
+end
+function parse_stagyy_float(s::Union{AbstractString,SubString{String}})
+    v = tryparse_stagyy_float(s)
+    isnothing(v) && error("Failed to parse Float64 from: \"$s\"")
+    return v
+end
+
 # Backend for reading StagYY "time.dat"s
 function read_StagYY_timefile(filename::String, rm_Cmass_error::Bool=true)
     # Memory map setup
@@ -188,13 +210,13 @@ function read_StagYY_timefile(filename::String, rm_Cmass_error::Bool=true)
                         dest[i-sr+1, j] = 0.0
                     else
                         fld = @view rowstr[rcol]
-                        dest[i-sr+1, j] = Parsers.parse(Float64, fld)
+                        dest[i-sr+1, j] = parse_stagyy_float(fld)
                     end
                     j+=1
                 end
             end
         end
-    
+
     return data, String.(header)
 end
 
@@ -235,14 +257,14 @@ function read_StagYY_rproffile(filename::String, Stag::StagData)
             block_range = block_to_byte_range(map, block, lf, Stag.nz, line_bytes, separator_bytes)
             # Time entry
             time_range = first(block_range):first(block_range)+separator_bytes
-            t = tryparse(Float64, split(String(map[time_range]))[6])
+            t = tryparse_stagyy_float(split(String(map[time_range]))[6])
             @assert !isnothing(t) "Failed to parse time entry in rprof.dat"
             time[block] = t
             # Row iterator
             @inbounds for row in 1:Stag.nz
                 row_range = row_to_byte_range(row, first(block_range), line_bytes, separator_bytes)
                 fld = split(String(@view map[row_range]))
-                dest[row, block-sb+1, :] .= Parsers.parse.(Float64, fld)
+                dest[row, block-sb+1, :] .= parse_stagyy_float.(fld)
             end
         end
     end
@@ -295,7 +317,7 @@ function read_StagYY_platesfile(filename::String)
                 j = 1
                 @inbounds for rcol in colranges
                     fld = @view rowstr[rcol]
-                    dest[i-sr+1, j] = Parsers.parse(Float64, fld)
+                    dest[i-sr+1, j] = parse_stagyy_float(fld)
                     j+=1
                 end
             end
@@ -342,7 +364,7 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
         end
         if Stag.H₂O_tracked
             # Add Saturation
-            rprof_header = vcat(rprof_header, "satH2O")
+            rprof_header = vcat(rprof_header, "H2Osat")
             rprof_data = cat(rprof_data, min.(1e2(rprof_data[:, :, idxR["boundH2O"]]./rprof_data[:, :, idxR["Wsol"]]), 100), dims=3)
             # Add total H2O mass
             rprof_header = vcat(rprof_header, "Water")
@@ -361,8 +383,13 @@ function load_sim(sroot::String, Sname::String; time::Bool=true, rprof::Bool=tru
         if Stag.H₂O_tracked
             # Add outgassed H2O
             time_header = vcat(time_header, "OutgassedH2O")
-            time_data = hcat(time_data, (time_data[:,idxT["OutputtedNotEruptedH2O"]].+time_data[:,idxT["EruptedH2O"]].+
-                                (("SaturationOutgasH2O" in time_header) ? time_data[:,idxT["SaturationOutgasH2O"]] : time_data[:,idxT["SaturationOutgassH2O"]])))
+            ov = zeros(length(time_data[:,1]))
+            ("EruptedH2O" in time_header)               && (ov.+=time_data[:,idxT["EruptedH2O"]])
+            ("LostH2O" in time_header)                  && (ov.+=time_data[:,idxT["LostH2O"]])
+            ("SaturationOutgasH2O" in time_header)      && (ov.+=time_data[:,idxT["SaturationOutgasH2O"]])
+            ("OutputtedNotEruptedH2O" in time_header)   && (ov.+=time_data[:,idxT["OutputtedNotEruptedH2O"]])
+            ("SatH2O" in time_header)                   && (ov.+=time_data[:,idxT["SatH2O"]])
+            time_data = hcat(time_data, ov)
             # Add H2O intake as a function of time
             time_header = vcat(time_header, "influxH2O")
             time_data   = hcat(time_data, vcat(0.0, diff(time_data[:,idxT["IngassedH2O"]])./diff(time_data[:,2])*1e-12)) # Tg/Myr
@@ -589,30 +616,33 @@ end
        ∂m(r, rcmb, ρ) = 4π/3 * diff(cat(1e3rcmb, r.+1e3rcmb, dims=1).^3, dims=1) .* ρ
 
     # Get phase transitions radial coordinates
-        function idx_ph_transitions(Dblock::DataBlock; timeidx::Int=1)
+        function idx_ph_transitions(Dblock::DataBlock; timeidx::Int=1, transitions=(410e3, 660e3))
             idxR = data_encoding(Dblock)[2]
             r = Dblock.rprofdata[:, timeidx, idxR["r"]]
-            midpoint_r = 0.5(r[1:end-1] .+ r[2:end])
-            ρ = Dblock.rprofdata[:, timeidx, idxR["rhomean"]]
-            ∂ρ_∂r = diff(ρ)./diff(r)
-            ∂²ρ_∂r² = diff(∂ρ_∂r)./diff(midpoint_r)
+            η = Dblock.rprofdata[:, timeidx, idxR["etalog"]]
+            # midpoint_r = 0.5(r[1:end-1] .+ r[2:end])
+            # ρ = Dblock.rprofdata[:, timeidx, idxR["rhomean"]]
+            # ∂ρ_∂r = diff(ρ)./diff(r)
+            # ∂²ρ_∂r² = diff(∂ρ_∂r)./diff(midpoint_r)
             # Find radial phase boundaries
-            baseline = maximum(∂²ρ_∂r²[1:findfirst(r.>=250000.0)]) # Corresponds to the decaying ppv -> pv transition from bottom to top
-            shifted_∂²ρ_∂r² = ∂²ρ_∂r² .- baseline
-            ph_bounds, prev, current_ph = zeros(Int, 3), -1.0, 1
-            for i in eachindex(shifted_∂²ρ_∂r²)
-                # Entering peak
-                ((shifted_∂²ρ_∂r²[i] <= 0.0) && (prev < 0.0)) && continue
-                # Forward step if next value is higher
-                if (shifted_∂²ρ_∂r²[i] > prev); (prev = shifted_∂²ρ_∂r²[i]); continue; end
-                # Descend until closes to zero, take first if end of array
-                prev = ∂²ρ_∂r²[i];
-                if (abs(∂²ρ_∂r²[i]) < prev); (prev = abs(∂²ρ_∂r²[i])); continue; end
-                # Record boundary index
-                ph_bounds[current_ph] = i-1
-                current_ph += 1
-                prev = -1.0
-            end
+            # baseline = maximum(∂²ρ_∂r²[1:findfirst(r.>=250000.0)]) # Corresponds to the decaying ppv -> pv transition from bottom to top
+            # shifted_∂²ρ_∂r² = ∂²ρ_∂r² .- baseline
+            # ph_bounds, prev, current_ph = zeros(Int, 4), -1.0, 1
+            # for i in eachindex(shifted_∂²ρ_∂r²)
+            #     # Entering peak
+            #     ((shifted_∂²ρ_∂r²[i] <= 0.0) && (prev < 0.0)) && continue
+            #     # Forward step if next value is higher
+            #     if (shifted_∂²ρ_∂r²[i] > prev); (prev = shifted_∂²ρ_∂r²[i]); continue; end
+            #     # Descend until closes to zero, take first if end of array
+            #     prev = ∂²ρ_∂r²[i];
+            #     if (abs(∂²ρ_∂r²[i]) < prev); (prev = abs(∂²ρ_∂r²[i])); continue; end
+            #     # Record boundary index
+            #     ph_bounds[current_ph] = i-1
+            #     current_ph += 1
+            #     prev = -1.0
+            # end
+            # (ph_bounds[3]==0) && (ph_bounds[3] = length(shifted_∂²ρ_∂r²)) # If 3rd boundary not found, set to last index
+            ph_bounds = (findfirst(r .> r[end]-transitions[2]), findfirst(r .> r[end]-transitions[1]), findlast(η .< 1e24))
             (ph_bounds[3]==0) && (ph_bounds[3] = length(shifted_∂²ρ_∂r²)) # If 3rd boundary not found, set to last index
             return ph_bounds
         end
@@ -732,9 +762,11 @@ end
     @inline k2c(T) = T-273.15
 
     # String format to field
-    function fin2label(field, in_rprof)
+    function fin2label(field, in_rprof, logf)
         field2use = replace(field, "_lm"=>"", "_tz"=>"", "_um"=>"", "_crust"=>"", "∂"=>"")
         ylab = in_rprof ? LRN[field2use] : LTN[field2use]
+        # Log
+        logf && (ylab = L"log_{10}\;%$ylab")
         # Sector
         ylab = contains(field, "_crust") ? L"%$ylab\;Crust" : contains(field, "_um") ? L"%$ylab\;UM" : contains(field, "_tz") ? L"%$ylab\;MTZ" : contains(field, "_lm") ? L"%$ylab\;LM" : ylab
         # Differential
@@ -789,7 +821,7 @@ end
                 model_fract(xHD, fit.param)
             end
         # Root mean squared error of fit
-        rmse = sqrt(sum(abs2, fit.resid) / (length(yvec) - length(fit.param)))
-        return xHD, yHD, rmse
+        # rmse = sqrt(sum(abs2, fit.resid) / (length(yvec) - length(fit.param)))
+        return xHD, yHD#, rmse
     end
     

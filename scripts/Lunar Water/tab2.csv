@@ -1,0 +1,84 @@
+﻿Sample, Age (Ga),Note,H2O content for primary melt (μg/g),H2O content for lunar mantle (μg/g), Reference,Phase,Age_Ref
+CE6,2.8,Min,108,8,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Max,270,22,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Min,123,10,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Max,247,20,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Min,141,11,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Max,209,17,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Min,71,6,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Max,295,24,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Min,79,7,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Max,283,23,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Min,60,4,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Max,308,20,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Min,138,10,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Max,212,14,This study, Pyroxene,"Zhang et al., (2024)"
+CE6,2.8,Min,15,1.00,"He et al., (2025)",Melt inclusion,Zhang et al. (2024)
+CE6,2.8,Max,22,1.47,"He et al., (2025)",Melt inclusion,Zhang et al. (2024)
+CE6,2.8,Min,55,3.67,"He et al., (2025)",Apatite,Zhang et al. (2024)
+CE6,2.8,Max,168,11.21,"He et al., (2025)",Apatite,Zhang et al. (2024)
+Apollo MI,,Min,,1.38,"McCubbin et al. (2023); He et al., (2025)",Melt inclusion,
+Apollo MI,,Max,,74.30,"McCubbin et al. (2023); He et al., (2025)",Melt inclusion,
+CE5,2,Min,261,4.57,"Hu et al. (2021); He et al., (2025)",Melt inclusion,Li et al. (2021)
+CE5,2,Max,305,5.35,"Hu et al. (2021); He et al., (2025)",Melt inclusion,Li et al. (2021)
+CE5,2,Min,230,4.03,"Hu et al. (2021); He et al., (2025)",Apatite,Li et al. (2021)
+CE5,2,Max,836,14.65,"Hu et al. (2021); He et al., (2025)",Apatite,Li et al. (2021)
+Apollo Apa,,Min,,1.20,"McCubbin et al. (2023); He et al., (2025)",Apatite,
+Apollo Apa,,Max,,14.00,"McCubbin et al. (2023); He et al., (2025)",Apatite,
+lunar magma ocean,~4.6,Min,,270,"Lin et al., (2016) ",Experiment,
+lunar magma ocean,~4.6,Max,,1650,"Lin et al., (2016) ",Experiment,
+AP11,3.8,Min,100,3,"Stephant et al., (2020)",Melt Inclusion,"Hiesinger et al., 2011"
+AP11,3.8,Max,200,60,"Stephant et al., (2020)",Melt Inclusion,"Hiesinger et al., 2011"
+AP11,3.8,Min,,84,"Chen et al., (2015)",Melt Inclusion,"Hiesinger et al., 2011"
+AP11,3.8,Max,,134,"Chen et al., (2015)",Melt Inclusion,"Hiesinger et al., 2011"
+AP12,3.2,Min,100,3,"Stephant et al., (2020)",Melt Inclusion,"Hiesinger et al., 2011"
+AP12,3.2,Max,200,60,"Stephant et al., (2020)",Melt Inclusion,"Hiesinger et al., 2011"
+AP12,3.2,Min,,25,"Singer et al., (2017)",Melt Inclusion,"Hiesinger et al., 2011"
+AP12,3.2,Max,,160,"Singer et al., (2017)",Melt Inclusion,"Hiesinger et al., 2011"
+AP12,3.2,Min,,84,"Chen et al., (2015)",Melt Inclusion,"Hiesinger et al., 2011"
+AP12,3.2,Max,,134,"Chen et al., (2015)",Melt Inclusion,"Hiesinger et al., 2011"
+AP15,3.35,Min,100,3,"Stephant et al., (2020)",Melt Inclusion,"Hiesinger et al., 2011"
+AP15,3.35,Max,200,60,"Stephant et al., (2020)",Melt Inclusion,"Hiesinger et al., 2011"
+AP15,3.35,Min,,84,"Chen et al., (2015)",Melt Inclusion,"Hiesinger et al., 2011"
+AP15,3.35,Max,,134,"Chen et al., (2015)",Melt Inclusion,"Hiesinger et al., 2011"
+AP15,3.35,Min,,133,"Hauri et al., (2015)",pyroclastic glasses,"Hiesinger et al., 2011"
+AP15,3.35,Max,,292,"Hauri et al., (2015)",pyroclastic glasses,"Hiesinger et al., 2011"
+Ap17,3.75,Min,,84,"Ni et al., (2019)",Melt Inclusion,"Hiesinger et al., 2011"
+Ap17,3.75,Max,,,"Ni et al., (2019)",Melt Inclusion,"Hiesinger et al., 2011"
+Ap17,3.75,Min,,133,"Hauri et al., (2015)",Pyroclastic glasses,"Hiesinger et al., 2011"
+Ap17,3.75,Max,,292,"Hauri et al., (2015)",Pyroclastic glasses,"Hiesinger et al., 2011"
+Ap17,3.75,Min,100,4," Füri et al., (2014)",Melt Inclusion,"Hiesinger et al., 2011"
+Ap17,3.75,Max,300,92," Füri et al., (2014)",Melt Inclusion,"Hiesinger et al., 2011"
+74220,3.48,Min,97,7.72,"Hauri et al. (2015); Chen et al. (2015), Ni et al. (2019); He et al., (2025)",,Tera and Wasserburg (1976)
+74220,3.48,Max,1410,132.94,"Hauri et al. (2015); Chen et al. (2015), Ni et al. (2019); He et al., (2025)",Melt inclusion,Tera and Wasserburg (1976)
+Pyroclastic glass,3.48,Min,,133.06,"Hauri et al. (2015); He et al., (2025)",Melt inclusion,
+Pyroclastic glass,3.48,Max,,292.03,"Hauri et al. (2015); He et al., (2025)",Glass,
+10020,3.7,Min,131,14.00,"Chen et al. (2015), Ni et al. (2019); He et al., (2025)",Glass,Hurley and Pinson (1970)
+10020,3.7,Max,434,16.21,"Chen et al. (2015), Ni et al. (2019); He et al., (2025)",Melt inclusion,Hurley and Pinson (1970)
+12008,3.18,Min,22,2.71,"Chen et al. (2015); He et al., (2025)",Melt inclusion,Stettler et al. (1973)
+12008,3.18,Max,58,5.17,"Chen et al. (2015); He et al., (2025)",Melt inclusion,Stettler et al. (1973)
+12040,3.15,Min,6,0.66,"Chen et al. (2015); Ni et al. (2019); He et al., (2025)",Melt inclusion,Nyquist et al. (1977)
+12040,3.15,Max,33,2.40,"Chen et al. (2015); Ni et al. (2019); He et al., (2025)",Melt inclusion,Nyquist et al. (1977)
+15016,3.29,Min,12,1.31,"Ni et al. (2019); He et al., (2025)",Melt inclusion,Evensen et al. (1973)
+15016,3.29,Max,30,2.99,"Ni et al. (2019); He et al., (2025)",Melt inclusion,Evensen et al. (1973)
+15647,,Min,7,0.29,"Chen et al. (2015); Ni et al. (2019); He et al., (2025)",Melt inclusion,
+15647,,Max,40,3.97,"Chen et al. (2015); Ni et al. (2019); He et al., (2025)",Melt inclusion,
+74235,3.72,Min,21,1.66,"Chen et al. (2015); Ni et al. (2019); He et al., (2025)",Melt inclusion,Paces et al. (1991)
+74235,3.72,Max,91,6.08,"Chen et al. (2015); Ni et al. (2019); He et al., (2025)",Melt inclusion,Paces et al. (1991)
+10020,3.7,min,6,0.40,"Stephant et al., (2020); He et al., (2025)",Melt inclusion,Hurley and Pinson (1970)
+10020,3.7,max,141,9.43,"Stephant et al., (2020); He et al., (2025)",Melt inclusion,Hurley and Pinson (1970)
+10058,3.63,min,6,0.27,"Stephant et al., (2020); He et al., (2025)",Melt inclusion,Papanastassion et al. (1970)
+10058,3.63,max,212,9.52,"Stephant et al., (2020); He et al., (2025)",Melt inclusion,Papanastassion et al. (1970)
+12002,3.36,min,9,0.87,"Stephant et al., (2020); He et al., (2025)",Melt inclusion,Papanastassion and Wasserburg (1970)
+12002,3.36,max,113,10.95,"Stephant et al., (2020); He et al., (2025)",Melt inclusion,Papanastassion and Wasserburg (1970)
+12004,3.29,min,8,4.15,"Stephant et al., (2020); He et al., (2025)",Melt inclusion,Papanastassion and Wasserburg (1971)
+12004,3.29,max,121,62.73,"Stephant et al., (2020); He et al., (2025)",Melt inclusion,Papanastassion and Wasserburg (1971)
+12008,3.18,min,8,0.87,"Stephant et al., (2020); He et al., (2025)",Melt inclusion,Stettler et al. (1973)
+12008,3.18,max,121,13.11,"Stephant et al., (2020) He et al., (2025)",Melt inclusion,Stettler et al. (1973)
+12020,3.2,min,44,5.15,"Stephant et al., (2020); He et al., (2025)",Melt inclusion,Alexander et al. (1972)
+12020,3.2,max,65,7.61,"Stephant et al., (2020); He et al., (2025)",Melt inclusion,Alexander et al. (1972)
+12040,3.15,min,22,2.65,"Stephant et al., (2020): He et al., (2025)",Melt inclusion,Nyquist et al. (1977)
+12040,3.15,max,194,23.34,"Stephant et al., (2020): He et al., (2025)",Melt inclusion,Nyquist et al. (1977)
+15016,3.29,min,2,0.23,"Stephant et al., (2020); He et al., (2025)",Melt inclusion,Evensen et al. (1973)
+15016,3.29,max,135,15.48,"Stephant et al., (2020); He et al., (2025)",Melt inclusion,Evensen et al. (1973)
+,,,,,,Melt inclusion,

@@ -53,9 +53,9 @@ end
 
 struct sfstruct
     # sᴴ²ᴼ maps
-    sum      :: Union{Array{Float64,2}, Array{Float64,3}, Nothing}    # Upper mantle sᴴ²ᴼ grid (nP × nT × redox × endmember)
-    stz      :: Union{Array{Float64,2}, Array{Float64,3}, Nothing}    # Transition zone sᴴ²ᴼ grid (nP × nT × redox × endmember)
-    slm      :: Union{Array{Float64,2}, Array{Float64,3}, Nothing}    # Lower mantle sᴴ²ᴼ grid (nP × nT × redox × endmember)
+    sum      :: Union{Array{Float64,2}, Array{Float64,3}, Nothing}    # Upper mantle sᴴ²ᴼ grid (nP × nT × endmember)
+    stz      :: Union{Array{Float64,2}, Array{Float64,3}, Nothing}    # Transition zone sᴴ²ᴼ grid (nP × nT × endmember)
+    slm      :: Union{Array{Float64,2}, Array{Float64,3}, Nothing}    # Lower mantle sᴴ²ᴼ grid (nP × nT × endmember)
     # fO₂ maps
     fum      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Upper mantle fO₂ grid (nP × nT × redox × endmember)
     ftz      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Transition zone fO₂ (nP × nT × redox × endmember)
@@ -72,9 +72,9 @@ struct sfstruct
     Plm      :: Array{Float64,1}    # Lower mantle pressure vector (kbar)
     Tlm      :: Array{Float64,1}    # Lower mantle temperature vector (K)
     FeR      :: Union{Float64, Array{Float64,1}} # Contains ∑Fe³⁺/∑Feᵀ ratio
-    ρP       :: Vector{Float64} # P vector of density correction
-    ρT       :: Vector{Float64} # T vector of density correction
-    ρH       :: Vector{Float64} # H₂O wt% vector of density correction
+    ρP       :: Union{Vector{Float64}, Nothing} # P vector of density correction
+    ρT       :: Union{Vector{Float64}, Nothing} # T vector of density correction
+    ρH       :: Union{Vector{Float64}, Nothing} # H₂O wt% vector of density correction
 end
 
 struct min_sᴴ²ᴼ{T}

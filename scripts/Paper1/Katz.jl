@@ -1,4 +1,4 @@
-using CairoMakie, ColorSchemes, LsqFit, Interpolations
+using CairoMakie, ColorSchemes, Interpolations
 
 function cpalette(scheme_sym::Symbol, n::Integer)
     cs = getfield(ColorSchemes, scheme_sym)         # e.g. :vik100 → ColorSchemes.vik100
@@ -31,7 +31,7 @@ for i in eachindex(p)
     mat[i, :] = Katz.(p[i], c)
 end
 
-# Litasov ΔT brackets (Pyrolite + 2 H₂O wt%) + 22GPa approx ΔT 2300 to 2150 for 50% to 38%, approx 120C ?
+# Litasov (2002) ΔT brackets (Pyrolite + 2 H₂O wt%) + 22GPa approx ΔT 2300 to 2150 for 50% to 38%, approx 120C ?
     lit = [ 13.5 16.25 19.5 24.5;   # Pressure GPa
             2050  2080 1950 2220;   # Last dry no-melt
             2100  2120 2160 2350;   # First dry melt
@@ -45,7 +45,7 @@ end
     litΔT = cat(litΔT, [22, 100, 150, 50], dims=2)
     litΔT = max.(litΔT, 0.0)
 
-# Iwamori peridotite 0.2 H₂O wt% ΔT bracket
+# Iwamori (2004) peridotite 0.2 H₂O wt% ΔT bracket
     an_iwa_p = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 
                 9.0, 9.5, 10.0, 10.5, 11.0, 11.5, 12.0, 12.5, 13.0, 13.5, 14.0, 14.5, 15.0, 15.5, 16.0, 
                     16.5, 17.0, 17.5, 18.0, 18.5, 19.0, 19.5, 20.0, 20.5, 21.0, 21.5, 22.0, 22.5, 23.0, 23.5, 24.0, 24.5, 25.0]
@@ -71,9 +71,9 @@ end
     xlims!(ax, xlims[1], xlims[2])
     ylims!(ax, ylims[1], ylims[2])
     lines!(ax, [8.0, 8.0], [-25, 900.0], color=:gray55, linestyle=:dash)
-    lines!(ax, [14, 14], [-25, 750.0], color=:olive, linestyle=:dash)
+    # lines!(ax, [14, 14], [-25, 750.0], color=:olive, linestyle=:dash)
     text!(ax, 8.3, 840, text="Katz (2003) boundary", color=:gray55, font=:italic)
-    text!(ax, 14.3, 680, text="Spinel onset", color=:olive, font=:italic)
+    # text!(ax, 14.3, 680, text="Spinel onset", color=:olive, font=:italic)
     # H2O labels
     text!(ax, 2.0, -45, text=L"1\times 10^{-3}\;wt\%\;H_2O", color=clr[5])
     text!(ax, 2.5, 50, text=L"1\times 10^{-2}\;wt\%\;H_2O", color=clr[4])
@@ -86,7 +86,7 @@ end
         lines!(ax, p, mat[:, i], color = clr[length(c)-i+1], label = "$(round(c[i], digits=3)) wt%", linewidth=3.0)
     end
     # Legend(fig[1,2], ax, "H₂O content")
-    ax = Axis(fig[1, 1], titlesize=25, xlabel = "Pressure [MPa]", ylabel = "ΔT [K]", xgridvisible=false, ygridvisible=false,
+    ax = Axis(fig[1, 1], titlesize=25, xlabel = "Pressure [GPa]", ylabel = "ΔT [K]", xgridvisible=false, ygridvisible=false,
                 xlabelsize=25, ylabelsize=25, xticklabelsize=20, yticklabelsize=20)
     xlims!(ax, xlims[1], xlims[2])
     ylims!(ax, ylims[1], ylims[2])
@@ -102,4 +102,5 @@ end
     scatter!(ax, p_iwa, ΔT_iwa, color=clr[2], marker=:rect, strokewidth=0.5, markersize=15, label="Iwamori 2004 (Peridotite + 0.2 wt% H₂O)")
 axislegend(ax, "Study measurements", unique=true, position=:rt, titlefont=:bold_italic)
 display(fig)
+CairoMakie.save("scripts/Paper1/imgs/Katz.png", fig)
 
