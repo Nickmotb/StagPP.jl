@@ -1,0 +1,479 @@
+===============================================================================================
+ TOex_bench.txt — validation record for src/TOex.jl
+ Oₑₓ partitioning between solid Fe₂O₃, melt Fe₂O₃, melt CO₂, solid carbonate and C-O-H fluid
+===============================================================================================
+ Every number produced by running this repo. "expected" = the published value tested against.
+ Section 3+ sweeps use a MOCK solid branch: they test the SOLVER, not the solid. Section 1 does not.
+ The mock's stated reason (MAGEMin_C won't precompile) was false — it was Julia 1.9. Not re-run.
+
+===============================================================================================
+ 1. BENCHMARKS AGAINST INDEPENDENT PUBLISHED DATA
+===============================================================================================
+
+-----------------------------------------------------------------------------------------------
+ 1.1  Zhang & Duan (2009) EOS — molar volume of pure H₂O
+-----------------------------------------------------------------------------------------------
+       T [K]      P [bar]     model [cc/mol]   published      diff %
+    1203.15          950            22.203            22.20         +0.02
+    1293.15         1750            19.002            19.00         +0.01
+    1393.15         1750            19.522            19.52         +0.01
+    1491.15          950            24.885            24.88         +0.02
+    1493.15         1750            20.040            20.04         -0.00
+    1593.15         1750            20.556            20.56         -0.02
+    1693.15         1750            21.072            21.07         +0.01
+    1723.15         2200            19.640            19.64          0.00
+    1873.15         2500            19.411            19.41          0.00
+
+    PASS. Coefficients taken from a working implementation (github.com/forsterite/ZD09); hand
+    transcription from the paper's scanned table reproduced volumes only to ~40-80 %.
+
+-----------------------------------------------------------------------------------------------
+ 1.2  K3, H₂ + ½O₂ = H₂O, 1 bar — tests hp98_gibbs Cp-integration and HP98 H₂O/H₂/O₂ data
+-----------------------------------------------------------------------------------------------
+       T [K]        model      expected       diff
+        1000      10.0557       10.0602     -0.005
+     1273.15       7.2706        7.2946     -0.024
+        1500       5.7206        5.7213     -0.001
+
+    PASS, within 0.024 log units.
+
+-----------------------------------------------------------------------------------------------
+ 1.2b K4, C(gph) + 2H₂ = CH₄, 1 bar — sets the CH₄/H₂O crossover. Ref: JANAF (NIST C-067).
+-----------------------------------------------------------------------------------------------
+       T [K]    model log₁₀K    JANAF log₁₀K      diff     model ΔfG    JANAF ΔfG [kJ/mol]
+        1000         -1.0297         -1.0181   -0.0115         19.71         19.492
+        1100         -1.4576         -1.4470   -0.0107         30.70         30.472
+        1200         -1.8176         -1.8075   -0.0102         41.76         41.524
+        1300         -2.1244         -2.1145   -0.0099         52.87         52.626
+        1400         -2.3887         -2.3789   -0.0098         64.02         63.761
+        1500         -2.6186         -2.6088   -0.0097         75.20         74.918
+
+    PASS, within 0.0115 log units; ΔfG° to ~0.25 kJ/mol.
+    CORRECTION: an earlier entry called K4 the least-verified quantity here. The reference values
+    used then were hand-estimated and were themselves the error. K4 is not a concern.
+
+-----------------------------------------------------------------------------------------------
+ 1.3  Graphite ⇄ diamond — tests HP98 G0/S/Cp AND Murnaghan volumes for both polymorphs.
+      Ref: Kennedy & Kennedy (1976), P ≈ 1.94 + 0.0025·T[°C].
+-----------------------------------------------------------------------------------------------
+       T [K]    model [GPa]    K&K [GPa]     diff [GPa]
+        1000           3.62         3.76          -0.14
+     1273.15           4.41         4.44          -0.03
+        1500           5.04         5.01          +0.03
+        1800           5.79         5.76          +0.03
+        2100           6.38         6.51          -0.12
+
+    PASS. Within 0.14 GPa over 1100 K, no systematic bias. Strongest independent carbon check.
+
+-----------------------------------------------------------------------------------------------
+ 1.4  EMOG(D), 2 MgCO₃ + Mg₂Si₂O₆ = 2 Mg₂SiO₄ + 2C + 2O₂ — USED IN THE SOLVE (sets aC_cap).
+      Refs: (a) Stagno & Frost (2010) EMOG/EMOD ≈ FMQ-1 to -3; (b) carbon_buffer_fO2(XCO₂=1,P,T).
+-----------------------------------------------------------------------------------------------
+       T [K]    P [GPa]    EMOG (computed)   ΔFMQ    Stagno fit (b)    (a)-(b) diff
+     1273.15        2.0            -10.242   -0.99          -10.128          -0.114
+     1373.15        3.0             -8.494   -1.36           -8.426          -0.068
+        1500        4.0             -6.718   -1.66           -6.733          +0.015
+     1673.15        5.0             -4.857   -1.88           -5.007          +0.150
+        1800        6.0             -3.635   -2.09           -3.838          +0.203
+
+    PASS both ways. ΔFMQ inside the published -1 to -3 window; two independent routes (mineral
+    thermodynamics vs empirical fit) agree to 0.02-0.20. That agreement is why it is trusted.
+
+-----------------------------------------------------------------------------------------------
+ 1.5  C-O-H speciation vs Matveev et al. (1997), IW-buffered — whole fluid branch on an ABSOLUTE
+      fO2 scale. 1273 K, 2.4 GPa, graphite-saturated.
+-----------------------------------------------------------------------------------------------
+      model reproduces the measured composition at   log₁₀fO2 = -13.975
+      IW (Frost 1991) at these conditions           log₁₀fO2 = -13.853
+                                                    DIFFERENCE = -0.122 log units
+
+      species        model      measured    GFluid (2010)
+      XH₂O          0.1172        0.1172           0.1169
+      XCH₄          0.8463        0.8136           0.8152
+      XH₂           0.0364        0.0538           0.0359
+
+    PASS — strongest result in this file. 0.12 log units from the buffer the experiment was run on.
+    XCH₄ high by 0.033 as expected: GFluid includes C₂H₆ (0.0319), excluded here by design.
+
+-----------------------------------------------------------------------------------------------
+ 1.6  C-O-H vs GFluid at matched XO — Sokol et al. (2004), 1693.15 K, 5.7 GPa.
+-----------------------------------------------------------------------------------------------
+                              model        GFluid
+      XO (matched)           0.2674        0.2672
+      XH₂O                   0.8366        0.8478
+      XCH₄                   0.1548        0.1393
+
+    PASS at matched XO; XCH₄ offset again consistent with the missing C₂H₆ (0.0121 here).
+    UNRESOLVED: GFluid Table 2 lists log₁₀fO2 = -16.57 for this composition (ΔFMQ ≈ -15.5), where
+    no fluid is water-dominated; feeding it here gives XCH₄ = 0.94. Unstated convention or an
+    error — not used to arbitrate the absolute scale; 1.5 was used instead.
+
+-----------------------------------------------------------------------------------------------
+ 1.7  FMQ from hp02ver — a FAILURE, found and fixed
+-----------------------------------------------------------------------------------------------
+       T [K]    P [GPa]    hp02ver-derived    Frost (1991)      diff
+     1073.15      1 bar            -13.343         -14.651     +1.308
+     1273.15      1 bar             -9.373         -10.977     +1.604
+     1473.15      1 bar             -6.485          -8.301     +1.816
+     1273.15        2.4             -7.647          -8.903     +1.256
+        1500        3.0             -4.341          -5.796     +1.455
+
+    FAIL — 1.3-1.8 too oxidised. Originally misread as a fluid error, because 1.5 had only been
+    checked by scanning for the fO2 matching the composition, which tests shape and not position.
+    SUPERSEDED 2026-09-03: Frost was itself wrong and also not the dataset producing the fO2. FMQ
+    and IW now come from sb24 (§1.8, TOex.jl §4c); hp02ver sits a near-CONSTANT +3.4 to +3.8 above
+    it, so "drifting with T" was measured against a drifting curve — a dataset offset.
+    LESSON: searching for the input that reproduces a known output tests only shape; and a
+    reference is only a reference if it comes from the same dataset.
+
+-----------------------------------------------------------------------------------------------
+ 1.8  Self-reduction with depth — Frost & McCammon (2008), Frost et al. (2004), Fux et al. (2024)
+      Real MAGEMin, sb24, bulk Fe³⁺/ΣFe FIXED at 0.03, isochemical descent, T = 1550 + 12P.
+      scripts: frost.jl
+-----------------------------------------------------------------------------------------------
+      FERTILE LHERZOLITE (Al₂O₃ 4.5 wt%)
+      P GPa    T K       fO2      dFMQ      dIW    metal wt%   Fe⁰/ΣFe   assemblage
+        1.0   1562     -6.625    +0.002   +3.919     0.00000   0.00000   ol plg opx sp cpx
+        3.0   1586     -4.414    +0.594   +5.176     0.00000   0.00000   gtmj cpx opx ol
+        5.0   1610     -4.619    -1.183   +4.045     0.00000   0.00000   gtmj cpx ol opx
+        8.0   1646     -4.748    -3.582   +2.578     0.00000   0.00000   ol gtmj cpx opx
+       10.0   1670     -4.951    -5.245   +1.514     0.00000   0.00000   cpx ol gtmj hpcpx
+       12.0   1694     -5.311    -7.023   +0.318     0.00410   0.00064   gtmj ol cpx hpcpx feg
+       14.0   1718     -4.625    -7.716   +0.192     0.04875   0.00767   cpx gtmj wa feg
+       16.0   1742     -3.770    -8.202   +0.256     0.09169   0.01442   gtmj wa feg
+       20.0   1790     -2.404    -9.409   +0.106     0.00000   0.00000   gtmj ri
+       25.0   1850     -0.603   -10.637   +0.121     0.82579   0.12988   gtmj mw pv capv feg
+
+      DEPLETED HARZBURGITE (Al₂O₃ 1.0 wt%) — same bulk Fe³⁺/ΣFe, same adiabat
+        3.0   1586     -3.357    +1.651   +6.233     0.00000   0.00000   gtmj cpx opx ol sp
+        8.0   1646     -2.334    -1.168   +4.992     0.00000   0.00000   cpx ol opx gtmj
+       12.0   1694     -2.904    -4.616   +2.725     0.00000   0.00000   hpcpx cpx ol gtmj
+       16.0   1742     -2.857    -7.289   +1.169     0.00000   0.00000   gtmj wa
+       25.0   1850     -0.677   -10.712   +0.047     0.31167   0.04803   pv mw capv feg
+
+      REPRODUCES
+        • Mechanism: at fixed bulk Fe³⁺/ΣFe, fertile falls ΔFMQ 0.0 → -7.0 (1 → 12 GPa) with
+          nothing added or removed — garnet/majorite takes the ferric iron.
+        • Al controls it, as Frost requires: fertile saturates at 12 GPa, depleted not until
+          bridgmanite at 25 GPa. Garnet's Fe³⁺ capacity is charge-coupled to Al³⁺.
+        • Lower-mantle metal 0.83 / 0.31 wt% at 25 GPa vs ~1 wt% Fe-Ni in Frost et al. (2004).
+
+      DOES NOT, AND WHY IT IS NOT A SOLVER FAILURE
+        • Onset 12 GPa (~350 km) vs the quoted ~250 km. Direction and mechanism right, depth not.
+        • The 20 GPa row loses metal between two metal-bearing rows — assemblage discontinuity,
+          not a trend, not chased down. Do not read it as physics.
+        • CANNOT DRIVE THE SOLVE, BUT IS NOW REPORTED. Disproportionation is oxygen-neutral, so it
+          is the null direction of sOₑₓ; the solver makes metal only when the BUDGET forces it.
+          2026-09-03: solid_fO2_interpolant harvests native-iron wt% from ph_frac_wt, so FeM_solid
+          is MAGEMin's assemblage, not the sign of sOₑₓ. At 8 GPa/1400 K harzburgite: 0.0027 wt%
+          at sOₑₓ = 0 where the old coordinate read zero; 5.95 wt% deep in the reducing half.
+        • THE TWO ROUTES SEPARATE, from the budget not from MAGEMin (which reports only a total):
+          dissociation frees 1 O per Fe⁰ and that O IS -sOₑₓ, so the net coordinate measures
+          dissociated metal alone; the rest was made at constant oxygen. → FeM_diss / FeM_disp.
+        • FERRIC RECOUNTED: with metal present, nFe³⁺ = 2(nO + nFe⁰) — the 2:1 ratio at nO = 0,
+          zero when metal is paid for by released O. Fixes FeR_solid briefly reading less ferric
+          than metal. Checked at 3.5 GPa/1250 K: Fe³⁺/Fe⁰ = 2.21 (2 stoichiometric, 0.21 uptake).
+        • Out of reach: DRIVING the solve with it needs Fe³⁺ and Fe⁰ as independent unknowns.
+
+      BENCHMARK — Fux et al. (2024) EPSL 645, ΔIW and bulk Fe³⁺/ΣFe, 5-16 GPa. scripts: fux_bench.jl
+        Their BSE-like mantle, 250 ppm S, near-adiabatic. Published curves used: bulk Fe³⁺/ΣFe
+        (0.036 at 5 GPa after Canil 1994, ~0.08 at 410 km, ~0.11 at 16 GPa) and ΔIW (IW+2.6 at
+        5 GPa, -0.87/GPa to ~IW at 8, IW-1 at 12-16). Their stated uncertainty ±0.5.
+
+        TEST B — feed sb24 Fux's OWN bulk Fe³⁺/ΣFe, compare the ΔIW returned. "Frost" columns are
+        the retired reference this was first written against; the size of the change is the point.
+        P GPa   T °C   bulk Fe³⁺   ΔIW sb24   ΔIW Fux      err  |  ΔIW Frost      err   metal wt%
+          5.0   1420      0.036      +2.663    +2.600   +0.063  |     +4.178   +1.578      0
+          8.0   1440      0.052      +1.859     0.000   +1.859  |     +3.371   +3.371      0
+         10.0   1460      0.062      +1.105    -0.500   +1.605  |     +2.606   +3.106      0
+         12.0   1490      0.072      +0.069    -1.000   +1.069  |     +1.555   +2.555      0
+         14.0   1540      0.084      -0.482    -1.000   +0.518  |     +0.989   +1.989      0
+         16.0   1590      0.110      -0.192    -1.000   +0.808  |     +1.258   +2.258      0
+        mean |error| against Fux:  sb24 IW 0.99   Frost IW 2.48   (log units)
+
+        TEST A — CEILING on bulk Fe³⁺/ΣFe above which sb24 no longer holds metal
+        P GPa   T °C   metal-out r   Fux bulk r   ratio
+          5.0   1420         0.003        0.036    0.07
+          8.0   1440         0.007        0.052    0.14
+         10.0   1460         0.015        0.062    0.23
+         12.0   1490         0.034        0.072    0.48
+         14.0   1540         0.055        0.084    0.66
+         16.0   1590         0.070        0.110    0.63
+
+        TEST C — metal abundance at bulk R = 0 (the most sb24 can make) vs Fux's alloy
+        P GPa   sb24 ppm   Fux ppm   ratio   saturation ΔIW
+          5.0       85.6       675   0.127        -1.749
+          8.0      225.7      1200   0.188        -1.497
+         12.0     1055.8      2200   0.480        -1.166
+         16.0     2111.6      3800   0.556        -1.117
+
+      VERDICT (revised 2026-09-03): right mechanism, right sign, within ~1 log unit at depth.
+        • A and B agree: Fux's bulk sits above sb24's metal-out ceiling everywhere, so B finding
+          zero metal IS A, not a second failure. C's ratio 0.13 → 0.56 tracks A's 0.07 → 0.63.
+        • sb24 too oxidised by +0.06 to +1.86, mean 0.99. Descent -0.26/GPa vs Fux's -0.33.
+        • Two thirds of the ORIGINAL error was the reference buffer. Frost FMQ wrong in SHAPE
+          (error grows with P), Frost IW in OFFSET only (-1.30 to -1.53, flat). Caught by Frost FMQ
+          vs MAGEMin's dQFM (-2.28 at 5 GPa → -3.90 at 16), and decisively by Frost IW putting
+          metal-BEARING rock at ΔIW +0.01 to +0.33. Mean 2.48 → 0.99. See buffer_check.jl.
+        • Residual -1.4 vs experimental IW: no Landau term in MAGEMin, cancels in ΔIW. Issue 10.
+        • CORRECTION: sb24 does NOT pin ΔIW at ~0 at saturation "by construction" — silicate
+          activities set it too. Measured -0.98 to -1.99, straddling IW-1.
+
+      WHY sb24 FALLS SHORT — read off the assemblage, not inferred.
+        • NOT the missing alloy. a(Fe) < 1 raises the ceiling (ΔIW = 2·log a(FeO) - 2·log a(Fe)):
+          right direction, wrong size. Closing 5 GPa needs a(Fe) = 0.006; Fux's Ni/(Fe+Ni) =
+          0.19-0.35 gives a(Fe) ≈ 0.4-0.6, worth +0.4 to +0.8 — ceiling 0.002 → 0.004 vs 0.036.
+        • MISSING FERRIC END-MEMBERS. At 5 GPa/1420 °C, Fux's bulk:
+              ol   56.8 wt%   fo/fa only     correct, olivine hosts ~no Fe3+
+              gtmj 17.9 wt%   andr = 0.048   the only ferric end-member carrying anything
+              cpx  17.4 wt%   acm = 0        exists, but Na is all in jd (0.136)
+              opx   7.9 wt%   none exists    SLB §4: omitted, no known ferric opx end-member
+          ~100 % of sb24's Fe³⁺ at 5 GPa is ANDRADITE, Ca₃Fe₂Si₃O₁₂. No skiagite, so every Fe³⁺
+          rides on calcium and competes with gr and cpx.
+        • Ca rationing demonstrated: scaling BSE CaO moves the 5 GPa ceiling 0.0027 → 0.0051 →
+          0.0258 (x1, x2, x3), i.e. x8.9, onto Fux's 0.036.
+        • Explains the depth trend: garnet 17.9 → 44.7 wt% and majoritic by 16 GPa.
+        • FALSIFIABLE: skiagite + a ferric opx end-member should close Test A at LOW P specifically
+          and leave 14-16 GPa alone. Both upstream database changes.
+        • Alloy blocked upstream anyway: sb24's components are Ca-Na-Fe-Mg-Al-Si-O-Cr — no Ni, S, C.
+
+===============================================================================================
+ 2. PHYSICAL BEHAVIOUR — the redox sequence
+===============================================================================================
+    T = 1500 K, P = 3 GPa, EMOG(D) at ΔFMQ = -2.75, TC = 0.5 wt%, H₂O present.
+    aC = carbon activity; carbon budget as % of TC; fluid Oₑₓ as fraction of TOₑₓ (neg = RELEASES).
+
+     ΔFMQ   f-EMOG      aC     XH₂O     XCH₄     XCO₂ | gph%  carb%  melt%  fluid% | fluid Oₑₓ
+    -9.29    -8.00       1   0.0015   0.9261   0.0000 | 93.6    0.0    0.0     6.4 |    -0.177
+    -7.29    -6.00       1   0.0151   0.9140   0.0000 | 93.6    0.0    0.0     6.4 |    -0.176
+    -5.29    -4.00       1   0.1337   0.8076   0.0001 | 94.0    0.0    0.0     6.0 |    -0.164
+    -4.29    -3.00       1   0.3512   0.6084   0.0006 | 94.9    0.0    0.0     5.1 |    -0.139
+    -3.29    -2.00       1   0.7606   0.2200   0.0053 | 97.3    0.0    0.2     2.5 |    -0.064
+    -2.29    -1.00       1   0.9184   0.0259   0.0481 | 95.1    1.7    2.1     1.1 |    +0.008
+    -1.79    -0.50       1   0.8271   0.0071   0.1553 | 81.2   11.0    5.2     2.7 |    +0.064
+    -1.29     0.00       1   0.4156   0.0008   0.5641 | 38.1   38.1    5.2    18.6 |    +0.485
+    -0.79    +0.50   0.316   0.4266   0.0001   0.5623 |  9.2   67.8    5.2    17.9 |    +0.471
+    -0.29    +1.00   0.100   0.4325   0.0000   0.5613 |  1.4   76.0    5.2    17.5 |    +0.463
+    +0.71    +2.00   0.010   0.4376   0.0000   0.5605 |  0.0   77.7    5.2    17.1 |    +0.455
+    +2.71    +4.00  1.0e-4   0.4397   0.0000   0.5601 |  0.0   77.9    5.2    17.0 |    +0.453
+
+    All EMERGENT, not imposed:
+      * Reduced fluid is CH₄-dominated (0.93), matching Zhang & Duan's ~80 % CH₄ near IW. Carbon
+        in a reduced fluid is methane, NOT CO₂/CO.
+      * Fluid flips SOURCE → SINK at ΔFMQ ≈ -2.3: making CH₄ from H₂O liberates O₂.
+      * At EMOG(D) exactly, graphite and carbonate are 38.1 % each — univariant coexistence.
+      * aC pinned at 1 while free graphite remains, then falls once carbonate takes over.
+      * Above EMOG the system is nearly static across 3 log units: carbonate is a CARBON-limited
+        sink that fills up, not an unlimited oxygen dump.
+
+ 2.2  Where EMOG(D) puts melt XCO₂, and why a cap exists
+-----------------------------------------------------------------------------------------------
+      The buffer DOES dictate melt XCO₂ from P-T-fO2 (invert_carbon_buffer_fO2); XCO₂ = aC·Bmelt.
+      A ceiling is needed because at EMOG(D) the buffer already asks for essentially pure CO₂.
+
+       T [K]   P [GPa]   EMOG(D)    Bmelt at EMOG   at EMOG-1   at EMOG-2
+        1273       2.0    -10.242           0.769      0.0769     0.00769
+        1500       3.0     -7.090           1.458      0.1458     0.01458
+        1673       5.0     -4.857           1.414      0.1414     0.01414
+        1900       6.0     -3.035           2.064      0.2064     0.02064
+
+      Bmelt > 1 is not a composition; with nC_melt = XCO₂·nOx/(1-XCO₂) it is an unbounded sink.
+      One log unit below EMOG it is back to ~0.1, so the pathology is local to the boundary.
+      Sweep: median XCO₂ = 1.1e-9, p99 = 0.089, max = 0.292; 1.9 % of cases solve at/above EMOG.
+      The cap is dormant in normal use.
+
+===============================================================================================
+ 3. SOLVER BEHAVIOUR — full parameter sweep
+===============================================================================================
+    1296 cases: P {1,3,10,25} GPa x T {1100,1500,1900,2100} K x phi {0.001,0.01,0.1}
+                x TOex {1e-4,1e-3,1e-2} x TC {1e-6,1e-2,1e-1} x H {0,1e-4,1e-2}.  Mock solid branch.
+
+ 3.1  Convergence history
+-----------------------------------------------------------------------------------------------
+      state of the model                                          converged      main failure mode
+      3-unknown LM solve, multi-regime cascade                        50.5 %      carbon_undersat gap
+      + removed double-imposed budget cap; log-linear low-end
+        extrapolation of the solid oxybarometer                       69.0 %      carbon_undersat gap
+      + carbon activity aC < 1 (carbon-undersaturated fluid)          81.3 %      capacity_exceeded
+      + Rmax 0.18 -> 0.4 (wider Fe³⁺ sampling)                        98.5 %      capacity_exceeded
+      + solid carbonate as a sink                                    100.0 %      —
+      + upper-end extrapolation of the solid oxybarometer            100.0 %      —   (also 100 %
+                                                                                  at Rmax = 0.18)
+
+ 3.2  Conservation invariants at the final state
+-----------------------------------------------------------------------------------------------
+      oxygen budget closure failures                     0 / 1296   (worst |Σ-1| = 1.0e-8)
+      carbon budget closure failures                     0 / 1296   (worst |Σ-1| = 4.6e-15)
+      negative partition shares                          0 / 1296
+      carbon over-committed beyond TC                    0 / 1296   (worst = 1.0000 x budget)
+      unexplained fO2-equality violations                0 / 1296
+      cost                                               ~3 ms per case
+
+ 3.3  capacity_exceeded — an artefact, not physics
+-----------------------------------------------------------------------------------------------
+      Was the solid Fe³⁺ ceiling set by STOICHIOMETRY (needs a new phase) or by TABLE REACH (Rmax)?
+        at Rmax = 0.18, before the aC work:   96 cases — 96 table-limited,   0 stoichiometric
+        after the aC work:                   242 cases — 242 table-limited,  0 stoichiometric
+      Not one case had exhausted its Fe²⁺. With the ceiling now stoichiometric and the oxybarometer
+      extrapolated above the table, capacity_exceeded is 0/1296 even at the original Rmax = 0.18.
+      IN PRODUCTION: genuine exhaustion means every Fe atom is Fe³⁺ — an enormous budget. More
+      likely an upstream bookkeeping error (TOex inflated by double-counted oxygen).
+
+ 3.4  Effect of Fe³⁺ sampling range, before the upper-end extrapolation existed
+-----------------------------------------------------------------------------------------------
+      Rmax     converged     capacity_exceeded
+      0.18        81.3 %          242 (18.7 %)
+      0.35        98.1 %           24 ( 1.9 %)
+      0.50        98.8 %           15 ( 1.2 %)
+      0.70        98.9 %           14 ( 1.1 %)
+      0.90        99.1 %           12 ( 0.9 %)
+
+      Returns flatten past ~0.35. Historical only — the extrapolation removed the dependence — but
+      retained as the evidence that the ceiling was a sampling artefact.
+
+===============================================================================================
+ 4. ROBUSTNESS TO A PATHOLOGICAL SOLID BRANCH
+===============================================================================================
+    Motivated by poor convergence below ~3 GPa and low T with REAL MAGEMin. The mock was made
+    pathological four ways to find which reproduces it.
+    48 cases: T {400,600,900,1500} K x P {0.1,0.5,1,3} GPa x TOex {1e-4,1e-3,1e-2}.
+
+      solid fO2(Fe³⁺) behaviour            before fix     after fix
+      monotonic (baseline)                    47/48         47/48
+      NON-MONOTONIC (dip from phase change)   31/48         47/48
+      sparse (most points dropped)            47/48         47/48
+      nearly flat (little fO2 sensitivity)    47/48         47/48
+
+    Only NON-MONOTONICITY breaks it, and badly: uniqueness needs every demand to rise with fO2, so
+    a dip — what an assemblage change looks like — makes the inversion ill-posed and the root vanish.
+    FIX: isotonic regression (pool-adjacent-violators), least-squares monotone, ordered points
+    untouched; a negligible increasing ramp breaks the ties pooling creates. Warns when it engages.
+    2026-09-03: also done at table-GENERATION time in sf_H2O.jl.
+    NOT CONFIRMED against the real failure — real MAGEMin has not been checked at low P/T.
+
+===============================================================================================
+ 4b. DEGENERATE MELT FRACTIONS — ϕ = 0 AND ϕ = 1
+===============================================================================================
+    At either endpoint one Fe³⁺ host has zero mass, so its oxybarometer describes a phase that
+    is not there.
+
+    BEFORE
+      ϕ = 1 (no solid)   HARD CRASH. Ms = 0 collapses the solid table's x-axis to one knot at zero;
+                         maxsOₑₓ = 0 hands _invert_demand the INVERTED bracket [1e-10, -1e-10],
+                         whose bisection gives a NEGATIVE loading, which the low-end extrapolation
+                         turns into +Inf. Caught by nancheck, but only as a crash.
+      ϕ = 0 (no melt)    Right numbers, wrong reason: melt_fO2 with Mf = 0 gives XFeO = 0, the
+                         "more O than Fe" sentinel fires and returns +14 for any loading, which
+                         _invert_demand read as "floor too oxidised". Correct by accident. Regime
+                         said :melt_depleted (wrong: absent), cap distance printed Inf, phantom XCO₂.
+
+    FIX
+      _invert_demand:677        hi <= lo -> return lo; removes the negative-loading path.
+      solid_fO2_interpolant:216 Ms <= 0 -> skip MAGEMin, return a placeholder.
+      classify_regime:725       zero capacity => ABSENT, distinct from floored; new :solid_only /
+                                :melt_only; pinned set so fO2-equality cannot warn spuriously.
+      mass_budget:168           maxXCO₂_raw guarded against 0/0.
+      report                    absent phases print ABSENT / n/a.
+
+    AFTER — 864 cases: P {1,3,6,10} x T {1000,1500,2000} x ϕ {0,0.01,0.25,0.5,0.99,1.0}
+                       x TOex {0.001,0.005,0.02} x TC {0,0.001} x H {0,0.001}
+        unconverged 96 (ALL at TOex = 2 wt%, ϕ >= 0.99)   worst O closure 1.0e-8
+        worst C closure 3.9e-15                            crashes 0
+      The 96 are genuine capacity_exceeded: at ϕ = 1, maxmOₑₓ = 0.400 for TOex = 2 wt%, so with
+      TC = H = 0 there is no other sink and ~60 % is correctly unplaced. Zero failures at other ϕ.
+    STILL MOCK-ONLY for ϕ = 0; the ϕ = 1 path skips MAGEMin so it is genuinely exercised.
+
+===============================================================================================
+ 5. WHAT IS DATA, WHAT IS CHOSEN, WHAT IS EMERGENT
+===============================================================================================
+
+ 5.1  External data used INSIDE the solve
+      solid fO2 vs Fe³⁺        MAGEMin sb24 (Stixrude & Lithgow-Bertelloni 2024), computed live
+      melt Fe³⁺ oxybarometer   Hirschmann (2022) regression
+      melt CO₂ buffer          Stagno & Frost-style: 5.44 - 21380/T + 0.078(P-1)/T + log XCO₂
+      fluid K(T)               Holland & Powell (1998) via Perple_X hp02ver.dat
+      EMOG(D) boundary         hp02ver.dat magnesite + enstatite + forsterite
+      fluid fugacities         Zhang & Duan (2009): 15 EOS coefficients, LJ eps/sigma, mixing k
+      melt integral-VdP        Sun & Yao (2024) / Deng et al. (2020), via sf_H2O.jl
+      endmember compositions   harzburgite / basalt mass fractions
+
+ 5.2  External data used for REPORTING ONLY
+      logfO2_FMQ               sb24 FMQ (3fa + O2 = 3qtz + 2mag); matches MAGEMin's own dQFM
+      logfO2_IW                sb24 IW (4Fe + 2O2 = Fe4O4 — SLB's wuestite end-member is Fe4O4)
+      slb_gibbs                one sb24 end-member's G(P,T) from Table C1 — Mie-Grueneisen-Debye
+                               on a BM3 cold curve, Newton on V, plus metal electronic (A2-A3)
+                               and bcc-Fe magnetic (A5-A9) terms
+      slb_gibbs_O2             O2 standard state, sb24's JANAF-fitted Cp polynomial
+      slb_plg                  Debye free-energy integral (HeFESTo/Perple_X form)
+      Rasinhspace              signed Fe3+/SumFe axis, uniform in asinh(R/R0) — crosses R = 0,
+                               which the logit cannot; beats splitting the table at 0 by ~9x
+      enforce_R_monotone!      isotonic repair at table-GENERATION time (sf_H2O.jl)
+      reference_buffers        the (FMQ, IW) pair reported against; needs no MAGEMin
+      logfO2_*_frost           Frost (1991) FMQ and IW, retired — kept for the scripts (see 1.8)
+      logfO2_FMQ_hp98          hp02ver FMQ, retained for comparison (see 1.7)
+
+ 5.3  Numbers CHOSEN, not measured — in order of leverage
+      XCO2max = 0.3     Melt CO₂ cap, stand-in for CO₂ saturation. INVENTED. Does NOT replace
+                        EMOG(D) — it only bounds where the inversion stops being physical, since
+                        nC_melt diverges as X -> 1 and EMOG wants XCO₂ ~ 0.8-2.1 (see 2.2).
+                        Never binds across the sweep (worst raw/cap 0.994): insurance, not active.
+      wEMOG = 0.25      Width of the graphite -> carbonate ramp. INVENTED but motivated: real
+                        carbonate is a magnesite-dolomite-calcite solution, so the boundary is smeared.
+      slope 1/0.1917    Oxybarometer extrapolation beyond both table ends. Semi-physical: the
+                        dilute-limit Fe³⁺/Fe²⁺ exponent the melt branch already uses.
+      Rmax, nr, R0      Fe³⁺ sampling range, node count, asinh scale (0.4, 100+15, 2e-3).
+      sharpness = 30    Softcap rounding.
+      1e-6 tie-break    Strictly-increasing ramp after isotonic repair.
+      tol = 1e-8        Mass-balance residual: above bisection's ~1e-11 floor, far below the
+                        ~0.1-3.5 jump at a genuine discontinuity. Eight orders of daylight.
+      lowclip, brackets, iteration counts — numerical; tested not to bind on the answer.
+
+ 5.4  Emergent — solved for, never prescribed
+      the shared fO2 and hence ΔFMQ; aC; sOₑₓ and mOₑₓ; melt XCO₂; the fluid's mole fractions and
+      how much fluid exists; the graphite/carbonate split; whether the fluid is a net source or
+      sink; which sinks pin; the regime label.
+
+===============================================================================================
+ 6. OPEN ISSUES
+===============================================================================================
+  1. XCO2max = 0.3 invented, but measured inactive across the sweep (worst raw/cap 0.994). Matters
+     only near and above EMOG(D). See 5.3, 2.2.
+  2. Low-P/T failures with real MAGEMin are reproduced by non-monotonic solid fO2 in the mock and
+     repaired (§4), but the real cause is unconfirmed. Run real MAGEMin, watch for the warning.
+  3. No precipitating Fe³⁺ phase. Believed unnecessary (§3.3) but untested above the tabulated
+     range, where the extrapolation cannot capture a phase change MAGEMin would have found.
+  4. Zhang & Duan (2009) is calibrated 673-2573 K and <=10 GPa; outside that the fluid is
+     extrapolated and the code warns.
+  5. All sweep results use the mock solid branch. Real MAGEMin now runs, so this is a re-run.
+  6. RESOLVED FOR REPORTING 2026-09-03 — depth-driven self-reduction. Disproportionation conserves
+     oxygen so the Frost mechanism sits at sOₑₓ = 0 and cannot DRIVE the solver, but metal is now
+     harvested from the assemblage and reported (FeM_solid, split FeM_diss / FeM_disp). §1.8.
+  7. Metal onset ~12 GPa vs a quoted ~250 km (~8 GPa), and the 20 GPa assemblage drops metal
+     between two metal-bearing neighbours. Both unexplained. §1.8.
+  8. Fux et al. (2024) benchmarked (§1.8). What survives the buffer fix: sb24 +0.06 to +1.86 too
+     oxidised at their bulk Fe³⁺ (mean 0.99, was 2.48) and holds too little ferric at saturation
+     (A 0.07 → 0.63; C 0.13 → 0.56). CAUSE: garnet's only ferric end-member is andradite, so Fe³⁺
+     rides on calcium (x3 CaO → x8.9 ceiling), and opx has none. NOT the alloy — 5 GPa would need
+     a(Fe) = 0.006. Fix is upstream: skiagite in gtmj, a ferric opx end-member.
+  9. RESOLVED 2026-09-03 — reference buffers. FMQ and IW now come from sb24, the dataset producing
+     the fO2 they are subtracted from. Removed a +1.7-to-+4.0 pressure-growing ΔFMQ error and
+     stopped ΔIW putting metal-bearing rock above its own buffer. TOex.jl §4c, buffer_check.jl.
+     G is computed in TOex.jl from Table C1/C3, not through LibMAGEMin.G_EM_function, so the
+     buffers need no live handle and cannot segfault. Printed values cost <=0.0084 on FMQ,
+     <=0.0012 on IW. Learned in passing:
+       - SLB's `wu` is Fe4O4, not FeO (`pe` likewise Mg4O4), so the reaction is per TWO O2.
+       - MAGEMin's `iw`/`qif` are UNUSABLE with sb: they call an end-member `iron` sb24 lacks and
+         G_EM_function SEGFAULTS on unknown names. Stoichiometry is wrong too.
+       - MAGEMin reads sb24's O2 Cp `b` from a negated slot (+6.91e-4 where HP have -6.91e-4).
+         TOex.jl matches it deliberately: cancels in any offset, keeps ΔFMQ/ΔIW exact, moves the
+         absolute buffer by 0.02-0.06.
+       Both MAGEMin issues worth reporting upstream.
+ 10. sb24's iron redox scale sits ~1.4 log units ABOVE experimental 1-bar IW (-11.50 vs O'Neill's
+     -12.90 at 1400 K). MECHANISM: MAGEMin's order-disorder slot (`cme`) is ZERO for every
+     end-member, so Table C3's Landau term is never applied and wuestite is short R·ln5 per Fe²⁺
+     = 1.398 log units, independent of P and T. It CANCELS in ΔIW (fayalite is short the same),
+     which is why metal-bearing rock still lands physical — do NOT add it to IW alone.
+     It does not cancel where the ABSOLUTE fO2 meets the HP98/Zhang & Duan fluid: 1.4 of the ~1.9
+     offset in 1.5 is now accounted for. Fixing it means restoring the Landau term for ALL ferrous
+     end-members — an upstream MAGEMin change.
+===============================================================================================

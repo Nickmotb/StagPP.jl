@@ -41,8 +41,15 @@
                             cc = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                             Prange=(1e-4, 135.0), Trange=(500.0, 4000.0), verbose=true,
                             cmap=:Blues, interp=false, cmap_reverse=false, logscale=true, phase_out=[],
-                            test_path=false, sys_in="mol", unoxidized=false, densities=true,
-                            Rv=0.01, nR=1, Rrange=(0.001, 0.2), pyr=false, exprt=true, solve_um=true, solve_tz_lm=true, Xmid=0.3
+                            # XB/XH/XP below are MASS fractions (wt%) - the same numbers, to four
+                            #  decimals, that TOex.jl's endmember_composition carries as mass
+                            #  fractions. Declaring them "mol" handed MAGEMin a different rock:
+                            #  MgO 9.88 vs 15.11 mol%, Al2O3 16.98 vs 10.26, worth up to 0.74 log
+                            #  units of fO2. TOex.jl is the reference formulation, so "wt" it is.
+                            #  Tables written before 2026-09-03 were generated on the "mol" branch
+                            #  and must be regenerated.
+                            test_path=false, sys_in="wt", unoxidized=false, densities=true,
+                            Rv=0.01, nR=1, Rrange=(0.001, 0.185), Rlog=true, R0=2e-3, pyr=false, exprt=true, solve_um=true, solve_tz_lm=true, Xmid=0.3
                             )
 
         # Checks
@@ -55,14 +62,24 @@
         # (nR>1) && (s=false; fO2=true; println("Large fO₂ block run called. Disabling sᴴ²ᴼ computations."))
 
         # Oxidizing routine 
+        # Fe + O, sb24's OWN component set, not FeO + O. Mandatory once the R axis can go negative:
+        #  below the FeO reference `oxidize_bulk` puts ELEMENTAL iron in the iron column, and calling
+        #  MAGEMin with a "FeO" label for it counts the iron's own oxygen twice — the same defect
+        #  that once returned ΔIW +10 with no native iron anywhere. The emitted labels are
+        #  `Xox24f` below, and both bases describe the identical system for R ≥ 0.
         function assignR_to_Xv!(Xv, Xv2, Xox, Xdummy, Rv, cap, cflag)
+            # wt_out must track wt_in: what comes OUT of `oxidize_bulk` is handed straight to
+            #  MAGEMin labelled `sys_in`, so leaving it in mole space while telling MAGEMin "wt"
+            #  describes a different rock. With wt_out pinned to false, sys_in="wt" was simply
+            #  unusable - which is why the shipped table was generated on the "mol" branch.
+            ox(x, r) = oxidize_bulk(x, r, Xdummy; wt_in=(sys_in=="wt"), wt_out=(sys_in=="wt"), FeFormat="Fe_O", vector=true, oldXox=Xox)
             for i in 1:cap
-                Xv[i]  = oxidize_bulk(Xv[i], Rv[i], Xdummy; wt_in=(sys_in=="wt"), wt_out=false, FeFormat="FeO_O", vector=true, oldXox=Xox);
+                Xv[i]  = ox(Xv[i], Rv[i])
                 Xv2[i] = copy(Xv[i])
                 if !cflag
-                    Xv[i+cap] = oxidize_bulk(Xv[i+cap], Rv[i], Xdummy; wt_in=(sys_in=="wt"), wt_out=false, FeFormat="FeO_O", vector=true, oldXox=Xox)
-                    Xv[i+2cap] = oxidize_bulk(Xv[i+2cap], Rv[i], Xdummy; wt_in=(sys_in=="wt"), wt_out=false, FeFormat="FeO_O", vector=true, oldXox=Xox)
-                    Xv2[i+cap] = oxidize_bulk(Xv2[i+cap], Rv[i], Xdummy; wt_in=(sys_in=="wt"), wt_out=false, FeFormat="FeO_O", vector=true, oldXox=Xox)
+                    Xv[i+cap]  = ox(Xv[i+cap],  Rv[i])
+                    Xv[i+2cap] = ox(Xv[i+2cap], Rv[i])
+                    Xv2[i+cap] = ox(Xv2[i+cap], Rv[i])
                 end
             end
         end
@@ -84,7 +101,22 @@
             Pum, Tum = LinRange(Prange[1], DBswitchP, nP), LinRange(Trange[1], 2000., nT)
             Ptz, Ttz = LinRange(DBswitchP, 25., nP), LinRange(700., Trange[2], nT)
             Plm, Tlm = LinRange(25., Prange[2], nP), LinRange(700., Trange[2], nT)
-            Rdom = nR>1 ? LinRange(Rrange[1], Rrange[2], nR) : Rv
+            # Fe³⁺/ΣFe axis. Node PLACEMENT, not node count, is what limits table accuracy here:
+            #  measured against a 220-point MAGEMin reference at 8 GPa/1400 K over R ∈ [-1.96, 0.4],
+            #  24 uniform-in-R nodes leave 1.33 rms log units and adding more does not monotonically
+            #  help, while 24 nodes on a curvature-following axis leave 0.15.
+            #  Two axes, picked automatically:
+            #   Rrange[1] > 0  → uniform in log(R/(1-R)), the ratio the oxybarometer is linear in
+            #                    (exactly this file's own extrapolation form, slope 1/0.1917).
+            #   Rrange[1] ≤ 0  → uniform in asinh(R/R0). The logit axis is undefined at R ≤ 0 and so
+            #                    cannot carry the reducing half at all; asinh crosses zero, is dense
+            #                    within |R| ≲ R0 and logarithmic beyond. Beats splitting the table in
+            #                    two at R = 0 by ~9x at equal node count, and leaves no seam where
+            #                    the curvature is highest.
+            #  Rlog=false restores the old uniform behaviour.
+            Rdom = nR>1 ? (Rlog ? (Rrange[1] > 0 ? Rlogspace(Rrange[1], Rrange[2], nR)
+                                                 : Rasinhspace(Rrange[1], Rrange[2], nR; R0=R0))
+                                : collect(LinRange(Rrange[1], Rrange[2], nR))) : Rv
             Pv, Tv, Rvec = zeros(Float64, eff_nPnTnR), zeros(Float64, eff_nPnTnR), (nR>1) ? zeros(Float64, eff_nPnTnR) : Rv.*ones(Float64, eff_nPnTnR);
         # --- Composition
             Xv = Vector{Vector{Float64}}(undef, eff_nPnTnR)
@@ -94,13 +126,25 @@
                 cflag ? Xv2[i] = cc : (Xv2[i] = XH; Xv2[i+nPnTnR] = XB)
             end
             Xdummy = (X=Vector{Float64}(zeros(length(Xox24))), Xox=Vector{String}(Xox24), mm=get_Xoxmm(Xox24)) # Dummy for Stx24 oxidizing calls
+            Xox24f = oxidized_Xox(Xox24, "Fe_O")   # labels MAGEMin is actually handed, see assignR_to_Xv!
             tnP, tnP05 = Int64(ceil(1.1max(nP, nT))), Int64(ceil(0.5max(nP, nT)))
         # --- Window variables
+        #  LAYOUT. Pv/Tv/Rvec are 3 stacked blocks of nPnTnR, one per composition (XH, XB, Xmid);
+        #   inside a block the index runs P fastest, then T, then R (mesh_vectorization!).
+        #   Xv is 3*nPnTnR (XH, XB, Xmid) and Xv2 is 2*nPnTnR (XH, XB), BOTH over all (P,T,R).
+        #   Any multi_point_minimization must therefore be handed exactly as many (P,T) points as
+        #   there are composition entries - counts that scale with nR, not with nPnT.
             Pv_nPnT = @view Pv[1:nPnT]
             Tv_nPnT = @view Tv[1:nPnT]
             if !cflag
-                Pv_2nPnT = @view Pv[1:2nPnT]
-                Tv_2nPnT = @view Tv[1:2nPnT]
+                # fO2 over both endmembers at every (P,T,R)
+                Pv_2nPnTnR = @view Pv[1:2nPnTnR]
+                Tv_2nPnTnR = @view Tv[1:2nPnTnR]
+                # Solubility is R-INDEPENDENT: it is solved once on the (P,T) grid for each of the
+                #  three compositions and replicated across R afterwards, so it needs 3*nPnT points
+                #  holding the (P,T) grid three times over. Block 1 of Pv is the (P,T) grid repeated
+                #  nR times, so its first 3*nPnT entries are exactly that for any nR >= 1 (for
+                #  nR = 1 and 2 the window simply runs on into the identical blocks 2 and 3).
                 Pv_3nPnT = @view Pv[1:3nPnT]
                 Tv_3nPnT = @view Tv[1:3nPnT]
             end
@@ -112,8 +156,12 @@
             end
             if fO2
                 fum, ftz, flm = zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2)
+                # Native-iron wt% maps, same shape as the fO2 ones and filled off the same
+                #  minimisations. They ride along with fO2 because they come free with it.
+                mum, mtz, mlm = zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2)
             else
                 fum, ftz, flm = nothing, nothing, nothing
+                mum, mtz, mlm = nothing, nothing, nothing
             end
 
         # ========================
@@ -138,29 +186,39 @@
                     else; outHB = 0.0; end
             end
             # Initialize sb24 MAGEMin environment
-                if (fO2||s) && solve_tz_lm
+                # Gated on solve_um TOO: the upper-mantle fO₂ call below needs this handle, so
+                #  solve_tz_lm=false with fO2=true used to die on an undefined `data`.
+                if (fO2||s) && (solve_um || solve_tz_lm)
                     data    = Initialize_MAGEMin("sb24", verbose=false)
                 end
-                s && (min_s = min_sᴴ²ᴼ_assembler(tnP))
+                (fO2||s) && (min_s = min_sᴴ²ᴼ_assembler(tnP))
                 !unoxidized && (assignR_to_Xv!(Xv, Xv2, Xox, Xdummy, Rvec, nPnTnR, cflag))  # Oxidize bulk for UM fO₂ calculations
             if solve_um
                 # Call UM through SB24 to get fO₂
                     if fO2
                         verbose && println("Calculating upper mantle fO₂...")
-                        out_fO2   = multi_point_minimization(10Pv_2nPnT, Tv_2nPnT.-273.15, data, X=Xv2, Xoxides=Xox24, name_solvus=true, progressbar=verbose, sys_in=sys_in)
+                        # X must cover every (P,T,R) point of both endmembers - Xv2 is 2*nPnTnR
+                        #  long, so the P/T windows have to be too. These used to be 2*nPnT, which
+                        #  only matched when nR == 1.
+                        Xf = cflag ? Xv : Xv2
+                        out_fO2   = multi_point_minimization(10*(cflag ? Pv[1:nPnTnR] : Pv_2nPnTnR), (cflag ? Tv[1:nPnTnR] : Tv_2nPnTnR).-273.15, data, X=Xf, Xoxides=Xox24f, name_solvus=true, progressbar=verbose, sys_in=sys_in)
                     else; out_fO2 = 0.0; end
                 # Assemble
-                    sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, nPnTnR, nR, cflag, min_s, s=s, fO2=fO2)
+                    sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, nPnTnR, nR, cflag, min_s, s=s, fO2=fO2, mmap=mum)
                     if s
                         um = cflag ? reshape(um, nP, nT, nR) : cat(reshape(um[:,1], nP, nT, nR), reshape(um[:,2], nP, nT, nR), reshape(um[:,3], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                         verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
                     end
                     if fO2
                         fum = cflag ? reshape(fum, nP, nT, nR) : cat(reshape(fum[:,1], nP, nT, nR), reshape(fum[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                        mum = cflag ? reshape(mum, nP, nT, nR) : cat(reshape(mum[:,1], nP, nT, nR), reshape(mum[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                     end
             else
                 s && (um = cflag ? reshape(um, nP, nT, nR) : cat(reshape(um[:,1], nP, nT, nR), reshape(um[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3))
-                fO2 && (fum = cflag ? reshape(fum, nP, nT, nR) : cat(reshape(fum[:,1], nP, nT, nR), reshape(fum[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3))
+                if fO2
+                    fum = cflag ? reshape(fum, nP, nT, nR) : cat(reshape(fum[:,1], nP, nT, nR), reshape(fum[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                    mum = cflag ? reshape(mum, nP, nT, nR) : cat(reshape(mum[:,1], nP, nT, nR), reshape(mum[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                end
             end
 
         # ===========================
@@ -172,21 +230,28 @@
                 # Minimizer call + assembly
                     if s || fO2
                         verbose && println("Calculating transition zone fO₂ | sᴴ²ᴼ...")
-                        out_fO2   = multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox24, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
+                        # Composition set for this sector. Solubility needs all three blocks of
+                        #  Xv (XH, XB, Xmid); fO2 only reads blocks 1 and 2 (see
+                        #  sᴴ²ᴼ_fO₂_assembler!), so an fO2-only run passes Xv2 and skips a third of
+                        #  the minimizations - 490k of them per sector at nP=nT=100, nR=49.
+                        Xsel = (cflag || s) ? Xv : Xv2
+                        nsel = length(Xsel)
+                        out_fO2   = multi_point_minimization(10*(@view Pv[1:nsel]), (@view Tv[1:nsel]).-273.15, data, X=Xsel, Xoxides=Xox24f, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
                     end; 
                     (fO2||s) && Finalize_MAGEMin(data);
                 # DHMS
                     if s
                         DHMS && verbose && println("Exploring DHMS paths...")
-                        ppaths, paths, _  =  DHMS ? path_solve(cflag ? cc : XH, Xox, phase_out, Pv_nPnT, Tv_nPnT, DBswitchP, (@view out_fO2[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2]) : (0.0, 0.0, 0.0)
+                        ppaths, paths, _  =  DHMS ? path_solve(cflag ? cc : XH, Xox, phase_out, Pv_nPnT, Tv_nPnT, DBswitchP, (@view out_fO2[1:nPnT]), test_path; npaths=max(50,tnP05), ns=max(100,tnP), Pend=Prange[2], sys_in=sys_in) : (0.0, 0.0, 0.0)
                 # Assemble  
                         ∫sᴴ²ᴼ!(tz, (@view Pv[1:nPnTnR]), (@view Tv[1:nPnTnR]), min_s, out_fO2, DHMS, ppaths, paths, nPnTnR, cflag)
                         tz = cflag ? reshape(tz, nP, nT, nR) : cat(reshape(tz[:,1], nP, nT, nR), reshape(tz[:,2], nP, nT, nR), reshape(tz[:,3], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                     end
                     if fO2 
                         verbose && println("Extracting transition zone fO₂...")
-                        sᴴ²ᴼ_fO₂_assembler!(tz, ftz, 0.0, out_fO2, nPnTnR, nR, cflag, min_s, s=false)
+                        sᴴ²ᴼ_fO₂_assembler!(tz, ftz, 0.0, out_fO2, nPnTnR, nR, cflag, min_s, s=false, mmap=mtz)
                         ftz = cflag ? reshape(ftz, nP, nT, nR) : cat(reshape(ftz[:,1], nP, nT, nR), reshape(ftz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                        mtz = cflag ? reshape(mtz, nP, nT, nR) : cat(reshape(mtz[:,1], nP, nT, nR), reshape(mtz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                     end
                 
 
@@ -201,7 +266,13 @@
                 # Minimizer call + assembly
                     if s || fO2
                         verbose && println("Calculating lower mantle sᴴ²ᴼ...")
-                        out_fO2   .= multi_point_minimization(10Pv, Tv.-273.15, data, X=Xv, Xoxides=Xox24, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
+                        # Composition set for this sector. Solubility needs all three blocks of
+                        #  Xv (XH, XB, Xmid); fO2 only reads blocks 1 and 2 (see
+                        #  sᴴ²ᴼ_fO₂_assembler!), so an fO2-only run passes Xv2 and skips a third of
+                        #  the minimizations - 490k of them per sector at nP=nT=100, nR=49.
+                        Xsel = (cflag || s) ? Xv : Xv2
+                        nsel = length(Xsel)
+                        out_fO2   = multi_point_minimization(10*(@view Pv[1:nsel]), (@view Tv[1:nsel]).-273.15, data, X=Xsel, Xoxides=Xox24f, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
                     end
                     if s
                         ∫sᴴ²ᴼ!(lm, (@view Pv[1:nPnTnR]), (@view Tv[1:nPnTnR]), min_s, out_fO2, DHMS, ppaths, paths, nPnTnR, cflag)
@@ -209,8 +280,9 @@
                     end
                     if fO2 
                         verbose && println("Extracting lower mantle fO₂...")
-                        sᴴ²ᴼ_fO₂_assembler!(lm, flm, 0.0, out_fO2, nPnTnR, nR, cflag, min_s, s=false)
+                        sᴴ²ᴼ_fO₂_assembler!(lm, flm, 0.0, out_fO2, nPnTnR, nR, cflag, min_s, s=false, mmap=mlm)
                         flm = cflag ? reshape(flm, nP, nT, nR) : cat(reshape(flm[:,1], nP, nT, nR), reshape(flm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                        mlm = cflag ? reshape(mlm, nP, nT, nR) : cat(reshape(mlm[:,1], nP, nT, nR), reshape(mlm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                     end
             else
                 if s
@@ -220,6 +292,8 @@
                 if fO2
                     ftz = cflag ? reshape(ftz, nP, nT, nR) : cat(reshape(ftz[:,1], nP, nT, nR), reshape(ftz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                     flm = cflag ? reshape(flm, nP, nT, nR) : cat(reshape(flm[:,1], nP, nT, nR), reshape(flm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                    mtz = cflag ? reshape(mtz, nP, nT, nR) : cat(reshape(mtz[:,1], nP, nT, nR), reshape(mtz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                    mlm = cflag ? reshape(mlm, nP, nT, nR) : cat(reshape(mlm[:,1], nP, nT, nR), reshape(mlm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                 end
             end
         
@@ -229,6 +303,31 @@
         # ================================
         # ====== Post-minimization =======
         # ================================
+
+        # Non-finite fO₂ guard. MAGEMin sb24 stops returning a finite fO₂ for these bulk
+        #  compositions once Fe³⁺/ΣFe gets large - the cliff sits near R ≈ 0.19-0.21, which is why
+        #  TOex.jl's solid_fO2_interpolant defaults to Rmax=0.2. Inf/NaN nodes silently poison the
+        #  bilinear (P,T) interpolation on the StagYY side, so say so loudly here rather than
+        #  writing them into the table.
+        if fO2 && nR>1
+            Rax = collect(Rdom)
+            for (nm, fld) in (("upper mantle", fum), ("transition zone", ftz), ("lower mantle", flm),
+                              ("upper mantle metal", mum), ("transition zone metal", mtz), ("lower mantle metal", mlm))
+                isnothing(fld) && continue
+                bad = [count(!isfinite, selectdim(fld, 3, r)) for r in 1:nR]
+                tot = sum(bad)
+                if tot > 0
+                    npr = length(selectdim(fld, 3, 1))
+                    @warn "solve_sH2O_fO2: $tot non-finite fO₂ node(s) in the $nm maps"
+                    for r in 1:nR
+                        bad[r] > 0 && println("     R = ", round(Rax[r], digits=5), " : ",
+                                              bad[r], "/", npr, " non-finite (",
+                                              round(100bad[r]/npr, digits=1), "%)")
+                    end
+                    println("     -> lower Rrange[2] until these clear; the useful ceiling is ~0.185.")
+                end
+            end
+        end
 
         # Ensure positivity
         if s
@@ -248,8 +347,21 @@
             SΔρ, MΔρ, ρP, ρT, ρH = nothing, nothing, nothing, nothing, nothing
         end
 
+        # Monotonicity is enforced at GENERATION time, not at read time - see enforce_R_monotone!.
+        #  fO₂ ONLY. Metal runs the other way (it DEcreases as the rock is oxidised), so forcing it
+        #  non-decreasing would invert it. It also needs no repair: nothing downstream inverts the
+        #  metal map, so a dip in it costs accuracy, never well-posedness.
+        if fO2 && nR>1
+            nfix = sum(enforce_R_monotone!(fld, nR) for fld in (fum, ftz, flm))
+            nfix > 0 && verbose && println("Repaired $nfix non-monotonic fO₂ column(s) along R (isotonic).")
+        end
+        # Metal is a weight fraction: negative is meaningless and only ever numerical noise.
+        if fO2
+            for fld in (mum, mtz, mlm); isnothing(fld) || (fld .= max.(0.0, fld)); end
+        end
+
         # Return structure
-        sfmap = sfstruct( um, tz, lm, fum, ftz, flm, MΔρ, SΔρ, Pum, Tum, Ptz, Ttz, Plm, Tlm, (nR>1) ? collect(Rdom) : Rv, ρP, ρT, ρH )
+        sfmap = sfstruct( um, tz, lm, fum, ftz, flm, mum, mtz, mlm, MΔρ, SΔρ, Pum, Tum, Ptz, Ttz, Plm, Tlm, (nR>1) ? collect(Rdom) : Rv, ρP, ρT, ρH )
         
         # Export
         verbose && println("Exporting...")
@@ -975,7 +1087,22 @@
 
     end
 
-    function sᴴ²ᴼ_fO₂_assembler!(smap, fmap, out_s, out_fO2, n, nR, cflag, min_s; s=true, fO2=true)
+    # sb24's native-iron endmembers. Same predicate as TOex.jl's solid_fO2_interpolant, which is
+    #  where the reference harvests metal from; keeping them textually identical is the point.
+    @inline isnativeFe(ph::String) = lowercase(ph) in ("feg", "fea", "fee")
+
+    # Native iron as a WEIGHT FRACTION of the solid, off the assemblage MAGEMin actually returned.
+    #  This is the one quantity the fO2 axis cannot carry: disproportionation (3Fe2+ -> 2Fe3+ + Fe0)
+    #  makes metal at CONSTANT oxygen, so it is invisible to sOex and can only come from here.
+    @inline function metal_wt_frac(o)
+        m = 0.0
+        for i in eachindex(o.ph)
+            isnativeFe(o.ph[i]) && (m += o.ph_frac_wt[i])
+        end
+        return m
+    end
+
+    function sᴴ²ᴼ_fO₂_assembler!(smap, fmap, out_s, out_fO2, n, nR, cflag, min_s; s=true, fO2=true, mmap=nothing)
         (!s && !fO2) && return
         Threads.@threads for i in 1:n
             if (s) # sᴴ²ᴼ
@@ -1027,6 +1154,12 @@
                 fmap[i, 1]=out_fO2[i].fO2 # Depleted (Harzburgite)
                 if !cflag
                     fmap[i, 2] = out_fO2[i+n].fO2 # Enriched (Basalt)
+                end
+                # Native iron off the SAME minimisation - no extra MAGEMin call, just a second
+                #  quantity read out of a result already in hand.
+                if !isnothing(mmap)
+                    mmap[i, 1] = metal_wt_frac(out_fO2[i])
+                    !cflag && (mmap[i, 2] = metal_wt_frac(out_fO2[i+n]))
                 end
             end
         end
@@ -1224,7 +1357,10 @@
     # Assumes DHMS are entirely isolated within region of stability. And only DHMS
     # phase carries over across boundaries.
 
-    function path_solve(XH, Xox, phase_out, Pvtz, Tvtz, DBswitchP, outH, test_path; npaths=50, ns=250, Pend=130.0)
+    # `sys_in` is threaded in rather than hard-coded: this minimises the SAME XH the caller does, so
+    #  declaring it "mol" here while the caller says "wt" would explore DHMS paths through a
+    #  different rock than the maps are built on.
+    function path_solve(XH, Xox, phase_out, Pvtz, Tvtz, DBswitchP, outH, test_path; npaths=50, ns=250, Pend=130.0, sys_in="wt")
 
         # Initialize variables
         P = LinRange(0.5, Pend, ns)
@@ -1246,10 +1382,10 @@
             idx = max(findfirst(Tpath(P) .>= reactions.r1(P))-1, 1)
             # Minimize crossing point
             if isempty(phase_out)
-                out = single_point_minimization(10*P[idx], Tpath(P[idx])-273.15, data, X=XH, Xoxides=Xox, B=1.0, sys_in="mol", name_solvus=true)
+                out = single_point_minimization(10*P[idx], Tpath(P[idx])-273.15, data, X=XH, Xoxides=Xox, B=1.0, sys_in=sys_in, name_solvus=true)
             else
                 rm_list = remove_phases(phase_out, "um")
-                out = single_point_minimization(10*P[idx], Tpath(P[idx])-273.15, data, X=XH, Xoxides=Xox, B=1.0, sys_in="mol", name_solvus=true, rm_list=rm_list)
+                out = single_point_minimization(10*P[idx], Tpath(P[idx])-273.15, data, X=XH, Xoxides=Xox, B=1.0, sys_in=sys_in, name_solvus=true, rm_list=rm_list)
             end
             # Extract atg mol%, if none get out.
             atg = 0.0
@@ -1876,6 +2012,54 @@
 # ======= Others =======
 # ======================
 
+    """
+        Rlogspace(Rlo, Rhi, n)
+
+    `n` Fe³⁺/ΣFe nodes spaced uniformly in log(R/(1-R)), i.e. uniformly in the log of the
+    Fe³⁺/Fe²⁺ ratio the oxybarometer is linear in. Endpoints are hit exactly.
+    """
+    function Rlogspace(Rlo::Real, Rhi::Real, n::Integer)
+        (0 < Rlo < 1 && 0 < Rhi < 1) || error("Rlogspace: R endpoints must lie strictly in (0,1); got ($Rlo, $Rhi)")
+        Rlo < Rhi || error("Rlogspace: need Rlo < Rhi; got ($Rlo, $Rhi)")
+        u = LinRange(log(Rlo/(1-Rlo)), log(Rhi/(1-Rhi)), n)
+        return [exp(ui)/(1+exp(ui)) for ui in u]
+    end
+
+    """
+        Rasinhspace(Rlo, Rhi, n; R0=2e-3)
+
+    `n` Fe³⁺/ΣFe nodes spaced uniformly in asinh(R/R0). Unlike `Rlogspace` this CROSSES R = 0, so
+    it can carry the reducing half of the axis (R < 0 is native iron, R = -2 all metal). Nodes are
+    dense within |R| ≲ R0 and logarithmic beyond it. Endpoints are hit exactly.
+    """
+    function Rasinhspace(Rlo::Real, Rhi::Real, n::Integer; R0::Real=2e-3)
+        Rlo < Rhi || error("Rasinhspace: need Rlo < Rhi; got ($Rlo, $Rhi)")
+        R0 > 0     || error("Rasinhspace: R0 must be positive; got $R0")
+        Rlo >= -2  || error("Rasinhspace: R < -2 is below full metal saturation; got $Rlo")
+        u = LinRange(asinh(Rlo/R0), asinh(Rhi/R0), n)
+        return [R0*sinh(ui) for ui in u]
+    end
+
+    # Forces fO₂ non-decreasing along the R axis (dim 3) of an assembled (nP, nT, nR[, nc]) map, so
+    # the table StagYY reads is invertible as written. MAGEMin breaks monotonicity wherever the
+    # assemblage changes — native iron coming in at R = 0 especially — and a flat or dipping segment
+    # makes the loading that reads a given fO₂ non-unique, which costs the solver its root. Doing it
+    # HERE means `solid_fO2_interpolant`'s runtime repair never has to fire and every consumer of the
+    # table sees the same repaired curve. Non-finite columns are left alone for the guard to report.
+    function enforce_R_monotone!(f, nR; label="")
+        (isnothing(f) || nR < 2 || ndims(f) < 3 || size(f, 3) != nR) && return 0
+        pre  = size(f, 1)*size(f, 2)
+        post = length(f) ÷ (pre*nR)
+        A    = reshape(f, pre, nR, post)
+        fixed = 0
+        for k in 1:post, i in 1:pre
+            v = @view A[i, :, k]
+            (all(isfinite, v) && !issorted(v)) || continue
+            v .= _isotonic(collect(v)); fixed += 1
+        end
+        return fixed
+    end
+
     function mesh_vectorization!(P, T, Rdom, nP, nT, nR, Pv, Tv, Rvec; single=false)
         if nR>1
             vP, vT, vR = repeat(repeat(P, outer=nT), nR), repeat(repeat(T, inner=nP), nR), repeat(Rdom, inner=nP*nT)
@@ -1975,7 +2159,7 @@
 # ======= Export =======
 # ======================
 # Export 30% as well!
-    function write_output(sfmap, cflag; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", fname_Mdens="StagMdens.dat", fname_Sdens="StagSdens.dat", s=true, fO2=true, densities=true)
+    function write_output(sfmap, cflag; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", fname_metal="StagMetal.dat", fname_Mdens="StagMdens.dat", fname_Sdens="StagSdens.dat", s=true, fO2=true, densities=true)
         # Array dimensions
         nP, nT, nR = length(sfmap.Pum), length(sfmap.Tum), length(sfmap.FeR)
         nH = 1; H = 1
@@ -2009,7 +2193,11 @@
                 println(io, sfmap.Pum[1], " ", sfmap.Pum[end], " ", sfmap.Tum[1], " ", sfmap.Tum[end])
                 println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
                 println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end])
-                println(io, sfmap.FeR[1], " ", sfmap.FeR[end], "\n")
+                # Fe³⁺/ΣFe axis, written EXPLICITLY as nR values (was: just min and max, with the
+                #  reader reconstructing a uniform grid - which is wrong for the log-spaced axis).
+                #  For nR==1 this writes one value, and a list-directed read of one value from the
+                #  old two-value line also yields FeR_min, so old tables still load correctly.
+                for r in 1:nR; print(io, sfmap.FeR[r], " "); end; println(io, "\n")
                 # Data
                 for r in 1:nR
                     for (n, slot) in enumerate(ivec)
@@ -2020,9 +2208,44 @@
                         end
                         for i in 1:nP
                             for j in 1:nT
-                                print(io, pmap[i,j], " ")
+                                # 6 decimals = 1e-6 log units, still 1e4 finer than the 0.01 the
+                                #  solver is required to match, at roughly half the bytes of the
+                                #  full 17-digit repr. NaN/Inf are written as-is so a bad node
+                                #  stays visibly bad rather than being rounded into silence.
+                                v = pmap[i,j]
+                                print(io, isfinite(v) ? round(v, digits=6) : v, " ")
                             end; println(io, "")
                         end; println(io, "")
+                    end
+                end
+            end
+
+            # Native iron, byte-for-byte the same file LAYOUT as the fO₂ table above (same header,
+            #  same R axis, same 6-maps-per-R-node order), so StagYY reads it with the same code
+            #  path. Written as a WEIGHT FRACTION of the solid, not a percentage.
+            if !isnothing(sfmap.mum)
+                open(joinpath(savedir, fname_metal), "w") do io
+                    println(io, nP, " ", nT, " ", nR, "\n");
+                    println(io, sfmap.Pum[1], " ", sfmap.Pum[end], " ", sfmap.Tum[1], " ", sfmap.Tum[end])
+                    println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
+                    println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end])
+                    for r in 1:nR; print(io, sfmap.FeR[r], " "); end; println(io, "\n")
+                    for r in 1:nR
+                        for (n, slot) in enumerate(ivec)
+                            if nR==1
+                                pmap .= n>4 ? sfmap.mlm[:,:,slot] : n>2 ? sfmap.mtz[:,:,slot] : sfmap.mum[:,:,slot]
+                            else
+                                pmap .= n>4 ? sfmap.mlm[:,:,r,slot] : n>2 ? sfmap.mtz[:,:,r,slot] : sfmap.mum[:,:,r,slot]
+                            end
+                            for i in 1:nP
+                                for j in 1:nT
+                                    # 8 decimals: metal fractions run down to ~1e-5 and the
+                                    #  interesting onset is smaller still, so 6 would quantise it.
+                                    v = pmap[i,j]
+                                    print(io, isfinite(v) ? round(v, digits=8) : v, " ")
+                                end; println(io, "")
+                            end; println(io, "")
+                        end
                     end
                 end
             end
@@ -2093,10 +2316,39 @@
 
         - wt::Bool \t\t-->\t Indicates if the input composition is in weight percent (wt%) [default: false (molar fraction)]
     """
+    # `Rv` is Fe³⁺/ΣFe, SIGNED: 0 is the FeO reference, 1 every iron ferric, and negative values are
+    # metal — -2 is every iron atom as Fe⁰. The floor is -2 rather than -1 because the two directions
+    # are not symmetric: Fe²⁺→Fe³⁺ takes half an extra O per Fe (1 → 1.5 O), while Fe²⁺→Fe⁰ gives a
+    # whole one back (1 → 0 O). So the iron carries nFe·(1 + Rv/2) oxygen throughout, and the EXCESS
+    # against the FeO reference is 0.5·Rv·nFe — a sink when positive, a source when negative.
+    #
+    # Total iron is conserved for every Rv and every FeFormat: the three formats are three ways of
+    # writing the SAME system, and must hand MAGEMin the same one.
+    #   "Fe_O"       Fe = nFe,         O = nFe(1 + Rv/2)     elemental; the only basis that can
+    #                                                        express Rv < 0, so it is forced there
+    #   "FeO_O"      FeO = nFe,        O = 0.5·Rv·nFe        MAGEMin's FeO-total + excess-O form
+    #   "Fe2O3_FeO"  FeO = (1-Rv)nFe,  Fe2O3 = 0.5·Rv·nFe    molecular
+    #
+    # Rewritten 2026-09-02; the previous version was inconsistent in four ways, each of which changed
+    # the composition MAGEMin actually saw (TOex_implementation.txt B2):
+    #   • nFe³ = Rv·nFe²/(1-Rv) against the ORIGINAL nFe² put Fe³⁺/ΣFe at Rv/(1-Rv), not Rv as
+    #     documented, and went singular at Rv = 0.5 — above it the ferrous column went NEGATIVE.
+    #   • the ferric iron was written into the second column as 1.5·nFe³ (its oxygen) but read back
+    #     by the format branches as if it were moles of Fe₂O₃, a factor of 3.
+    #   • "FeO_O" left the FeO column at the FERROUS iron only, so raising R deleted iron from the
+    #     bulk instead of oxidising it.
+    #   • `wt_out` scaled every column by the INPUT oxide's molar mass, so "Fe_O" multiplied the iron
+    #     column by mm.FeO rather than mm.Fe.
+    # It also renamed columns of `Xdummy.Xox` in place without restoring them, so a second call on
+    # the same scratch tuple took the wrong input branch or tripped its own assertion.
     function oxidize_bulk(X, Rv, Xdummy; wt_in=false, wt_out=false, frac=false, FeFormat="Fe_O", SymXox=nothing, vector=false, oldXox=nothing)
-        
-        # R = Fe³/∑Fe | If negative, this removes R mol units from the bulk composition (makes the system reduced)
-        (Rv<0.0) && (FeFormat="Fe_O")
+
+        @assert -2 <= Rv <= 1 "R = Fe³⁺/ΣFe must lie in [-2, 1]: 1 all ferric, 0 the FeO reference, -2 all metal."
+        (Rv < 0.0) && (FeFormat = "Fe_O")   # a negative excess cannot be written as an oxide
+
+        # The format branches rename columns in place; restored before returning so the scratch
+        # tuple can be reused and the input-format detection below stays trustworthy.
+        entryXox = copy(Xdummy.Xox)
 
         # Assign passed bulk to memory array (Correct from different Oxide list if needed)
         if !isnothing(oldXox)
@@ -2107,64 +2359,85 @@
             Xdummy.X .= Vector{Float64}(X)
         end
 
-        # Create window variables + and compute value sum
+        # Create window variables
         @views begin
             Xd = Xdummy.X; Xoxd = Xdummy.Xox; mmd = Xdummy.mm
-        end; n=sum(Xd);
+        end
 
-        # Ensure passed in composition is unoxidized
-        ("Fe2O3" ∈ Xoxd)    && @assert Xd[Xoxd.=="Fe2O3"][1]==0.0               "Please pass in an unoxidized composition. (XFe2O3 = 0.0)"
-        ("Fe"    ∈ Xoxd)    && @assert Xd[Xoxd.=="O"][1]==Xd[Xoxd.=="Fe"][1]    "Please pass in an unoxidized composition. (XFe = XO)"
-        ("O"     ∈ Xoxd)    && @assert Xd[Xoxd.=="O"][1]==0.0                   "Please pass in an unoxidized composition. (XO = 0.0)"
+        # Ensure passed in composition is unoxidized. "XO = 0" applies only where the O column is a
+        # separate EXCESS column (alongside FeO); in an elemental Fe + O list it carries the
+        # reference oxygen instead, one per iron, and the two conditions would contradict.
+        ("Fe2O3" ∈ Xoxd)               && @assert Xd[Xoxd.=="Fe2O3"][1]==0.0             "Please pass in an unoxidized composition. (XFe2O3 = 0.0)"
+        ("Fe" ∈ Xoxd)  && ("O" ∈ Xoxd) && @assert Xd[Xoxd.=="O"][1]==Xd[Xoxd.=="Fe"][1]  "Please pass in an unoxidized composition. (XFe = XO)"
+        ("FeO" ∈ Xoxd) && ("O" ∈ Xoxd) && @assert Xd[Xoxd.=="O"][1]==0.0                 "Please pass in an unoxidized composition. (XO = 0.0)"
 
         # Convert from mass fraction → molar fraction if required and normalize
-        wt_in && (Xd./=mmd)  
+        wt_in && (Xd./=mmd)
         n=sum(Xd); Xd./=n
-        
-        # Process to unoxidized FeO + Fe₂O₃
-        if ("Fe"∈Xoxd) && ("O"∈Xoxd) # Fe + O entering
+
+        # Locate the iron pair. Whichever basis came in, the composition is unoxidized, so ALL the
+        # iron sits in the first column of the pair and the second is the (empty) ferric one.
+        if ("Fe"∈Xoxd) && ("O"∈Xoxd)            # elemental Fe + O entering
             idxF, idxO = findfirst(Xoxd.=="Fe"), findfirst(Xoxd.=="O")
-            Xd[idxO] = 0.0; Xoxd[idxF] = "FeO"; Xoxd[idxO] = "Fe2O3"
-        elseif ("Fe2O3"∈Xoxd) && ("FeO"∈Xoxd) # FeO + Fe₂O₃ entering
+        elseif ("Fe2O3"∈Xoxd) && ("FeO"∈Xoxd)   # FeO + Fe₂O₃ entering
             idxF, idxO = findfirst(Xoxd.=="FeO"), findfirst(Xoxd.=="Fe2O3")
-        elseif ("FeO"∈Xoxd) && ("O"∈Xoxd) # FeO + O entering with no ferric iron
+        elseif ("FeO"∈Xoxd) && ("O"∈Xoxd)       # FeO + O entering with no ferric iron
             idxF, idxO = findfirst(Xoxd.=="FeO"), findfirst(Xoxd.=="O")
-            Xoxd[idxO] = "Fe2O3"
+        else
+            error("oxidize_bulk: no iron pair in $(Xoxd) — need Fe+O, FeO+O or FeO+Fe2O3.")
         end
+        nFe = Xd[idxF]
 
-        # Oxidize bulk
-        if Rv>=0.0
-            nFe² = Xd[idxF]
-            nFe³ = (Rv*nFe²)/(1 - Rv)
-            nFe² = nFe² - nFe³
-            nO³ = 1.5nFe³
-            Xd[idxF] = nFe²; Xd[idxO] = nO³
-        end
-        
-        # Refactor to desired Fe format
-        XFeO, XFe2O3 = Xd[idxF], Xd[idxO]
+        # Write the requested basis. Same system each time, only the bookkeeping differs.
         if FeFormat=="Fe_O"
-            Xd[idxF] = XFeO + 2XFe2O3; Xd[idxO] = XFeO + 3XFe2O3
-            Xoxd[idxF] = "Fe"; Xoxd[idxO] = "O"
+            Xd[idxF] = nFe;            Xd[idxO] = nFe*(1 + 0.5Rv)
+            Xoxd[idxF] = "Fe";         Xoxd[idxO] = "O"
         elseif FeFormat=="FeO_O"
-            Xd[idxO] = XFe2O3; Xoxd[idxO] = "O"
+            Xd[idxF] = nFe;            Xd[idxO] = 0.5Rv*nFe
+            Xoxd[idxF] = "FeO";        Xoxd[idxO] = "O"
+        elseif FeFormat=="Fe2O3_FeO"
+            Xd[idxF] = (1 - Rv)*nFe;   Xd[idxO] = 0.5Rv*nFe
+            Xoxd[idxF] = "FeO";        Xoxd[idxO] = "Fe2O3"
+        else
+            error("oxidize_bulk: unknown FeFormat \"$FeFormat\" (Fe_O, FeO_O or Fe2O3_FeO).")
         end
 
-        # Rv negative -> amount to remove in mols to the O pool
-        (Rv<0.0) && (Xd[idxO] -= min(abs(Rv), Xd[idxO]))
-
-        wt_out && (Xd.*=mmd) # Convert from molar fraction → mass fraction if required
+        # Convert from molar fraction → mass fraction if required. The iron pair is scaled by the
+        # molar masses of what it now HOLDS, not of what came in — `mmd` is built from the input
+        # oxide list and no longer describes those two columns.
+        if wt_out
+            for i in eachindex(Xd)
+                Xd[i] *= (i==idxF || i==idxO) ? getfield(mm, Symbol(Xoxd[i])) : mmd[i]
+            end
+        end
         n=sum(Xd); Xd./=n    # Normalize
         !frac && (Xd.*=1e2)  # Convert to % if desired
 
         # Generate output
+        outXox = copy(Xoxd)
+        Xdummy.Xox .= entryXox
         if !vector
-            isnothing(SymXox) && (SymXox = Symbol.(Xoxd))
+            isnothing(SymXox) && (SymXox = Symbol.(outXox))
             return Cbulk((; zip(SymXox, Xd)...))
         else
             return copy(Xd)
         end
-        
+
+    end
+
+    # The oxide list `oxidize_bulk` emits for a given FeFormat — what MAGEMin must be told those
+    # columns are. Kept beside it so the labels and the arithmetic cannot drift apart.
+    function oxidized_Xox(Xox, FeFormat)
+        out  = Vector{String}(Xox)
+        idxF = findfirst(x -> x in ("FeO", "Fe"), out)
+        idxO = findfirst(x -> x in ("O", "Fe2O3"), out)
+        (isnothing(idxF) || isnothing(idxO)) && return out
+        if     FeFormat=="Fe_O"      ; out[idxF], out[idxO] = "Fe",  "O"
+        elseif FeFormat=="FeO_O"     ; out[idxF], out[idxO] = "FeO", "O"
+        elseif FeFormat=="Fe2O3_FeO" ; out[idxF], out[idxO] = "FeO", "Fe2O3"
+        else   error("oxidized_Xox: unknown FeFormat \"$FeFormat\".")
+        end
+        return out
     end
 
     @views function get_Xoxmm(Xox)

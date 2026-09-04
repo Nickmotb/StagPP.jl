@@ -16,7 +16,10 @@ module StagPP
     const om = 1.31e21 # Ocean mass in kg
     const m_s2cm_yr = 3.1536e9 # (cm yr⁻¹) / (m s⁻¹)
     # Molar masses (g/mol)
-    const mm = Cbulk(60.08, 101.96, 71.85, 55.85, 56.08, 101.96, 61.98, 151.99, 159.69, 16.0, 79.88, 94.2, 18.015, 44.009, 12.011)
+    # MgO was 101.96 - Al2O3's mass - until 2026-09-02. It feeds molfracXB, nB_per_mass, Phi and
+    # both stoichiometric ceilings in TOex.jl, so it was not cosmetic. 40.30 = Mg 24.30 + O 16.0,
+    # matching this table's own convention (O=16.0, Fe=55.85, hence FeO=71.85).
+    const mm = Cbulk(60.08, 40.30, 71.85, 55.85, 56.08, 101.96, 61.98, 151.99, 159.69, 16.0, 79.88, 94.2, 18.015, 44.009, 12.011)
     const Cbulk_iterator = String.(fieldnames(Cbulk))
     const defHB = defaultHB(SA["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "H2O"],
                             SA[43.43, 45.93, 8.34, 0.9, 1.0, 0.01, 0.3, 0.0],
@@ -38,12 +41,12 @@ module StagPP
     # === Misc
         include("misc.jl")
     # === Misc (ground-up rewrite, WIP — see misc_corrected.jl header)
-        include("misc_corrected.jl")
+        include("TOex.jl")
 
     # Structure export
     export DataBlock, sᴴ²ᴼ, min_sᴴ²ᴼ
     # Constant export
-    export sec2Gyr, om, m_s2cm_yr
+    export sec2Gyr, om, m_s2cm_yr, km2GPa, GPa2km, cpalette
     # Function export
     export load_sim, load_local, data_encoding, solve_sH2O_fO2, min_sᴴ²ᴼ_assembler, solve_point
     # Misc export
@@ -51,9 +54,9 @@ module StagPP
     # Plot exports
     export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, ta_series_vs_field, 
             mantle_water, mantle_water_at_t, plot_sf, minmap, time_vs_ratio,
-            snapshot, IOplot, H2O_sector_ACF, H2O_PCA, regime
+            snapshot, IOplot, H2O_sector_ACF, H2O_PCA, regime,
     # Auxilliaries
-            idx_ph_transitions, t_avg, oxidize_bulk, c2k, k2c, km2GPa, GPa2km, cpalette,
+            idx_ph_transitions, t_avg, oxidize_bulk, oxidized_Xox, c2k, k2c, km2GPa, GPa2km, cpalette,
     # Densities
             PT_H2O_ρ, Gerya_solid_H2O_density_correction, Gerya_solid_H2O_density_correction_interpolator, Jing_Karato_silicate_melt_density
 end

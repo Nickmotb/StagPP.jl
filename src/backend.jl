@@ -724,7 +724,7 @@ end
         function GPa2km(pressure)
             depth = LinRange(0., 6371., 800)
             P = sort(km2GPa.(depth))
-            itp = interpolate((P,), depth, Gridded(Linear()))
+            itp = Interpolations.interpolate((P,), depth, Gridded(Linear()))
             return itp(pressure)
         end
 

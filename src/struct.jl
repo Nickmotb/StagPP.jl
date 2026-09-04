@@ -60,6 +60,12 @@ struct sfstruct
     fum      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Upper mantle fO₂ grid (nP × nT × redox × endmember)
     ftz      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Transition zone fO₂ (nP × nT × redox × endmember)
     flm      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Lower mantle fO₂ (nP × nT × redox × endmember)
+    # Native-iron maps. Weight fraction of the solid held as Fe⁰, off MAGEMin's assemblage, on the
+    #  SAME (P,T,R,endmember) grid as the fO₂ maps above. This is the only route to metal made by
+    #  disproportionation (3Fe²⁺ → 2Fe³⁺ + Fe⁰), which moves no oxygen and so cannot be read off fO₂.
+    mum      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Upper mantle Fe⁰ wt fraction
+    mtz      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Transition zone Fe⁰ wt fraction
+    mlm      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Lower mantle Fe⁰ wt fraction
     # Silicate melt H₂O density correction
     MΔρ      :: Union{Array{Float64,4}, Nothing}    # Solid H₂O correction as %-decrease ↔ H₂O wt% map (nP × nT × wt%H₂O × endmember)
     # Solid H₂O density correction

@@ -1,13 +1,22 @@
 using StagPP, GLMakie, MAGEMin_C
 
-P       = 10.0       # GPa
-T       = 1300       # K
-p       = 0.0       # 0 -> depleted solid || 1 -> enriched solid
-ϕ       = 0.01       # Melt fraction k
-TOex    = 0.0001       # Excess oxygen as a wt% of tracer mas
-TC      = 1.e-2      # Carbon content as wt% of tracer mass
-H       = 0.4   # Free H₂O mass in wt%
+# solve_sH2O_fO2(100, 100;
+#                s          = false,          # solubility maps unchanged - do not regenerate them
+#                fO2        = true,
+#                densities  = false,
+#                nR         = 30,
+#                Rrange     = (-1.96, 0.4), # MAGEMin ceiling, see above
+#                Rlog       = true,           # log-space the Fe³⁺/ΣFe axis
+#                verbose    = true,
+#                exprt      = true)
+
+P       = 8.0
+T       = 1400.
+p       = 0.0
+ϕ       = 0.95        # Melt fraction k
+TOex    = 1e-4        # Excess oxygen as a wt% of tracer mas
+TC      = 1e-1         # Carbon content as wt% of tracer mass
+H       = 0.001         # Free H₂O mass in wt%
 
 # data = Initialize_MAGEMin("sb24", verbose=false)
-partition_Oₑₓ(P, T, p, ϕ, 1e-2TOex, 1e-2TC, 1e-2H, verbose=true, data=data, maxiter=1000, debug=false)
-# Finalize_MAGEMin(data)
+partition_Oₑₓ(P, T, p, ϕ, TOex, TC, H, data=data)

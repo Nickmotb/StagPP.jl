@@ -1,0 +1,1254 @@
+===============================================================================================
+ TOex_implementation.txt - porting the TOex solver into the StagYY fork at ~/Desktop/watercarb,
+ so water and carbon move as one coupled system. What is being built, in what order, tested how.
+===============================================================================================
+ Companions: TOex_workflow.txt (the Julia algorithm) · TOex_bench.txt (validation) ·
+             TOex_math.txt (equations and execution order).
+ Notation: ? a decision · ! an assumption or a place something can go wrong · GATE a blocking test.
+
+ STATUS
+   Phase 0   [x]  repairs                    2026-09-01
+   Phase 1   [x]  solver port, standalone    2026-09-03  (signed axis, metal table, SLB buffers)
+   Phase 2   [~]  fields and bookkeeping     2026-09-04  GATE 2a PASS; 2b passes on O_ex only
+   Phase 3   [~]  coupling                   3.A [x] 3.B [x] GATE 3-0 PASS · 3.C-3.F open
+   Phase 4   [ ]  surface reservoir
+   Phase 5   [ ]  validation
+
+===============================================================================================
+ PART A - ARCHITECTURE
+===============================================================================================
+
+ A.0  WHERE THE CODE LIVES   (refactor done 2026-08-31, before Phase 0)
+ -----------------------------------------------------------------------------------------------
+   volatiles_mod.f90      module volatilestuff   variables, tracer field indices, budgets, the
+                                                 &volatiles namelist, and the TOex solver. A LEAF.
+   volatileprocs_mod.f90  module volatileprocs   the ~16 volatile procedures, out of tracers.f90.
+
+   ! The two MUST stay in separate files: comppars reads the volatile master switches and
+     volatileprocs needs comppars, so one file is an object-level cycle. Verified by building it.
+
+   STAYED BEHIND, DELIBERATELY
+     eval_fO2_traWsol, compute_H2O_hzbs   need perplexstuff, whose closure includes io and
+       meltprocs, and meltprocs calls volatileprocs - importing it back reintroduces the cycle.
+     traceelement_water/carbon            comppars reads the whole traceelement_* family as a block.
+     Dpartition_* / outgas_fraction_*     six members of one 60-entry family; splitting fragments
+       the input file for no gain. B.5 still applies - see 2.2.
+
+   prem_pressure / prem_depth moved meltprocs -> miscellaneous to break the solub_* arm.
+   ! NEW PARAMETERS GO IN &volatiles, NOT &tracersin.
+
+ A.1  THE THREE LEVELS   - each quantity lives at exactly one
+ -----------------------------------------------------------------------------------------------
+   TRACER   every conserved quantity, and H2O solubility.
+            H2O, H2Ofree, OxC, ReC, OEX, CFLUID, OFLUID, WSOL, fO2, F3FT, SCRB
+   CELL     the TOex solve and nothing else. Inputs summed from the cell's tracers AFTER
+            solubility; outputs written back onto them.
+            ? Why not per tracer: a tracer is either solid or molten, so it could only ever pass
+              phi = 0 or 1 - the degenerate branches where one Fe3+ host is ABSENT, and the
+              solid<->melt Fe3+ exchange would not exist. The cell is the smallest volume in which
+              the coexistence being solved for is represented.
+   GRID     derived intensive state, cached for the step, never advected.
+            fO2, the five COH mole fractions, rho_fluid, eta_fluid.
+            ! Diagnostics and coefficients only. Nothing conservative lives here.
+
+ A.2  WHERE THE SOLVE SITS IN THE TIMESTEP
+ -----------------------------------------------------------------------------------------------
+   The slot exists inside TraMeltErupt; the two eval_fO2_traWsol calls will be replaced.
+       1  flow solve
+       2  carbon ingassing            (new velocities, before advection)
+       3  advect tracers
+       4  melting / eruption          (solidus reads C(c_oxC), lagged one step - B.9)
+       5  per-tracer solubility       S_eff = S*a_H2O^n, a_H2O LAGGED from step n-1     3.C.1
+       6  gather -> CELL TOex solve   -> fO2, sink shares, speciation, rho, eta        3.B.1 3.C
+       7  scatter back to tracers     incremental for rock, proportional for fluid     3.B.2 3.D
+       8  outgassing                  speciated, from 6                                3.F.1
+       9  COH redistribution / Darcy  on the (H,C,O_ex) triple, rho and eta from 6     3.E
+      10  tracer -> grid interpolation, for output and for step n+1's solidus
+
+   ! No grid->tracer interpolation of speciation is needed: rho and eta are consumed as cell
+     scalars in the same cell the solve ran in.
+   ! Fluid arriving in a new cell is not re-speciated until the next solve. Harmless for
+     conservation precisely because OFLUID is transported explicitly, not recomputed on arrival.
+   ! TWO LAGS, both structural and both one step: a_H2O into 5 (B.16) and the carbonate fraction
+     into 4's solidus (B.9). Neither is a shortcut - each output is produced by 6, downstream of
+     its consumer. Removing either needs an inner iteration over the whole step.
+
+ A.3  RUNTIME ALGORITHM, TABLED MAGEMIN
+ -----------------------------------------------------------------------------------------------
+   ? A full lookup of the TOex outputs was rejected: the input space is 7-D (1.3e9 nodes at 20 per
+     dimension), and the regime boundaries are near-discontinuities, so interpolating across one
+     returns shares that do not sum to 1 - and renormalising breaks the shared-fO2 construction.
+
+   EXPENSIVE AND TABULATABLE   MAGEMin. Depends only on (P,T,p,R). Already in the fork as
+                               fO2_data x 6 maps + metal_data x 6.
+   NOT TABULATABLE, AND NOT CHEAP EITHER. Measured on the ported solver, 2000 calls at phi = 1
+   over 2-22 GPa and 1200-2700 K, all converged:
+         1.14 ms per cell        34 outer bisection iterations, from the full bracket
+   Against the 2-D benchmark (1 x 256 x 64 = 16384 cells, 8.2 s/step as it stands today):
+         every cell, every step, cold start   18.7 s/step   2.3x THE ENTIRE CURRENT TIMESTEP
+   ! COST CONTROL IS NOT OPTIONAL AND IS NOT PREMATURE. Three levers, in order of what they buy:
+     (1) CONVERGENCE TOLERANCE, the big one. The bisection currently runs until the RESIDUAL is
+         tiny; 34 halvings of a ~25 log unit bracket is ~1e-9 in fO2, against a TABLE whose own
+         resolution is ~0.01 (A.4). Exiting at the table's resolution is worth roughly 3x. This is
+         1.6's deferred "revisit as a perf change after GATE 1".
+     (2) WARM START. Seeding from the cell's stored fO2POS narrows the bracket from ~25 log units
+         to ~4, which is log2(25/4) = 2.6 HALVINGS - about 3 iterations, not 25. Bisection is
+         logarithmic in bracket width, so a warm start is worth much less here than intuition
+         suggests. It is still free and cannot change the answer, but it is not the lever.
+     (3) DIRTY-FLAG SKIPPING (3.C.5). Linear in the fraction skipped, so it is the only lever that
+         can buy an order of magnitude - and after (1) and (2) the step is still ~6 s against a
+         current 8.2. EXPECT TO NEED IT. It is sequenced last because it is the only one that
+         changes the answer, not because it is unlikely.
+
+   Worth building later, both low-dimensional: a (P,T) table of K1..K4, EMOG, the gph/dia sign,
+   IDV and FMQ; and optionally phi_i(P,T) as an EOS seed to cut the 6 fixed passes to 2.
+
+ A.4  THE SOLID TABLES: AXIS, RESOLUTION, FILE CONTRACT
+ -----------------------------------------------------------------------------------------------
+   THE AXIS IS THE WHOLE PROBLEM. The oxybarometer is log-linear in Fe3+/Fe2+ = R/(1-R), so
+   sampling uniformly in R fights a logarithm. Max |error| in log10 fO2, R in [1e-3, 0.185]:
+         nR      uniform-in-R    log-spaced
+         17          1.67           0.032
+         25          1.24           0.014
+         49          0.68           0.0036
+         65          0.51           0.0020
+   Uniform cannot reach the target at any practical node count. No byte budget buys past a wrong axis.
+
+   ? On a positive-only axis Rmin is 1e-3, not 0, because fO2 -> -inf as R -> 0. The signed axis
+     supersedes it.
+   ! THE R CEILING IS MAGEMin'S, NOT A CHOICE. sb24 stops returning finite fO2 somewhere above the
+     sampled top; on the current composition that is beyond R = 0.4, which is what the table uses.
+   ! CONSEQUENCE FOR THE DEEP MANTLE, unchanged: bridgmanite wants Fe3+/SumFe ~ 0.5-0.7, above
+     anything tabulated, so lower-mantle fO2 rests on the log-linear EXTRAPOLATION. Same form
+     TOex.jl falls back on, so the two stay consistent - but GATE 1 must test it, not assume it.
+
+   (P,T)      100 x 100 per sector. Decimation tests put 100x100 near 0.008 RMS; finer buys little
+              because the MAX error is set by phase-assemblage discontinuities and does not converge.
+   precision  6 decimals for fO2 (1e-6 log units), 8 for metal (it runs down to ~1e-5).
+   size       ~26 MB, ~2.94e6 minimizations, ~30 min on 16 threads. Generation time is the constraint.
+
+   FILE CONTRACT. The R axis is written EXPLICITLY as nR values on header line 5. Reconstructing
+   it from min/max as an even grid silently mislocates every interior node. A legacy nR=1 table
+   whose line holds "Rmin Rmax" still loads (list-directed read takes the first value).
+
+   THE TABLE PAIR AS OF 2026-09-03 - two files, generated together, cross-validated at load:
+       StagfO2.dat    100 x 100 x 30, R in [-1.96, 0.40], uniform in asinh(R/2e-3) to 2.7e-15
+       StagMetal.dat  identical grid and map order, native Fe as a WEIGHT FRACTION of the solid
+     load_s_fO2_data aborts if the metal grid or R axis disagrees - they would describe different
+     rocks. A MISSING metal table is not fatal; the solver degrades to FeM_net.
+     ! THE TWO ALWAYS REGENERATE TOGETHER. They come off the same minimisations, so a mismatched
+       pair is not a partial update, it is two different rocks.
+     ! 120 of 1.8M nodes non-finite: the SAME 2 (P,T) cells in the TZ sector at T ~ 3970-4000 K,
+       every R, both endmembers. Fully molten, benign, filled from finite neighbours at load.
+
+   INTERPOLATION COORDINATE. u = log(R/(1-R)) on a positive-only axis, asinh(R/R0) on a signed one
+   (the logit is undefined at R <= 0). Interpolating in R instead throws away the axis.
+   ! Metal is CLAMPED in R at both ends where fO2 is not - there is no metal above the sampled
+     range and no more of it below, so extrapolating either end invents iron.
+
+   LOADER CONTRACT, three rules the multi-R path depends on:
+     (a) thermochem_int's Hint means H2O for 'solubility' and R for 'fO2'. It is clamped to the
+         solubility table's H2O axis ON THE SOLUBILITY PATH ONLY - clamping it on the fO2 path
+         pins R to the H2O axis, which has one node.
+     (b) Non-finite nodes are repaired at load from finite neighbours, with a warning, and abort
+         if a node has no finite neighbour. Untouched they poison the four cells around each.
+     (c) Maps read are COUNTED, so a truncated file is a diagnosed abort rather than whole maps
+         left undefined.
+
+   ! GATE 1 TRAP. TOex.jl builds its own interpolant on a much finer axis than the table, so at
+     low R the FORTRAN IS MORE ACCURATE THAN THE REFERENCE and they will disagree by far more than
+     0.01. Settle the comparison basis before GATE 1 runs, or it measures the wrong thing.
+
+===============================================================================================
+ PART B - DECISIONS TAKEN
+===============================================================================================
+
+ B.1  REFERENCE STATE
+ -----------------------------------------------------------------------------------------------
+   Excess oxygen against Fe as FeO, C as graphite, H as H2O:
+       CO2 / carbonate +2 per C · CO +1 · organic C, graphite 0 · CH4 -2 · H2O 0 · H2 -1 per H2
+   Mass conversion: 2 O per C = 2*15.999/12.011 = 2.6642 kg O per kg C.
+   ! EVERY entry and exit point uses this convention, through ONE helper (B.6). If it is
+     duplicated, the budget drifts and the failure looks like a solver problem.
+
+ B.2  CARBON-OFF COMPATIBILITY IS A GATING GUARANTEE, NOT A PHYSICS IDENTITY
+ -----------------------------------------------------------------------------------------------
+   With traceelement_carbon = .false. the solver is never called, the tables are never loaded
+   (refstate.f90 passes traceelement_carbon to load_s_fO2_data), and every new field sits inside
+   `if (traceelement_carbon)`. So CFLUID == 0, OFLUID == 0, a_H2O == 1 and the redistribution
+   behaves exactly as today.
+   ! A CARBON-FREE FLUID IS NOT A PURE-H2O FLUID, and its O_ex is not zero. Measured with Mc = 0
+     at 3 GPa / 1500 K:
+         log fO2   -18     -15     -12      -9      -6
+         X_H2      0.999   0.980   0.504   0.008   0.0002
+         fex      -8.88   -8.71   -4.47   -0.067  -0.002
+     Water dissociates to H2 + 1/2 O2 at low fO2 with no carbon anywhere. The identity holds
+     because the SOLVER IS BYPASSED, not because the chemistry is trivial. Anything that runs the
+     solver on a pure H-O system will see a large negative OFLUID, and any H2-solubility term
+     (F.8) is live with carbon off and therefore needs its own switch, defaulting off.
+   ! Protected by GATE 2a. The other place it is at risk is H_escape_mode - B.13.
+
+ B.3  COMPOSITION BASE: EM_Xhz / EM_Xbs
+ -----------------------------------------------------------------------------------------------
+   defaults_include.f90 already holds the endmembers TOex uses (same 7 oxides, same order,
+   canonically reordered in refstate.f90), so X = p*EM_Xbs + (1-p)*EM_Xhz ports verbatim.
+   ? FEOPOS IS NOT USED. Under tracers_FeNum it holds Fe# = FeO/(FeO+MgO) against a DIFFERENT
+     oxide basis (4 oxides, mole%, Xu et al. 2009). Mixing the two bases corrupts the Fe
+     inventory, which is what converts O_ex <-> Fe3+. See F.1 for how to add it safely.
+
+ B.4  TRACER FIELDS
+ -----------------------------------------------------------------------------------------------
+   RULE: every advected field must mean the same thing regardless of TYPEPOS. "Total carbon" and
+   "excess oxygen" pass; "melt CO2" and "graphite" fail - they go silently wrong the moment a
+   tracer melts or freezes.
+
+   CONSERVED, ADVECTED, D = 1.0
+       OEXPOS      wt% O   rock-hosted excess oxygen, SIGNED
+       OxCPOS      wt% C   oxidised carbon  (carbonate on solid, dissolved CO2 on melt)
+       ReCPOS      wt% C   reduced carbon   (graphite/diamond on solid, ~0 on melt)
+       H2OFREEPOS  wt%     H in the free COH fluid, as H2O-EQUIVALENT
+       CFLUIDPOS   wt% C   carbon in the free COH fluid
+       OFLUIDPOS   wt% O   excess oxygen in the free COH fluid, SIGNED
+   CONSERVED, REAL D        H2OPOS - bound water, keeps Dpartition_water
+   WRITTEN EACH SOLVE       fO2POS, F3FTPOS  (diagnostic and warm start)
+   UTILITY                  SCRBPOS, WSOLPOS - unchanged
+   NEVER STORED, DERIVED    the five COH mole fractions, aC, graphite vs diamond, melt CO2 vs
+                            solid carbonate (from TYPEPOS), fluid rho and eta
+
+   ! H2OFREEPOS IS A HYDROGEN INVENTORY IN H2O-MASS UNITS. molH = 2*Mh/M_H2O is exact for H
+     whatever the speciation (M_H2O already contains the oxygen, so Mh/M_H2O is H2O MOLECULES and
+     the 2 is H atoms per molecule), and the solver divides by its own speciation-dependent nH.
+     Measured at fixed Mh = 10 g, 3 GPa / 1500 K, sweeping fO2 from -14 to -1:
+         H atoms      1.110186 mol   INVARIANT to 6 decimals
+         fluid mass   4.34 -> 12.32 g   a 2.84x range that STRADDLES Mh
+     It is not a one-sided bias - at the oxidised end the fluid is HEAVIER than Mh because it
+     takes up CO2. H2OFREEPOS is not the fluid's mass in either direction; it is a hydrogen count
+     at 9.0075 g per mol H.
+     ! Nothing leaks. Water -> methane is a reaction, C + 2H2O -> CH4 + O2: the carbon comes from
+       CFLUID and the liberated O2 is booked as excess oxygen, which is fex going negative. Mass
+       closes across H2Ofree + CFLUID + OFLUID + OEX + OxC + ReC.
+     ! No oxygen double-count, and not by luck: OFLUID is EXCESS O and H2O's oxygen is the
+       reference, so it is excluded by construction.
+     ! CONSUMERS THAT NEED THE REAL MASS, and there are only two: Darcy (3.E.3) and degassing
+       (3.F.1). Both take n_fluid * mean molar mass from the solve; B.17 says why it is not stored.
+
+   ? WHY OxC AND ReC ARE KEPT rather than collapsed to one total: melting.f90 feeds C(c_oxC) to
+     the Dasgupta solidus (carbonate depresses it, graphite does not), and the pair preserves a
+     kinetic degree of freedom for F.3. The redundancy with OEX is deliberate and safe under
+     advection and under melting at D=1; it can break ONLY at mass-flux boundaries, which is
+     exactly where B.6 is mandatory.
+
+ B.4b ONE FIELD, SPLIT BY TRACER IDENTITY - NOT BY A SECOND FIELD
+ -----------------------------------------------------------------------------------------------
+   ? OEXPOS is ONE index shared across solid and melt tracers, not OEX_solid / OEX_melt. The
+     separation "melt segregation carries its own Fe3+ and CO2 away" already exists: isol and imel
+     are DIFFERENT tra entries from the moment of melting, each with its own scalar. A second
+     field would sit at zero on every tracer, always.
+   The split happens in two steps, both already in the plan:
+     1  AT MELTING - mechanical, D = 1, mass-weighted. Bookkeeping only, no chemistry.
+     2  AT THE NEXT CELL SOLVE - chemical. sOex and mOex are structurally distinct inside the
+        residual, so the writeback re-equilibrates the mechanical split.
+   After 2, imel carries its own re-equilibrated budget and takes it with it if it erupts - melt
+   segregation of oxidised species, at no extra field cost.
+
+ B.5  NOTHING IS DOUBLE-PARTITIONED
+ -----------------------------------------------------------------------------------------------
+   ! TOex IS the partitioning. Running C or O_ex through Dpartition would fractionate them and
+     then let the solve fractionate them again from a corrupted start. No diagnostic.
+   ? Water is genuinely different: TOex takes FREE water as an input and never splits H between
+     melt and solid. Bound-water partitioning stays StagYY's job, so Dpartition_water stays.
+   ? C and O_ex stay MECHANICALLY in the TE array with D forced to 1.0. At D=1 the fractional
+     branch collapses to identity and the batch branch to mass-weighted mixing, so all six
+     melting/freezing branches handle the transfer with no new code.
+   ! The free COH fluid is a THIRD PHASE, not a dissolved component - a partition coefficient is
+     the wrong tool for it entirely. D = 1 makes the melting step a mechanical split of pore
+     fluid between the solid and melt sub-parcels. NO speciation factor belongs there; that is
+     the double count this decision exists to prevent. The chemistry is in B.16 instead.
+   ! Dpartition_carbon and outgas_fraction_carbon are REMOVED. Either silently reintroduces the
+     double count, so setting them is a hard error.
+
+ B.6  ONE REFERENCE-STATE HELPER
+ -----------------------------------------------------------------------------------------------
+       toex_ref_state:  (mC, oex_per_C) -> (dC_ox, dC_red, dO_ex),  f_ox = clamp(oex_per_C/2, 0, 1)
+   In volatilestuff, which is a leaf, so every call site can reach it: ingassing, eruptive
+   outgassing, initial conditions, surface exchange, escape.
+
+ B.7  SUB-GRID REDOX HETEROGENEITY MUST SURVIVE THE WRITEBACK
+ -----------------------------------------------------------------------------------------------
+   ? Grain size is NOT used anywhere in this work.
+   ? WHAT PROTECTS THE HETEROGENEITY IS THE WRITEBACK RULE, not a timescale: 3.B.2 applies the
+     cell's CHANGE to each tracer, so every tracer takes the same absolute increment and the spread
+     between them is preserved exactly. Overwriting each tracer with the cell mean would flatten
+     every cell every step, and 5.4 would then measure its own artefact.
+   ! Melt sinks equilibrate essentially instantly; solid-state Fe3+ does not, by many orders of
+     magnitude. That asymmetry is real but is deferred to F.9 - equilibration is instantaneous.
+
+ B.8  ROBUSTNESS
+ -----------------------------------------------------------------------------------------------
+   ? Non-convergence: retain the previous step's partition for that cell, count it, report the
+     rate. NEVER error stop - a production run is 1e4-1e6 steps.
+   ? Isotonic repair of a non-monotonic oxybarometer happens OFFLINE at table-build time.
+   ? Warm start the outer bisection within TOex_warmstart_window of the stored fO2POS, falling
+     back to the full bracket on failure.
+   ? Dirty-flag skipping: re-solve only when a cell has moved by more than TOex_d{T,phi,p,budget}_resolve.
+   ? THE FLUID BRANCH IS NEVER SWITCHED OFF (corrected 2026-08-31). DHMS breakdown releases real
+     free water beyond 10 GPa, and zeroing H at the solve while leaving it on the tracer is a mass
+     violation. What actually breaks past 10 GPa is only the ZD09 FUGACITY EOS - K1..K4 and EMOG
+     are HP98 and remain valid. So H2OFREE/CFLUID/OFLUID are tracked at every depth, and only the
+     call into zd_volume/zd_fugacity clamps its (P,T) to the calibration box (<=10 GPa,
+     673-2573 K), flagged by fluid_eos_extrapolated. Same technique as the solid table.
+
+ B.9  THE SOLIDUS FEEDBACK IS LAGGED BY ONE STEP
+ -----------------------------------------------------------------------------------------------
+   Melting runs before the solve, so the carbonate fraction the solidus sees is from the previous
+   one. ? Accepted and documented; the alternative is an inner iteration.
+
+ B.10 SURFACE RESERVOIR: TWO BOXES, (C, O_ex) PAIRS
+ -----------------------------------------------------------------------------------------------
+   A  atmosphere + ocean, receives degassing.      State (C_A, O_A)
+   B  ingassable crust/sediment, feeds ingassing.  State (C_B, O_B)
+   ? The currency is (C, O_ex), not an ox/red binary: a binary cannot represent CH4, which is a
+     reductant (O_ex = -2), not merely unoxidised.
+   DIAGNOSTICS  Theta = O_A/C_A - 2 (surface oxidation excess: >0 oxic with free O2, =0 exactly
+                CO2, -2<.<0 CO2+CO/CH4, <=-2 net reducing) and O_B/C_B (what gets subducted).
+
+ B.11 BURIAL A -> B: TWO INDEPENDENT SCALARS
+ -----------------------------------------------------------------------------------------------
+   ! NEVER write burial as "move carbon at box A's prevailing O/C ratio". Written that way f_org
+     does nothing and organic burial is meaningless.
+       dC = burial carbon flux
+       dO = 2*(1 - f_org)*dC*(M_O/M_C)          C_B += dC, O_B += dO, C_A -= dC, O_A -= dO
+   The residual 2*f_org*dC*(M_O/M_C) STAYS IN A by construction. That one asymmetry is the entire
+   redox engine of the surface system - it is how organic burial produces free O2.
+   Two pathways f_org mixes: carbonate/seafloor carbonation (C enters B at O_ex = +2, neutral for
+   A) and organic burial (C enters B at O_ex = 0; A keeps 2 O per C).
+       RATE      F_bur = min( C_A*(1 - exp(-dt/tau_burial)), headroom(B) )
+       CAPACITY  C_B <= (w_max_C/100)*M_ingassable
+   ! The exponential matters: StagYY steps (1e3-1e5 yr) are comparable to plausible tau_burial, so
+     a linear C_A*dt/tau would overshoot.
+   ! When B saturates, burial backs up and C_A rises - a high-CO2 greenhouse. A result, not a
+     clamp. Same constraint as the per-tracer ingassing cap (4.7); both must use the same w_max_C.
+
+ B.12 THE DEGASSING / BURIAL STEADY STATE
+ -----------------------------------------------------------------------------------------------
+   With r_deg = O_ex/C of the erupted parcel, box A at steady state gives f_org = 1 - r_deg/2:
+       r_deg = +2 (CO2)               f_org = 0     all burial must be carbonate
+       r_deg = +1.6                   f_org = 0.2   ~ modern Earth
+       r_deg =  0 (graphite-buffered) f_org = 1     all burial organic - the pump's maximum
+       r_deg <  0 (CH4-rich)          f_org > 1     IMPOSSIBLE - no steady state
+   ! The last row is a PREDICTION: a mantle reduced enough to degas net-reducing carbon cannot
+     sustain an oxidising surface, and f_org <= 1 means you cannot tune out of it. For r_deg < 0
+     the missing sink is hydrogen escape (B.13).
+   ! STRUCTURAL WARNING - the loop through B and the mantle is POSITIVE (reduced mantle -> CH4-rich
+     degassing -> reducing A -> more organic burial -> reduced B -> little oxidant ingassed ->
+     mantle stays reduced), and symmetrically for the oxidised branch, so the coupled system is
+     plausibly BISTABLE near r_deg = 0. Mitigating: mantle Fe3+ is a far larger oxygen reservoir
+     than carbon, so loop gain may be small; and H escape is a one-way oxidising term that breaks
+     the symmetry. Probed deliberately by 5.6.
+
+ B.13 HYDROGEN ESCAPE
+ -----------------------------------------------------------------------------------------------
+   Because the reference puts H in H2O, escape bookkeeping is one line:
+       EVERY 2 H ATOMS THAT ESCAPE LEAVE +1 O OF EXCESS OXYGEN BEHIND, REGARDLESS OF CARRIER.
+       H2O degassed  dC 0, dO_ex 0    ... its 2 H escape  dC 0, dO_ex +1
+       CH4 degassed  dC +1, dO_ex -2  ... its 4 H escape  dC 0, dO_ex +2   NET dC +1, dO_ex 0
+   ! So methane degassing plus complete escape leaves carbon at GRAPHITE equivalence, not CO2.
+     Getting the surface to CO2 still needs organic burial or further escape.
+   ? PHYSICS: H2O is cold-trapped on a wet planet and barely escapes; CH4 and H2 are not and reach
+     the homopause. That asymmetry is why a CH4-rich Archean atmosphere is thought to have driven
+     net surface oxidation.
+   ? H_escape_mode is REQUIRED, no silent default:
+       'legacy'     water_budget(2) driven by outgas_fraction_water, exactly as today. Protects B.2.
+       'speciated'  degassed H2O -> ocean; CH4/H2 -> escape; +1 O per 2 H credited to box A.
+   ! Today outgas_fraction_water = 1.0 sends 100% of erupting tracers' water to space.
+   ! PAYOFF: escape credits O to A, raises Theta, and (once f_org responds, F.2) lowers organic
+     burial - a NEGATIVE feedback, and the term missing from B.12's loop. Not a refinement;
+     plausibly what stabilises the system.
+
+ B.14 SURFACE MODE
+ -----------------------------------------------------------------------------------------------
+   'twobox'      internal A/B model live, burial active.
+   'prescribed'  C_B and O_B/C_B held at namelist values, burial = 0, A a pure diagnostic.
+   ? 'prescribed' is the hook for an external climate model, and the control run for isolating
+     mantle behaviour from surface feedback - which is what 5.6 needs.
+   ! Degassing speciation is computed in BOTH modes: it is a by-product of the cell solve on the
+     mantle side. f_org, tau_burial and w_max_C are 'twobox' parameters only.
+
+ B.15 f_org IS CONSTANT FOR NOW
+ -----------------------------------------------------------------------------------------------
+   ? A single namelist scalar.
+   ! Consequence: unless f_org happens to equal 1 - r_deg/2, box A drifts monotonically. Theta
+     must be in the time series. Feedback formulations that would bound it are in F.2.
+
+ B.16 WATER ACTIVITY COUPLES SOLUBILITY TO SPECIATION   (settled 2026-09-04)
+ -----------------------------------------------------------------------------------------------
+   THE PROBLEM. WaterSaturationAndVerticalRedistribution dissolves free fluid into rock as bound
+   water up to the storage capacity S. But the sH2O tables were generated with
+   Initialize_MAGEMin(buffer="aH2O") at B = 1, i.e. saturation against PURE WATER. Once the fluid
+   is COH with X_H2O < 1, water activity is lower and the true storage content is lower. The same
+   applies in reverse: with a reduced fluid present, MORE water should exsolve, not less.
+
+   ? THE FIX IS ON THE THRESHOLD, NOT ON THE FLUX.
+         S_eff = S * a_H2O^n,     a_H2O = (phi_H2O/phi_H2O_pure)*X_H2O  ~  X_H2O
+     ! Capping the transferable MASS at X_H2O instead was considered and REJECTED: it makes the
+       amount moved per step depend on speciation while leaving the equilibrium target at S, so an
+       undersaturated tracer still walks to the wrong endpoint, just more slowly.
+   ? n is a namelist knob defaulting to 1, because linear-in-activity is what the table's own
+     buffer axis means. NAM literature supports 0.5-1 depending on the substitution mechanism.
+   ? LAGGED ONE STEP, from the speciation cached at 3.C.6. a_H2O comes FROM the solve, so using it
+     to set S_eff in the same step is circular. a_H2O = 1 before the first solve, so behaviour is
+     unchanged until then. Standard operator splitting; a_H2O tracks C/H and fO2, both slow.
+   ? BOTH SOLID AND MELT take the scaling, but they are NOT equally clean:
+       SOLID   NAMs take H as OH point defects; several substitution mechanisms, so the exponent
+               is uncertain, but there is no meaningful H2/CH4 storage. One activity variable
+               genuinely controls it - a_H2O^n is the right functional form.
+       MELT    dissolves H2O as molecular + OH, but ALSO molecular H2 and CH4, and those matter
+               precisely where a_H2O is low (Hirschmann et al. 2012; Ardia et al. 2013).
+     ! KNOWN LIMITATION, ACCEPTED: the scaling drives melt water -> 0 as X_H2O -> 0, where H2/CH4
+       dissolution should take over. Reduced-fluid melt is therefore UNDER-hydrated. Documented
+       rather than floored - an invented floor is a number nobody can defend later. Closing it
+       needs an H2 solubility model, which is F.8.
+   ! Carbon-off is inert by B.2: X_H2O == 1, so S_eff == S identically and GATE 2a/3a are safe.
+   ! The rigorous alternative is an a_H2O axis on StagH2O.dat, exactly as fO2 got its R axis.
+     Deferred: expensive, and the cheap version should first show that it matters.
+
+ B.17 ONE ELEMENT CURRENCY; REAL MASS IS DERIVED, NEVER STORED   (settled 2026-09-04)
+ -----------------------------------------------------------------------------------------------
+   Three element ledgers, and nothing else is conserved state:
+       water_budget   H, in H2O-EQUIVALENT kg      carbon_budget  C      oxygen_budget  O_ex
+   Two of the three already worked this way; only the H ledger's UNITS need explaining, and those
+   units are load-bearing - they are what makes carbon-off numerically unchanged.
+
+   ? REJECTED, with reasons, so they are not revisited:
+     true element masses (wt% H)   cleanest semantics, but every threshold
+       (water_percolation_threshold, WaterSatCutoff, water_min_sat, water_dry_conc, topH2O_val),
+       every par file, every restart and every plot changes meaning by 9.0075x. Enormous migration
+       for a cosmetic gain, and GATE 2a fails by construction.
+     species-resolved tracer fields  underdetermined per tracer (F.7), AND not independently
+       conserved - the species interconvert, so every solve would overwrite them.
+     an advected fluid-MASS field    fluid mass is not conserved under a re-solve (same H,
+       different mass), so an advected copy goes stale the moment redox changes.
+
+   ? DECIDED: real mass lives at GRID level, which A.1 already reserves for derived intensive
+     state. Cache the fluid's mean molar mass beside rho_fluid and eta_fluid at 3.C.6, as the
+     DIMENSIONLESS ratio mfluid_per_H so its neutral value is exactly 1. Two consumers only -
+     Darcy (3.E.3) and degassing (3.F.1).
+   ! A total fluid mass for REPORTING may be computed in ComputeTotalOxygenCarbonMass from the
+     cached speciation (3.F.4). A diagnostic, never a ledger entry.
+
+   ? WHEN THE H2-SOLUBILITY MODEL ARRIVES (F.8), extend the SAME convention to the bound
+     reservoir rather than inventing a second one: H2OPOS becomes bound H as H2O-equivalent, and
+     the capacity becomes S_total = S_H2O*a_H2O^n + S_H2(f_H2) in the same units, with the bound
+     speciation derived from the same cell solve. No new tracer state.
+   ! The H2 term is LIVE WITH CARBON OFF (B.2), so it needs its own switch defaulting off, or it
+     breaks B.2 and GATE 2a.
+
+   ! water_budget slots 1-4 and 6 are H and stay exactly as they are - the arithmetic is already
+     right. Slot 5, the OCEAN, is the one that must become a real mass, because an ocean is liquid
+     water and degassed CH4 is not. That is the box-A interception of B.13 and belongs to Phase 4;
+     until then, with carbon on, slot 5 must carry an explicit "approximate" flag (3.E.4).
+
+ B.18 THE FLUID MOVES AS AN ELEMENT TRIPLE, NEVER AS A REDOX LABEL   (settled 2026-09-04)
+ -----------------------------------------------------------------------------------------------
+   THE PROBLEM. Free fluid is the one volatile reservoir that moves by something other than
+   advection: WaterSaturationAndVerticalRedistribution marches a scalar in kg up each column,
+   handing it between cells and between subdomains. A parcel leaving a reduced cell and arriving
+   in an oxidised one must deliver the right C and O, not just H.
+
+   ? "OXIDISED / NEUTRAL / REDUCED" IS NOT TRANSPORTABLE. The same fluid is oxidising in one cell
+     and reducing in another - the label is a RELATION between fluid and host, not a property of
+     the fluid. What is transportable is the element budget, and B.4 already provides it:
+         (H2Ofree, CFLUID, OFLUID) = (H as H2O-equivalent, C, excess O signed)
+     Three extensive amounts, complete, and MIXING IS EXACT ELEMENT-WISE ADDITION - no mixing rule
+     for fO2, no lever arithmetic, no averaging of an intensive variable. That is the reason this
+     basis was chosen, and it is what makes the receiving cell's job trivial: it does not need to
+     know where the parcel came from, only the three numbers.
+
+   THE VALIDITY WINDOW, in mol:        -n_H/2  <=  n_Oex  <=  +2*n_C
+     Upper bound: all C as CO2, and H cannot oxidise past H2O. Lower bound: has NO carbon term,
+     because CH4 (-2 per C over 4 H) and H2 (-1 per H2) are both exactly -0.5 per H - the most
+     reducing thing available to a fluid is a function of its hydrogen alone. A parcel outside the
+     window cannot exist. Position INSIDE it is the redox state, and it is a pure function of the
+     three transported numbers, computable with no thermodynamics.
+
+   ? TWO TRANSPORT RULES, AND THEY DIFFER:
+     DISSOLUTION  pool -> bound water.  H ONLY. It takes zero C and - because H2O is the reference
+       state - ZERO O_ex, so the ledger closes with no extra term. The pool's C/H rises as a
+       consequence, which is correct: stripping water out of a COH fluid drives the residue toward
+       carbon saturation.
+     PHASE SPLIT  pool -> {stays, ascends}.  CONGRUENT, fixed proportions on all three. Darcy moves
+       a PHASE; there is no basis for fractionating elements at a permeability limit.
+   ! The failure mode of the first rule - a parcel stripped of H arriving as bare carbon - is shut
+     off by B.16, not by a clamp: as the pool dries of H2O, a_H2O falls, S_eff falls, dissolution
+     stops. B.16 IS THEREFORE LOAD-BEARING FOR CONSERVATION, not only for realism, and is a
+     prerequisite of 3.E rather than an independent refinement.
+   ! This also answers "can only part of the free H2O be partitioned per step" - the question is
+     malformed. Every kilogram that moves is FLUID, and fluid is the triple. The speciation
+     limitation lives on the capacity (B.16), never on the flux.
+
+   ! THE BOUND-WATER DIFFUSION PATH NEEDS NOTHING (advdif -> smooth_tracer_H2O). It moves c_h2o
+     only, which is pure H2O, hence zero O_ex by construction.
+
+   ! ncycles = 3 LETS A PARCEL CROSS THE MANTLE IN ONE STEP with its composition frozen at the
+     deepest source's speciation. It still exchanges mass with every cell on the way, but no
+     intermediate cell re-speciates it, so redox freezing - carbon precipitating where a rising
+     reduced fluid meets oxidised wall rock - cannot form at all. The ncycles = 4 path
+     (limitflow_relperm) caps transit at ONE cell per step, which makes "inert in transit" exactly
+     consistent, because the receiving cell's next solve IS the equilibration.
+     ? limitflow_relperm is REQUIRED with carbon on (3.E.6). Same one-step-lag class as B.9, but
+       only if transit is one cell.
+
+===============================================================================================
+ PART C - DATA MODEL
+===============================================================================================
+
+ C.1  NEW NAMELIST PARAMETERS   (declared in volatiles_mod.f90, defaulted under `! &volatiles`)
+ -----------------------------------------------------------------------------------------------
+     surface_mode          = 'twobox'   ! 'twobox' | 'prescribed'
+     H_escape_mode         = 'legacy'   ! 'legacy' | 'speciated'   REQUIRED, no silent default
+     f_org                 = 0.2        ! organic fraction of A->B burial. Constant (B.15)
+     tau_burial            = 1.0e5      ! yr
+     w_max_C               = 1.5        ! wt% C, saturation of the ingassable surface layer
+     C_B_prescribed        = -1.0       ! kg;  <0 = use init
+     OC_B_prescribed       = 2.0        ! O per C
+     aH2O_exponent         = 1.0        ! n in S_eff = S*a_H2O^n  (B.16)
+     TOex_warmstart_window = 2.0        ! log10 fO2 half-width
+     TOex_dT_resolve       = 20.0       ! K            dirty-flag thresholds
+     TOex_dphi_resolve     = 0.02
+     TOex_dp_resolve       = 0.02
+     TOex_dbudget_resolve  = 0.01       ! relative
+     TOex_stub_solve       = .false.    ! identity solve, for GATE 3-0 only (3.B.3)
+   ARRIVES WITH ITS FEATURE, NOT BEFORE   tau_redox_solid (F.9)
+   ALREADY IN (Phase 2)  initOxPower_F3FT = 0.02, initCarbon_oex_per_C = 2.0
+   REMOVED, hard error if present   Dpartition_carbon (B.5), outgas_fraction_carbon (-> 3.F.1)
+
+ C.2  BUDGET ARRAYS
+ -----------------------------------------------------------------------------------------------
+   oxygen_budget(5)  IMPLEMENTED at 2.5:  1 rock · 2 free COH fluid (SIGNED) · 3 box A · 4 box B ·
+                     5 total. Boxes are zero until Phase 4; 5 is the closed-system invariant.
+   carbon_budget grows to carry both boxes as (C, O_ex) pairs. Proposed, to be fixed at 4.1:
+     1 ingassed C · 2 outgassed C · 3 legacy surface C · 4 total C · 5 C_A · 6 O_A · 7 C_B ·
+     8 O_B · 9 escaped H · 10 O credited to A by escape
+   ! Layout must be settled before it goes into the restart, or every checkpoint breaks (G.1).
+
+ C.3  GRID FIELDS
+ -----------------------------------------------------------------------------------------------
+   c_oxC, c_reC                         PRE-EXISTING, not part of this work
+   c_Oex, c_Cfluid, c_Ofluid            ADDED at 2.7, in the same block and the same order as the
+                                        tracer TE fields, written by carbon_write
+   fO2                                  already written under fO2_write
+   THE DERIVED-STATE CACHE (3.A), allocated under carbon, never in the restart. Neutral values in
+   brackets are what make each consumer inert until 3.C.6 fills them:
+     X_H2O, X_CO2, X_CH4, X_CO, X_H2    [1,0,0,0,0]   X_H2O is also a_H2O for B.16
+     mfluid_per_H                       [1.0]         DIMENSIONLESS ratio, real mass / H2O-equiv
+     rho_fluid, eta_fluid               [1e3, IAPWS]  consumed by 3.E.3
+     T/phi/p/budget at last solve, force flag         dirty-flag state for 3.C.5
+
+===============================================================================================
+ PART D - THE IMPLEMENTATION PROGRAMME
+===============================================================================================
+
+ PHASE 0 - REPAIRS                                                        [x] DONE 2026-09-01
+ -----------------------------------------------------------------------------------------------
+ [x] 0.1  THE CARBON OUTGASSING LOOP IS CLOSED. Clost_kg is credited back exactly as the water
+          path does it, and avCrbxCell is topped up from carbon_budget(3) before distribution so
+          degassed carbon is re-ingassable.
+          ! ASYMMETRY WITH WATER: outgassed water LEAVES the system, outgassed carbon degasses
+            INTO box A, so the domain total is invariant rather than decreasing.
+          ! The shortfall is currently spread UNIFORMLY over surface cells. Real degassing is
+            localised at eruption sites - a placeholder until B.10.
+ [x] 0.2  retrieve_vn_trench works off a local 3x3 stencil and takes the better-conditioned
+          Hessian row with an isotropic fallback: 0 degenerate over a 200k sweep, worst residual
+          3.7e-16. Row 2 alone collapses to (0,0) wherever the stress field is grid-aligned.
+          ! Gaussian pre-smoothing NOT reinstated - it needs stresstmp over 5x5 and the array is
+            dimensioned (-1:nx,-1:ny), so ix-2 is out of bounds at every subdomain edge.
+ [x] 0.3  Unknown InitCarbonMode is a gabort.
+ [x] 0.4  carbon_retrace_tol, scaled by the DOMAIN TOTAL on both checks. The retracement error is
+          round-off of a global sum, so it is a roughly CONSTANT ~2.6e4 kg set by how much carbon
+          passes THROUGH the system, not by how much is left - scaling it to the reservoir makes
+          the same absolute error read as a growing relative one.
+ [x] 0.5  ingas_carbon print gating; Dcrb removed.
+
+     GATE 0  [x] PASSED. 7001 steps hold totCrb at 7.363107781851E+19 kg to all 13 printed digits,
+             drift EXACTLY 0.0; the before-binary leaks 5.161E+16 kg (0.0701%) with CrbOutgas pinned
+             at 0. retrieve_vn_trench verified out-of-model: bit-identical over 50 repeats,
+             H n = lambda_min n to 3.7e-16 over 200k random Hessians.
+             ! The 3-D trench path was tested standalone only - it is unreachable in 2-D.
+             ! THE DECISIVE SIGNAL that the loop is genuinely closed is CrbIngas EXCEEDING the
+               total inventory (by 6.45E+13 kg here): carbon can only pass the one-time budget by
+               going round the loop more than once. Conservation alone does not show it.
+             ! OPEN DEFECT, NOT ATTRIBUTED: all three long runs SIGSEGV at
+               melt_freeze_continuous_tracers_new+3767 via TraMeltErupt (pinned against the symbol
+               table). Untouched by this campaign, and the A/B pair brackets it with BOTH arms
+               crashing - but not cleared, because no stock long-run baseline exists. Crash states
+               differ with no NaN in any log, pointing at an unguarded index, not a runaway.
+             ! TRAP IN THE SHIPPED PAR FILES: pars/par.2d sets outgas_fraction_carbon = 0.0, which
+               mutes the whole carbon cycle. Also why 0.1 could persist unnoticed.
+
+ PHASE 1 - SOLVER PORT, STANDALONE
+ -----------------------------------------------------------------------------------------------
+ [x] 1.1  Solver lives in volatiles_mod.f90 (module volatilestuff). Fixed-size locals throughout.
+          ! NOT CALLED FROM THE TIMESTEP. The only wiring is toex_bind_solid_fO2 in refstate.f90.
+          ! WHERE THE OXYBAROMETER CALL HAD TO GO, AND WHY IT TOOK THREE ATTEMPTS. Both obvious
+            homes are cycles: volatiles_mod (perplexstuff -> comppars -> volatilestuff, expected)
+            and volatileprocs (advdif.o -> volatileprocs.mod -> perplexstuff.mod ->
+            thermochem_mod.o -> io.mod -> advdif.o, found only by building it).
+            ! GNU make does not fail on a cycle - it prints "Circular X <- Y dependency dropped",
+              drops an edge and carries on. The symptom was a clean serial build and a -j8 that
+              died on a missing .mod, i.e. it looked like a race. `make -n | grep -i circular`
+              is what names it.
+            RESOLUTION: volatiles_bind.f90 declares NO MODULE, so it emits no .mod, nothing can
+            depend on it, and it cannot appear in any cycle - while being free to use perplexstuff.
+ [x] 1.2  (P,T) primitives. Over 50 points, 0.5-25 GPa x 900-2500 K: IDV and FMQ BIT-IDENTICAL,
+          K1..K4 <= 1.8e-14, logfO2_EMOG <= 6.0e-14, FMQ_hp98 <= 2.9e-14 relative.
+ [x] 1.3  endmember_composition from EM_Xhz/EM_Xbs. 17 quantities x 4 mixes, all BIT-IDENTICAL.
+ [x] 1.4  Solid oxybarometer adapter. Axis, contract and both sides implemented (A.4); signed axis
+          and metal table added 2026-09-03. Node-exact round trip Julia -> file -> Fortran.
+ [x] 1.5  ZD09 EOS. 9 points, pure H2O: volume BIT-IDENTICAL, fugacity <= 2.4e-16 relative.
+          ! This tests the TRANSLATION. The absolute check against ZD09 Table 6 is a property of
+            the reference (bench 1.1); porting cannot change it.
+ [x] 1.6  Speciation, carbon demand, aC solve. The 120-iteration bisection is kept as-is - halving
+          it changes the last bits and would muddy the comparison. Revisit as a perf change after
+          GATE 1, with the diff measured.
+ [x] 1.7  coh_state. 24 states: aC, all five mole fractions, fex and carbO <= 3.6e-14 relative;
+          carbon closure max 4.0e-15 against a 1e-12 target.
+ [x] 1.8  Residual + bisection. Convergence judged on the residual alone; the no-sign-change branch
+          returns the closer endpoint unconverged.
+          ! jsign() reproduces Julia's three-way sign(), which both bisections branch on.
+          ! WARM START DELIBERATELY OMITTED until GATE 1 passes - it changes the iteration path and
+            would make any disagreement impossible to attribute. Phase 3 is where it earns its keep.
+ [x] 1.9  Driver toex_partition. At phi = 1 both implementations skip MAGEMin entirely, so the
+          whole driver is directly comparable: converged, fO2, sOex and iters BIT-IDENTICAL in all
+          21 cases.
+     ! WHAT PHASE 1 HAS NOT SHOWN: every test above holds the SOLID BRANCH OUT (phi = 1). It is
+       the TRANSLATION that is validated, not the solver.
+
+     FOUR CONVENTIONS THAT MUST HOLD ON BOTH SIDES. Each is worth 0.03-0.74 log units on its own,
+     and each is invisible in a single-implementation test - only a cross-check catches them.
+       (C1) mm.MgO = 40.30 (Mg 24.30 + O 16.0, that table's own convention). It feeds molfracXB,
+            nB_per_mass, Phi, both ceilings and the melt mole fractions. 0.0386 log units, ~4x the
+            GATE 1 tolerance.
+       (C2) R IS Fe3+/SumFe EXACTLY, and every caller of oxidize_bulk passes wt_in = true. Inside
+            it: ferric iron enters as MOLES of Fe2O3 (not 1.5*nFe3, which is its oxygen); the FeO
+            column carries TOTAL iron so raising R oxidises rather than deletes; wt_out scales by
+            the OUTPUT oxide's mass.
+       (C3) THE GENERATOR RUNS ON sys_in = "wt". XB/XH are wt%, the same numbers
+            endmember_composition carries as mass fractions; handing them to MAGEMin as mol%
+            describes a different rock by ~5 percentage points of MgO and Al2O3. assignR_to_Xv!
+            must track wt_out to sys_in, and path_solve must inherit the caller's.
+       (C4) toex_sOwt_of_R is the conserved-iron Fe+O form. Composition is LINEAR in R there, so
+            sOwt is a Mobius function inverting in CLOSED FORM - no bisection. Verified at 27
+            points over R in [-1.96, 0.9] and three mixes, to 12 significant figures.
+
+     GATE 1   >= 2000 tuples spanning a real run's range, both implementations. Require fO2 within
+              0.01 log units, every sink share within 1e-6, oxygen closure < 1e-8, carbon < 1e-12,
+              identical convergence verdict on >= 99 % with every disagreement inspected.
+              ! Non-negotiable. Nothing in Phase 2+ can be debugged if the solver is wrong,
+                because every symptom will look like a bookkeeping error.
+              STATUS 2026-09-03: PARTIAL, full sweep blocked on the regenerated tables.
+                PASSED  phi = 1: fO2 to 1.7e-4 log units, shares to ~1e-4 relative (the residual is
+                        the IDV trapezoid and bisection tolerances, not the port)
+                        SLB buffers: all 6 printed decimals at 16 (P,T) over 1-60 GPa, 1000-2500 K
+                        sOwt(R): 12 significant figures over the whole signed range
+                        metal table: node-exact round trip, all 8 decimals
+                        mass balance ~5e-9 on six live-table states
+                NOT RUN the 2000-tuple sweep WITH the solid branch. The Fortran reads a bilinear
+                        100x100x30 table where the Julia calls MAGEMin at the point, so expect a
+                        floor of a few tenths of a log unit from that alone.
+              ! RESTATE THE 0.01 CRITERION as a table-resolution error budget before running, or
+                the sweep fails on resolution and looks like a port defect.
+
+ PHASE 2 - FIELDS AND BOOKKEEPING                                    [~] CODE COMPLETE 2026-09-03
+ -----------------------------------------------------------------------------------------------
+ [x] 2.1  OEXPOS, CFLUIDPOS, OFLUIDPOS in the carbon block of init_tracers, after ReCPOS.
+          H2OFREEPOS widened to COH-fluid H as H2O-equivalent; identical with carbon off.
+ [x] 2.2  D = 1.0 and outgas_fraction = 0 on all five (outgassing becomes speciated at 3.F.1).
+          Dpartition_carbon / outgas_fraction_carbon default to -999. and gabort in read_input.
+          ! DEVIATION: H2Ofree takes D = 1 only under traceelement_carbon. Unconditionally would
+            change a carbon-OFF run whenever Dpartition_water /= 1, which GATE 2a forbids. No-op
+            at the default 1.0. Revisit if free-water partitioning is ever wanted fixed per se.
+          ! The knobs gabort rather than being deleted from the namelist: a namelist read error is
+            unactionable, this names the reason and the fix.
+ [x] 2.3  toex_ref_state in volatilestuff (B.6). Verified against B.1: CO2 gives 2.66422 kg O per
+          kg C, CH4 the same magnitude negative, graphite zero, carbon conserved to 1e-14.
+ [x] 2.4  init_oxidizingPower rewritten. New knobs initOxPower_F3FT, initCarbon_oex_per_C. O_ex
+          from toex_oex_of_R on endmember Fe (p = 1 for the basalt family) plus the initial
+          carbon's oxygen through 2.3. Unknown mode is now a gabort.
+ [x] 2.5  ComputeTotalOxygenCarbonMass, called after ComputeTotalWaterCarbonMass. Fills
+          oxygen_budget (C.2); carbon_budget(4) now includes fluid C.
+ [x] 2.6  magic 13 -> 14, oxygen_budget appended. A magic<14 restart loads with zeros and prints
+          that init_oxidizingPower must be re-run.
+ [x] 2.7  c_Oex, c_Cfluid, c_Ofluid in comp, in the SAME order as the tracer TE block.
+          ! comp is filled by the slice copy c(c_te1:c_xxN) = tra(TE1POS:XXNPOS), so any
+            reordering silently relabels every field - and it shows up in a carbon-OFF run too,
+            which is exactly what GATE 2a catches.
+
+     GATE 2   ! PREREQUISITE, FOUND 2026-09-04: random_repeatable = .true. MUST be set in the par
+                file, on both binaries. It defaults to .false. (defaults_include.f90) and par.2d
+                does not set it, so random_seed() draws an unpredictable seed and THE SAME BINARY
+                RUN TWICE DIVERGES FROM STEP 0. Without the flag this gate can never pass, and a
+                failure looks like a code defect. Verified: bit-reproducible with it set.
+              ! The baseline must be the CURRENT tree with ONLY the Phase 2 diff reverted. A
+                worktree at HEAD is not a baseline - the tree carries substantial uncommitted work
+                predating Phase 2, and HEAD-vs-current differs on 40 of 50 time.dat columns for
+                reasons that have nothing to do with this phase.
+              (a) COMPATIBILITY: with traceelement_carbon = .false., a water-only benchmark is
+                  BIT-FOR-BIT identical to the pre-change binary over >= 200 steps.
+                  [x] PASS 2026-09-04. 200 steps, par.2d: all 52 output files BYTE-IDENTICAL.
+                  Only EW_parameters.dat differs, by exactly 6 lines - the two sentinel defaults
+                  and the two new namelist entries. That file is a namelist ECHO, not state.
+                  ! To get that, the magic bump was made CONDITIONAL: magic = 13, and 14 only when
+                    traceelement_carbon. A water-only run therefore writes byte-identical restart
+                    files to a pre-Phase-2 binary. Conditional magic is already the pattern in that
+                    routine (if (vector) magic=400+magic).
+              (b) CONSERVATION: with carbon on and the solve STUBBED, O_ex and C conserved to
+                  round-off over >= 1000 steps including melting, eruption and advection.
+                  [~] O_ex PASSES, carbon NOT EXERCISED. 1001 steps, carbon on, ingassing on,
+                  0 errors:
+                      O_ex   1000 samples, max relative drift 1.378e-13 from the first value
+                             (~0.6 ulp per step on a global sum). Non-trivially populated at
+                             9.19e18 kg by 2.4, and carried through melting, eruption, advection.
+                      totCrb exactly ONE distinct value over all 1000 steps.
+                  ! CARBON NEVER ENTERS THE MANTLE, so its conservation is trivial. InitCarbonMode
+                    ='Uniform' is the ONLY mode and it seeds the SURFACE reservoir (avCrbxCell),
+                    not tracers; ingassing does not fire from a cold start in 1000 steps
+                    (CrbIngas = 0). The code path IS covered, because OxC/ReC/OEX/CFLUID/OFLUID
+                    share one TE array, one D = 1 and the same six melting/freezing branches, and
+                    O_ex traverses all of them. What is untested is carbon-specific bookkeeping at
+                    the ingassing boundary - which is 4.7's job.
+                  ! To close it: add a mantle-seeding InitCarbonMode, or run from a developed
+                    restart. Not done - it is arguably outside Phase 2.
+              ! FIRST REAL-RUN EXERCISE OF THE TABLE PAIR: both loaded correctly in a live StagYY
+                run, signed axis recognised, native iron at 6.52 wt% max.
+
+ PHASE 3 - COUPLING
+ -----------------------------------------------------------------------------------------------
+   SIX BLOCKS, IN ORDER. Each is a superset of the previous one's guarantees and each has a test
+   that does not depend on the blocks after it. Do not reorder - every block reads state an
+   earlier one creates.
+       3.A  DERIVED-STATE CACHE      inert scaffolding. Nothing changes, carbon on or off.
+       3.B  ASSEMBLY AND WRITEBACK   the tracer<->cell communication, tested with a STUB solver.
+       3.C  THE SOLVE                first real behaviour change.
+       3.D  RELAXATION               time dependence of the solid.
+       3.E  THE FLUID PARCEL         Darcy on the (H,C,O_ex) triple, real mass and buoyancy.
+       3.F  MASS-FLUX BOUNDARIES     outgassing, ingassing, melting - where B.6 is mandatory.
+   ! 3.A AND 3.B ARE DELIBERATELY INERT. Carbon-off bit-for-bit AND a carbon-on no-change test both
+     hold through them, so when 3.C breaks something the cause is unambiguous. Building the cache
+     and the communication at the same time as the chemistry is how this phase fails.
+   ! THE SOLVE NEEDS NO COMMUNICATION - per-cell, neighbour-independent, no halo, no reduction.
+     The only communicating step in the phase is 3.E's column pass.
+
+ 3.A  DERIVED-STATE CACHE                                  [x] DONE 2026-09-04; nothing reads it
+ -----------------------------------------------------------------------------------------------
+ [x] 3.A.1  Six allocatable arrays in volatilestuff (a leaf, so every consumer can reach them),
+            dimensioned (-1:nx,-1:ny,-1:nz,nb) like Dh2o. Allocated in main under
+            traceelement_carbon, freed in deallocate_all_fields. A.1 reserves GRID for exactly
+            this: intensive, derived, never advected, never in a ledger.
+                toex_X(..,TOEX_NX)   the five COH mole fractions, slots TOEX_XH2O/XCO2/XCO/XCH4/XH2
+                toex_mfluidH         real fluid mass / H2O-equivalent mass
+                toex_rhof, toex_etaf kg/m3, Pa.s
+            ! The cache is EXACTLY the outputs of the last solve. No control state lives in it -
+              see 3.A.3.
+ [x] 3.A.2  NEUTRAL INITIALISATION IS THE DESIGN, not a placeholder. Every neutral value is the
+            constant the pre-TOex code used, so a consumer reading the cache reproduces it EXACTLY:
+                X_H2O = 1, other X = 0 · a_H2O = 1 -> S_eff == S                  (B.16 inert)
+                toex_mfluidH = 1.0     · a RATIO, so fluid mass == H2Ofree        (B.17 inert)
+                toex_rhof = 1e3        · the hardcoded w_rho it replaces
+                toex_etaf = 0.         · SENTINEL for "unset". volatilestuff is a leaf and cannot
+                                         reach IAPWS_dynamic_viscosity, so the Darcy step keeps
+                                         its own call until 3.E.3 reads a positive value here.
+            ! Storing mass-per-H as a DIMENSIONLESS RATIO rather than kg/mol is what makes 3.E
+              provably inert before 3.C. Wire the consumers first, fill the cache later.
+            ! toex_aH2O() and toex_mass_per_H() return the neutral value when the cache is NOT
+              allocated, so a caller needs no traceelement_carbon guard of its own.
+ [x] 3.A.3  NO DIRTY-FLAG STATE HERE. It was built and then removed, because it is control state
+            for an optimisation whose necessity is not yet established, and mixing it into a cache
+            of solve OUTPUTS muddles what the cache means.
+            ? WHAT THE MECHANISM IS, for when 3.C.5 needs it: the solve is a nested double
+              bisection with an EOS inside it, so it dominates the step (A.3: 2.3x the whole
+              timestep, cold). If a cell has not moved in (T, phi, p, budget) beyond the thresholds
+              since it was last solved, the stored partition is still the answer to within those
+              thresholds - skip it and leave the tracers alone. That needs the previous VALUES
+              stored per cell, four reals, which is 0.5 MB on the 2-D benchmark. The state cost is
+              irrelevant; the risk is not, because skipping leaves a cell holding a partition
+              computed at a different state and that error varies spatially - exactly the
+              checkerboard GATE 3d looks for.
+            ? Skipping is nonetheless exactly CONSERVATIVE under 3.B.2's incremental writeback,
+              because not writing back is not changing anything. Same argument as 3.C.4.
+ [x] 3.A.4  RESTART needs no plumbing at all. The cache is derived, so it is not in the checkpoint
+            (magic 14 unchanged), and with every cell solved every step there is nothing to force.
+            ? A restart is not bit-identical to a continuous run at the one-step level - one step
+              at a_H2O = 1. Accepted rather than putting derived state in the checkpoint.
+     TEST   [x] PASS 2026-09-04. Builds clean; carbon-ON 120 steps against the Phase-2 binary,
+            all 66 output files BYTE-IDENTICAL. Run twice - with the dirty-flag arrays and after
+            removing them - so the inertness claim is measured in both forms, not asserted.
+
+ 3.B  CELL ASSEMBLY AND WRITEBACK                               [x] DONE 2026-09-04, GATE 3-0 PASS
+ -----------------------------------------------------------------------------------------------
+   THE SLOT TABLE. Nine (reservoir, host phase) pairs, in volatilestuff so both sides see them.
+   Tracer identity does the solid/melt split (B.4b) - the SAME tracer field lands in a different
+   slot depending on TYPEPOS, which is why there is no OEX_solid / OEX_melt field.
+       TOEX_S_OEX/S_OXC/S_REC   hosted by SOLID tracers
+       TOEX_M_OEX/M_OXC/M_REC   hosted by MOLTEN tracers
+       TOEX_F_H/F_C/F_O         the free COH fluid triple, on every non-air tracer
+   toex_cell_t carries Msol, Mmel, Mtot, phi, pbas, Tk, Pgpa, fO2 and w0(9) - the CURRENT mass in
+   each slot, which is both the solver's input and the baseline the writeback increments against.
+   ! pbas/Tk/Pgpa, not p/T/P: Fortran is case-insensitive, so p and P would be ONE component.
+ [x] 3.B.1  toex_cell_gather -> solver input, from celltra after link_tracers_to_cells:
+              M_sol, M_mel  from MASSPOS over non-air tracers    phi = M_mel/(M_sol+M_mel)
+              p             basalt fraction from TYPEPOS, mass-weighted over SOLID tracers ONLY -
+                            F.5 holds the melt at a fixed basaltic XB, so molten tracers do not
+                            vote on the solid composition
+              budgets       mass-weighted OEX, OxC, ReC, H2Ofree, CFLUID, OFLUID
+              warm start    mass-weighted fO2POS
+            GUARDS: skip an all-air, zero-mass or massless cell (cl%valid stays .false.).
+ [x] 3.B.2  toex_cell_scatter -> toex_apply_slot, once per slot. EVERY slot is INCREMENTAL: add
+            the cell's CHANGE to each host, never overwrite it with the cell mean. Overwriting
+            flattens every cell every step and destroys the sub-grid redox heterogeneity B.7
+            exists to protect, which 5.4 would then measure as absent.
+            ! A uniform CONCENTRATION increment is all it takes, for any mass distribution:
+              sum(m_i*(c_i+dc)) = sum(m_i*c_i) + dc*Msub. No per-tracer weights.
+            ? THE FLUID IS INCREMENTAL TOO, which is a change from the first draft. It IS one
+              connected phase per cell and does want flattening - but the Darcy step ALREADY
+              flattens it (icycle 4 spreads free fluid evenly over the cell's tracers). Doing it
+              again in the writeback duplicates an existing mechanism, and it costs the exact-no-op
+              property that makes GATE 3-0 a clean test. Homogenisation stays where it is.
+            ! A slot whose phase is ABSENT from the cell (no melt, say) returns without writing;
+              the caller keeps the mass rather than forcing it onto the wrong host.
+            ! FLOORS ARE NOT UNIFORM ACROSS THE THREE O_ex SLOTS, and the asymmetry is structural:
+                MELT O_ex   FLOORED AT 0. toex_melt_fO2 is log10(XO/(XFeO - 2*XO)) with XO
+                            proportional to mOex, so negative is UNDEFINED, not merely unphysical -
+                            and TOex has no melt-metal sink. invert_demand brackets the melt at
+                            [lowclip, maxmOex] for exactly this reason.
+                SOLID O_ex  signed to -minsOex, the Fe0 plateau (2026-09-03b).
+                FLUID O_ex  signed to the B.18 window, -n_H/2.
+              The last two need composition, so they land with 3.C and 3.E.5. Flooring either at 0
+              would be wrong; leaving the MELT unfloored hands the solver an input its own bracket
+              cannot represent, and the failure surfaces at 3.C looking like a solver defect.
+            ! NON-NEGATIVITY REPAIR. An incremental decrement can push a tracer below its floor
+              (0 for OxC/ReC/H2Ofree/CFLUID; -minsOex at that tracer's own composition for OEX;
+              the B.18 window for the fluid triple). Clip, then redistribute the shortfall over
+              tracers with headroom, largest first.
+            ! EXACT CLOSURE. Sum the cell back up after scatter and assign the round-off residual
+              to the largest-mass tracer. Without it GATE 3b measures ~1e-16 per cell per step
+              accumulating, which over 1e5 steps is not noise.
+ [x] 3.B.3  STUB SOLVE. TOex_stub_solve (namelist, default .false.) makes toex_solve_cells set
+            w = cl%w0 - the identity - and run the full gather/scatter path. Wired into melting.f90
+            after the SECOND eval_fO2_traWsol, i.e. A.2 step 6, between solubility and Darcy.
+            ! Under the incremental rule the tracers come back UNCHANGED, not merely conserved -
+              a much stronger test, and a reason to prefer that rule on testability alone. It also
+              means toex_apply_slot can return immediately when m_new == m_old, so the no-op is
+              exact rather than round-off-clean.
+     GATE 3-0  With TOex_stub_solve, a carbon-ON run is bit-for-bit identical to the same binary
+               with it off. This is the only chance to debug the communication scheme - celltra
+               walking, phase classification, mass weighting, the wt% conversion, floors and
+               closure - with the chemistry out of the way.
+               [x] PASS 2026-09-04. 120 carbon-ON steps, same binary, stub off vs on: 65 of 66
+               output files BYTE-IDENTICAL. The 66th is EW_parameters.dat, which must differ - it
+               is the namelist echo and the two par files differ by TOex_stub_solve itself.
+               ! Carbon-off is unaffected by construction: toex_solve_cells returns immediately
+                 without traceelement_carbon, so GATE 3a is not at risk from this block.
+               ! THE GATE EARNED ITS KEEP TWICE, neither time on the algebra:
+                 (a) A SWEEP THAT WRITES NOTHING CAN STILL PERTURB THE MODEL. The first clean run
+                     came back with EW_time.dat differing in ONE column, Cmass_error, by 1.1e-4
+                     PERCENTAGE POINTS on -0.43 - about 1e-6 relative on the underlying sums, with
+                     every state file identical. Cause: the sweep called link_tracers_to_cells,
+                     which deallocates and rebuilds every cell's traNum list, and the reorder shows
+                     up in a cancellation-dominated residual. Melting has already linked by that
+                     point and WaterSaturation links again straight after, so the call was pure
+                     redundancy. Removed -> exact.
+                 (b) CHECK THE RETURN CODE BEFORE DIFFING. An earlier attempt reported "all 66
+                     differ" from a run that never started: TOex_stub_solve was put in &tracersin
+                     in the par file while it is declared in &volatiles, and a namelist mismatch
+                     aborts at parse time. A diff-only harness reads that as total divergence.
+
+ 3.C  THE SOLVE                                                 first behaviour change
+ -----------------------------------------------------------------------------------------------
+ [ ] 3.C.1  Per-tracer solubility FIRST, with S_eff = S*a_H2O^n from the 3.A cache (B.16). It must
+            precede the gather: solubility decides how much water is FREE, and free water is what
+            the gather sums. Lagged by construction, not by shortcut - a_H2O comes from the solve.
+ [ ] 3.C.2  Replace the two eval_fO2_traWsol calls in TraMeltErupt. The routine STAYS for the
+            carbon-off path; it is not deleted.
+ [ ] 3.C.3  WARM START from the gathered fO2 within TOex_warmstart_window, full bracket on failure.
+            Withheld until now (1.8) so GATE 1 stayed attributable; from here it is the primary
+            cost control, not a refinement. It cannot change the answer - it moves the bracket, not
+            the root - so it is the one to spend first. Measure iterations before and after: A.3's
+            34-from-cold should fall by ~3. That is all a warm start buys: bisection is
+            logarithmic in bracket width. The tolerance is the lever - see A.3.
+ [ ] 3.C.4  FAILURE HANDLING (B.8): retain the previous partition for that cell, count it, report
+            the rate per output step. NEVER error stop.
+            ! Retaining the previous partition leaves the tracers alone, which is automatically
+              conservative under 3.B.2's incremental rule. Under a proportional rule it is not.
+ [ ] 3.C.5  DIRTY-FLAG SKIPPING. Probably required, on A.3's numbers. Store (T, phi, p, budget norm) per
+            cell at each solve and skip against TOex_d{T,phi,p,budget}_resolve. Conservative by
+            3.C.4's argument. ? Deliberately deferred behind the warm start: this one DOES change
+            the answer, so it has to earn its place against a measured profile rather than an
+            assumption. Report the skip fraction if it lands.
+ [ ] 3.C.6  Fill the 3.A cache: the five X_i, a_H2O = X_H2O, mfluid_per_H, rho_fluid, eta_fluid.
+            This one step switches on B.16 and 3.E.3 together, because it is where 3.A.2's neutral
+            values stop being the answer.
+     TEST   fO2 smooth, no checkerboard; failure rate reported; cost per step against skip fraction.
+
+ 3.D  TIME-DEPENDENT EQUILIBRATION                              [defer] see F.9
+ -----------------------------------------------------------------------------------------------
+   ? EQUILIBRATION IS INSTANTANEOUS FOR NOW (settled 2026-09-04). The writeback applies the cell
+     solution in full, every step, to solid, melt and fluid alike.
+   ! This does NOT cost sub-grid redox heterogeneity - 3.B.2's incremental writeback preserves the
+     spread between tracers exactly, because every tracer in the cell takes the same absolute
+     increment. tau would only slow the approach, not protect the structure (B.7, 5.4).
+   The slot stays numbered so 3.E and 3.F do not move. Design detail in F.9.
+
+ 3.E  THE FLUID PARCEL - DARCY ON AN ELEMENT TRIPLE              B.18
+ -----------------------------------------------------------------------------------------------
+   The only communicating step, and the only way a volatile moves other than by advection. Order
+   matters inside the block: 3.E.1 is a pure refactor, 3.E.2 is where chemistry enters, 3.E.3
+   changes the velocity.
+ [ ] 3.E.1  VECTORISE THE PARCEL. WaterMassExcessBelow -> a 3-vector (H as H2O-equivalent, C,
+            O_ex signed). WaterPassUpwards gains a leading dimension of 3; send_2Dzpside /
+            receive_2Dzmside take the rank-4 array, or are called three times.
+            ! Carbon off, components 2-3 are identically zero and component 1's arithmetic is
+              unchanged. Byte-identical, and that is the test.
+ [ ] 3.E.2  THE TWO TRANSFER RULES (B.18). Eleven sites write H2Ofree today; each becomes a triple:
+              volatileprocs_mod.f90  526, 569 setHomogeneousWfield · 1992, 1998, 2008, 2012
+                                     exsolution, icycles 2-3 · 2028, 2031 absorption ·
+                                     2066 icycle-4 redistribution
+              tracers.f90            2883 ingassing · 3235
+            Which rule applies is not a judgement call: anything writing H2OPOS is DISSOLUTION
+            (H only); anything moving fluid between a tracer and the parcel is a PHASE SPLIT
+            (congruent).
+            ! The exsolution branch tests bound water w against S but sheds wt - S, LUMPING
+              bound-derived H2O with the pre-existing free triple. Decompose it - the free triple
+              goes first, being the mobile phase, and the bound-derived part joins the parcel as
+              PURE H2O, dC = 0 and dO_ex = 0.
+ [ ] 3.E.3  REAL MASS AND BUOYANCY. Replace w_rho = 1e3 with rho_fluid and the IAPWS pure-water
+            call with eta_fluid, both from 3.A. Convert H2O-equivalent H to real mass through
+            mfluid_per_H wherever a MASS is meant - the Darcy flux, phi_w, the relative-
+            permeability saturation.
+            ! Until this lands the Darcy velocity is wrong for any non-H2O fluid, by up to the
+              2.84x range B.4 measured. Promoted out of the phase tail for that reason.
+            ! phi_w = mass/(rho*V): numerator AND denominator change and they do NOT cancel - a
+              CH4-rich fluid is both lighter and less dense.
+ [ ] 3.E.4  TOP OF DOMAIN. H2Oout becomes three numbers. H -> water_budget as today; C and O_ex go
+            to carbon_budget(3) and oxygen_budget(3) until Phase 4 exists, or they are silently
+            destroyed the first time a carbon-bearing fluid surfaces. Slot 5 flagged approximate.
+ [ ] 3.E.5  ASSERT THE B.18 WINDOW after every merge and every subdomain receive. Three multiplies,
+            and it catches a dropped component at the site rather than as a GATE 3b drift a
+            thousand steps later.
+ [ ] 3.E.6  REQUIRE limitflow_relperm WHEN CARBON IS ON (B.18) - gabort otherwise. Under ncycles=3
+            a parcel crosses the mantle in one step with frozen composition, and redox freezing
+            cannot form at all.
+     TEST   carbon off, byte-identical to Phase 2. Carbon on, all three components conserved across
+            the column pass and across subdomain boundaries - same case on 1 vs 4 vertical
+            subdomains, budgets must agree.
+
+ 3.F  MASS-FLUX BOUNDARIES                                      where B.6 is mandatory
+ -----------------------------------------------------------------------------------------------
+   ! B.4's redundancy between OEX and the OxC/ReC pair is safe under advection and under melting at
+     D = 1. It breaks ONLY here, which is why every entry and exit goes through 2.3.
+ [ ] 3.F.1  SPECIATED ERUPTIVE OUTGASSING, replacing the blanket outgas_fraction. Degas melt CO2
+            and fluid carbon with their O_ex through 2.3; retain graphite and carbonate hosted in
+            the residue. outgas_fraction_carbon is already a hard error (2.2).
+            ? G.4 open: fluid carbon only, or fluid carbon plus melt CO2.
+ [ ] 3.F.2  INGASSING WRITES A REFERENCE-STATE TRIPLE. Moved forward from 4.7 because it is a
+            PREREQUISITE for GATE 3b, not a surface-model feature - the moment ingassing fires,
+            carbon arriving without its oxygen breaks the O_ex ledger. The split is:
+              HERE     the (C_ox, C_red, O_ex) write through 2.3 and the per-tracer w_max_C cap
+              PHASE 4  where the carbon comes from and at what O/C - box B
+            ! No dependency on 3.A-3.E; listed here because B.6 governs all boundaries together.
+ [ ] 3.F.3  MELTING AND ERUPTION, grid-level consistency. melting.f90:3732 scales c_H2Ofree by
+            Cf_solidrockfrac; c_Cfluid and c_Ofluid need the same scaling or the three grid fields
+            describe different fluids. Diagnostic only - comp is not a ledger - but it feeds output.
+            ! The tracer-level split needs nothing: D = 1 makes all six melting/freezing branches a
+              mass-weighted mechanical split already (B.5, verified by GATE 2b on O_ex).
+ [ ] 3.F.4  SEPARATE H FROM MASS in ComputeTotalWaterCarbonMass and water_budget reporting (B.17).
+            Slots 1-4 and 6 are H and stay as they are. Add a DIAGNOSTIC total fluid mass from the
+            cached speciation; mark slot 5 approximate while carbon is on.
+
+     GATE 3   (a) carbon-off bit-for-bit, re-run after EVERY block rather than once at the end.
+                  Each block is individually inert to carbon-off; if one is not, that is a finding.
+              (b) carbon-on O_ex and C conserved to round-off over >= 1000 steps with the REAL
+                  solver, ingassing firing and eruption occurring.
+                  ! Needs what GATE 2b could not have: carbon actually in the mantle. Either a
+                    mantle-seeding InitCarbonMode or a developed restart - settle before the gate.
+              (c) convergence failure rate < 1 % over the run's (P,T) coverage, failures MAPPED
+                  rather than counted.
+              (d) fO2 spatially smooth, within a few log units of FMQ where it should be. A
+                  checkerboard means 3.B.2's writeback rule is wrong.
+              (e) MPI INVARIANCE of 3.E: same case on 1 vs 4 vertical subdomains, budgets agree.
+
+ PHASE 4 - SURFACE RESERVOIR
+ -----------------------------------------------------------------------------------------------
+ [ ] 4.0  surface_mode dispatch and the export/import interface. Degassing speciation reported in
+          BOTH modes. EXPORT per step: F_CO2, F_CO, F_CH4, F_H2O, F_H2 and the totals F_C, F_O_ex,
+          F_H. IMPORT: avCrbxCell(ix,iy,ib) and the O/C of that carbon.
+ [ ] 4.1  'twobox': C_A, O_A, C_B, O_B in carbon_budget (C.2). Theta and O_B/C_B in the time series.
+ [ ] 4.2  Degassing -> A, speciated, via 2.3.
+ [ ] 4.3  Burial A -> B as TWO INDEPENDENT SCALARS (B.11). Residual oxygen stays in A.
+          TEST: with f_org = 0, O_A/C_A unchanged by burial; with f_org = 1, burial removes carbon
+          and NO oxygen. These two cases are the whole mechanism.
+ [ ] 4.4  Burial rate and capacity (B.11). w_max_C used here AND at 4.7 - same number.
+ [ ] 4.5  'prescribed': hold C_B and O_B, burial = 0, A diagnostic only.
+ [ ] 4.6  avCrbxCell carries C; oxygen rides as C*(O_B/C_B). No second SCRB carrier.
+ [ ] 4.7  SOURCE the ingassed carbon from box B at its O/C. The reference-state WRITE and the
+          per-tracer w_max_C cap moved forward to 3.F.2 - they gate GATE 3b.
+ [ ] 4.8  Replace the intra-cell exp(-depth/zscale) weighting. With zscale ~ 0.3-1 km inside a top
+          cell tens of km thick, the whole flux lands on whichever one or two tracers happen to be
+          shallowest, and the resulting wt% depends on that stochastic count.
+ [ ] 4.9  H_escape_mode (B.13). 'speciated' routes H2O -> ocean, CH4/H2 -> escape, +1 O per 2 H to A.
+          TEST: prescribed pure-CH4 degassing with full escape converges to O_ex/C = 0 at the
+          surface, and water_budget(6) falls by exactly the escaped H.
+
+     GATE 4   Over >= 1 Gyr: total C (mantle + A + B + escape) conserved to round-off; the surface
+              reservoir round-trips instead of draining; Theta and O_B/C_B stay finite and are
+              reported every output step.
+
+ PHASE 5 - VALIDATION
+ -----------------------------------------------------------------------------------------------
+ [ ] 5.1  Closed system: O_ex and C conserved to round-off over >= 1e4 steps.
+ [ ] 5.2  Open system: surface reservoir round-trips; no monotonic drain.
+ [ ] 5.3  Convergence-failure map over a real run's (P,T) coverage. Cross-reference bench section
+          4, whose low-P/T non-monotonicity finding was never confirmed against real MAGEMin.
+ [ ] 5.4  Redox sanity: mantle fO2 against dFMQ expectations; sub-grid heterogeneity survives the
+          3.D relaxation rather than being homogenised away.
+          ! What actually protects it is 3.B.2's INCREMENTAL writeback; tau only slows the approach.
+ [ ] 5.5  Escape stoichiometry, as 4.9 but end-to-end.
+ [ ] 5.6  Bistability probe (B.12): identical runs from reduced and oxidised initial mantle fO2,
+          looking for hysteresis in r_deg around 0. 'prescribed' first to isolate the mantle, then
+          'twobox'.
+
+===============================================================================================
+ PART E - SLAB DECARBONATION
+===============================================================================================
+ [ ] E.1  Ingassed carbon can currently only leave by melting and eruption. There is no slab
+          devolatilisation - carbonate breaking down to a CO2 fluid at slab-top P-T - which is how
+          most subducted carbon actually returns on Earth. TOex already supplies the split; the
+          missing half is a mechanism to move the fluid out, and the Darcy path is that machinery.
+ !        Scheduled after GATE 4. Earlier means debugging new physics on an unvalidated budget.
+
+===============================================================================================
+ PART F - DEFERRED
+===============================================================================================
+ F.1  FEOPOS Fe-INVENTORY CORRECTION. Phase 1 uses endmember Fe only. Once Fe# drifts through
+      melting the ceilings maxsOex/maxmOex are affected. Add as a RELATIVE correction, never
+      absolute:  n_Fe = n_Fe(EM at p) * [Fe#_tracer / Fe#_endmember(p)], with the denominator on
+      the SAME 4-oxide Xu basis the tracer's Fe# lives on. Being a ratio of ratios, the basis
+      mismatch cancels - the only safe formulation across two incompatible oxide sets.
+
+ F.2  f_org FEEDBACK. Three candidates: (i) constant, current; (ii) relax toward 1 - r_deg/2,
+      bounded but circular - it imposes the steady state one would rather predict; (iii)
+      f_org = f_org_max*sigma(-Theta/k), since organic preservation is strongly enhanced under
+      anoxic bottom water. RECOMMENDED when the time comes; reduces to (i) as k -> infinity.
+      ! (iii) regulates A's oxygen but does NOT damp the loop through B and the mantle. H escape does.
+
+ F.3  KINETIC OxC <-> ReC. Graphite -> carbonate is not instantaneous. The pair is currently
+      slaved to the equilibrium answer; carrying it as genuine state with a relaxation is a
+      one-line change once a timescale is defensible. This is why the fields were kept (B.4).
+
+ F.4  B -> A WEATHERING RETURN. Interface at 4.10, rate defaulted to zero. Carbonate weathering
+      returns C at O_ex = +2 (redox-neutral); oxidative weathering of organic C returns it at
+      O_ex = 0 while CONSUMING 2 O per C from A - the exact inverse of the organic pump, and A's
+      main oxygen sink. ! Without it, and with f_org constant, A's only oxygen sink is reduced
+      degassing.
+
+ F.5  MELT COMPOSITION CONSISTENCY. TOex mixes the SOLID endmembers by p while holding the melt at
+      a fixed basaltic XB. In StagYY the melt composition also varies with ttype. A conscious
+      approximation, not an oversight.
+
+ F.6  phi_i(P,T) EOS SEED TABLE. Only worth building if profiling shows the EOS loop dominating.
+
+ F.7  PER-TRACER COH SPECIATION. Not needed and not built. (H, C, O_ex) is a COMPLETE element
+      budget, but three amounts against five species with four degrees of freedom is
+      underdetermined by two; the missing constraints are thermodynamic, so recovering speciation
+      needs a 2-D solve for (fO2, aC). Never required, because the cell-level call already
+      produces speciation everywhere it is used, and B.18 shows transport does not need it either.
+      If it is ever wanted, that 2-D solve is the route - not more tracer fields.
+
+ F.8  H2 AND CH4 SOLUBILITY IN MELT. B.16's a_H2O scaling drives melt water to zero as X_H2O -> 0,
+      where molecular H2/CH4 dissolution should take over (Hirschmann et al. 2012; Ardia et al.
+      2013). Until a solubility law is added, reduced-fluid melt is UNDER-hydrated. Accepted and
+      documented rather than floored.
+
+ F.9  TIME-DEPENDENT SOLID EQUILIBRATION. Melt sinks equilibrate essentially instantly; solid-
+      state Fe3+ does not, by many orders of magnitude. The form is a rate-limited exchange toward
+      the cell solution, dOEX_applied = dOEX*(1 - exp(-dt/tau_redox_solid)), on the SOLID increment
+      only. Two things to get right when it is built:
+      ! IT IS A TRANSFER, NOT A PARTIAL APPLICATION. If the solid takes less oxygen than the solve
+        says, the remainder must be somewhere - credit it to OFLUID explicitly. Applying a fraction
+        of the solid's change while leaving the other reservoirs at their full new values loses
+        exactly the un-relaxed amount, every cell, every step.
+      ! A relaxing cell is deliberately OUT of equilibrium and therefore dirty by construction.
+        Exclude it from 3.C.5's skip test, or tau silently becomes infinite.
+
+===============================================================================================
+ PART G - OPEN QUESTIONS
+===============================================================================================
+ G.1  carbon_budget layout (C.2) is proposed, not fixed. Settle before 2.6 writes it into the
+      restart, or changing it breaks every checkpoint. ! oxygen_budget IS now fixed and in magic 14.
+ G.2  The ZD09 clamp's boundary behaviour: hold phi at its P=10 GPa value, or re-evaluate at the
+      clamped point each call? Confirm it introduces no discontinuity in the residual across the
+      boundary - the same concern the workflow flags for the solid table's extrapolation.
+ G.3  w_max_C = 1.5 wt% C is defensible in bulk but is one number standing in for a strongly
+      heterogeneous quantity. Sensitivity test at GATE 4.
+ G.4  Whether 3.F.1 should degas fluid carbon only, or fluid carbon plus melt CO2. Physically both
+      degas; the question is whether melt CO2 that freezes back in should be retained.
+ G.5  B.16's exponent n. Defaulted to 1 as the table's own buffer axis implies, but NAM literature
+      supports 0.5-1 and the melt may want a different value from the solid. Currently one knob
+      for both - split if 5.4 shows it matters.
+
+===============================================================================================
+ PART H - CHANGE LOG
+===============================================================================================
+ Newest first. One entry per change; detail lives in the section it names. The SPEC above states
+ what the code does now - the archaeology of how it got there stays down here.
+
+ 2026-09-04f 3.B IMPLEMENTED, GATE 3-0 PASSES. Nine (reservoir, host phase) slots; gather sums
+             them off celltra, scatter writes each back as a uniform CONCENTRATION increment over
+             its own host phase. 120 carbon-ON steps, stub off vs on, 65 of 66 files byte-identical
+             (the 66th is the namelist echo).
+             ! MELT O_ex IS FLOORED AT 0 and the solid and fluid are not. toex_melt_fO2 is
+               log10(XO/(XFeO-2*XO)) with XO proportional to mOex, so negative is UNDEFINED, and
+               TOex has no melt-metal sink - invert_demand brackets the melt at [lowclip, maxmOex]
+               against the solid's [-minsOex, +maxsOex]. Leaving it unfloored would hand the solver
+               an input its own bracket cannot represent, at 3.C, looking like a solver defect.
+             ! THE FLUID SLOTS ARE INCREMENTAL, NOT HOMOGENISED. The fluid is one connected phase
+               and does want flattening, but the Darcy step already flattens it (icycle 4).
+               Duplicating it costs the exact-no-op property GATE 3-0 depends on.
+             ! MASSPOS IS ALREADY KG. An intermediate holding MASSPOS/100 made Msol/Mmel/Mtot
+               kg/100 while documented as kg. Harmless in 3.B (the factor cancelled in every ratio)
+               but a landmine at 3.C, where the solver takes real masses.
+
+ 2026-09-04e 3.A IMPLEMENTED, 3.D DEFERRED. Four arrays in volatilestuff carry the per-cell derived
+             state at neutral values; toex_aH2O() and toex_mass_per_H() return the neutral value
+             when the cache is unallocated, so consumers need no carbon guard. eta uses a <=0
+             sentinel because volatilestuff is a leaf and cannot reach IAPWS. Inertness measured,
+             not asserted: 120 carbon-ON steps, all 66 output files byte-identical to the Phase-2
+             binary.
+             Equilibration is INSTANTANEOUS for now (F.9). It costs nothing in heterogeneity -
+             3.B.2's incremental writeback is what preserves the spread between tracers, not tau.
+             ! DIRTY-FLAG STATE BUILT AND THEN REMOVED. It is control state for an optimisation
+               whose necessity was not established, sitting in a cache of solve OUTPUTS. Measuring
+               the solver settled the sequencing: 1.14 ms and 34 cold iterations per cell means
+               18.7 s/step on the 2-D benchmark against a current 8.2 s/step - 2.3x the whole
+               timestep, so cost control IS needed - but a warm start at ~9 iterations gets it to
+               4.9 s/step on its own, and unlike skipping it cannot change the answer. Warm start
+               first (3.C.3), skipping only if that is not enough (3.C.5).
+
+ 2026-09-04d B.18 ADDED - the fluid moves as an ELEMENT TRIPLE, never as a redox label, and PHASE 3
+             SPLIT INTO SIX ORDERED BLOCKS (3.A-3.F). "Oxidised/reduced" is a relation between
+             fluid and host, so it cannot be transported; (H, C, O_ex) can, and mixing is exact
+             element-wise addition. Validity window -n_H/2 <= n_Oex <= +2 n_C, whose lower bound
+             has no carbon term because CH4 and H2 are both -0.5 O per H. Two transfer rules:
+             dissolution is H-only (H2O is the reference, so it moves zero O_ex), the phase split
+             is congruent. B.16 is what stops a parcel arriving as bare carbon, so it is now
+             LOAD-BEARING FOR CONSERVATION and a prerequisite of 3.E. limitflow_relperm becomes
+             required with carbon on. Ingassing's reference-state write moved 4.7 -> 3.F.2, being
+             a GATE 3b prerequisite. New in 3.B.2: the writeback is INCREMENTAL for rock and
+             proportional for fluid - overwriting with the cell mean would homogenise sub-grid
+             redox every step and make 5.4 measure its own artefact.
+
+ 2026-09-04c GATE 2 RUN. 2a PASSES bit-for-bit over 200 carbon-off steps (all 52 files); 2b passes
+             on O_ex (1.378e-13 over 1001 steps) but does NOT exercise carbon - the only
+             InitCarbonMode seeds the surface and ingassing never fires. Magic made conditional on
+             traceelement_carbon so 2a is byte-clean, not merely physics-clean.
+             ! THE MODEL IS NON-DETERMINISTIC BY DEFAULT (random_repeatable = .false., par.2d does
+               not set it) so the SAME BINARY RUN TWICE DIVERGES FROM STEP 0. This invalidated the
+               first attempt. And a worktree at HEAD is NOT a baseline - the tree carries
+               uncommitted pre-Phase-2 work, 40 of 50 columns differ for unrelated reasons.
+
+ 2026-09-04b B.17 ADDED - one element currency, real mass derived. At fixed Mh = 10 g the H count
+             is invariant at 1.110186 mol while the fluid mass runs 4.34 -> 12.32 g, a 2.84x range
+             that STRADDLES Mh. So H2OFREEPOS is not a biased mass, it is not a mass at all - it is
+             a hydrogen count at 9.0075 g per mol H. Real mass goes to GRID level.
+             ALSO CORRECTED B.2: a carbon-free fluid is NOT pure H2O - 99.9% H2 at log fO2 = -18,
+             fex = -8.88, with Mc = 0. The carbon-off guarantee is code gating, not chemistry.
+
+ 2026-09-04a B.16 ADDED - water activity couples solubility to speciation. The sH2O tables are
+             built at a_H2O = 1, so absorbing a COH fluid's whole H inventory as bound water
+             over-hydrates. FIX IS ON THE THRESHOLD: S_eff = S*a_H2O^n, lagged one step. Capping the
+             transferable MASS was rejected - it leaves the equilibrium target wrong and just walks
+             there more slowly. Melt under-hydration at low a_H2O accepted and logged as F.8.
+
+ 2026-09-03d PHASE 2 CODE COMPLETE. Three things to carry: comp field order must mirror the tracer
+             TE block (slice copy); H2Ofree takes D = 1 only under carbon, to protect GATE 2a; the
+             removed knobs gabort rather than vanishing from the namelist.
+
+ 2026-09-03c NATIVE IRON TABULATED AND READ. Disproportionation is oxygen-neutral, so no oxygen
+             coordinate can see it - and it is no corner case: a lower-mantle cell at R = +0.40
+             still carries 0.70 wt% Fe0, and sb24 holds 0.31 wt% at R = 0 where sOex is exactly
+             zero. Harvested from ph_frac_wt over {feg,fea,fee} on the SAME minimisations that make
+             fO2, read through the OPTIONAL toex_metal_hook.
+             ! Metal is CLAMPED in R where fO2 is not, and excluded from enforce_R_monotone!
+               because it DEcreases with R. Unbound hook => FeM_solid falls back to FeM_net.
+
+ 2026-09-03b THE REDUCED HALF OF THE SOLID AXIS IS LIVE. sOex spans [-minsOex, +maxsOex]; below the
+             FeO reference the solid is an oxygen SOURCE. Node validation (0,1) -> [-2,1);
+             coordinate -> asinh(R/R0); below a signed table fO2 holds FLAT (the Fe0 + 1/2 O2 = FeO
+             plateau) and above it stays log-linear. Verified continuous through R = 0, pinning at
+             exactly R = -2, minsOex/maxsOex = 2.036 (Fe2+ -> Fe0 returns a whole O, -> Fe3+ half).
+
+ 2026-09-03a REFERENCE BUFFERS REBUILT FROM SLB (2024). The port shipped with Frost (1991), which
+             bench 1.7-1.8 had retired: an offset is meaningless unless buffer and fO2 share a
+             dataset, and Frost put metal-BEARING rock above its own IW. Matches Julia to all 6
+             printed decimals at 16 (P,T) points.
+
+ 2026-09-02g SOLID CEILING SET TO maxsOex = 0.5*(Ms*X[3]/mm.FeO)*mm.O/TOex, by analogy with the
+             melt. Found by adding the Fe3+/SumFe diagnostic and asking what each cap corresponds
+             to - the answer has to be 1.
+             ! That regime is pinned by STOICHIOMETRY, not by the sampled Rmax, so raising Rmax
+               does not move it.
+
+ 2026-09-02f rock_pool REPLACES TOex_pool. TOex_pool = 1 + max(0,-cohsink) is the rock-sink total
+             only when the fluid is a source; when it is a SINK it returns 1 while the rock gets
+             LESS than TOex. rock_pool = 1 - cohsink is correct in every regime. Oex_added kept for
+             what it means - inventory growth owed to the hydrogen reservoir - not as a mass factor.
+
+ 2026-09-02e THE FLUID OXYGEN SOURCE IS REPORTED, NOT RENORMALISED AWAY. When the fluid is
+             reducing, H2O -> CH4/H2 hands oxygen back and the four rock sinks share out MORE than
+             TOex. The solve always handled this (cohsink is signed, the five sum to 1); the
+             verbose block divided every row by the pool and hid the fluid row when it was a source.
+             ! The residual and its Sum = 1 invariant are UNTOUCHED - renormalising inside the
+               solve would change the function the bisection is monotone on, for a presentation bug.
+             SCALE: 18 of 21 driver cases have a reducing fluid; in a deliberately reduced case the
+             rock sinks distribute 464% of TOex. Common, not an edge case.
+
+ 2026-09-02d SOLVER RELOCATED into volatiles_mod.f90; toex_mod.f90 deleted. The oxybarometer call
+             fits in NEITHER volatiles_mod nor volatileprocs (both cycles), so it is
+             dependency-inverted through a pointer bound from the module-free volatiles_bind.f90.
+
+ 2026-09-02c PHASE 1 SOLVER PORTED, called from nowhere. 702 pure-function values at max 6.0e-14;
+             21 driver cases at phi = 1 bit-identical. Warm start and iteration-count reductions
+             deliberately NOT applied, to keep the comparison attributable.
+             Dead carbon code removed: the abandoned oxygen-partitioning block in
+             melt_freeze_continuous_tracers_new, its five unused locals, and OxPower_uniform_value.
+
+ 2026-09-02b fO2 TABLE 100x100x30 VERIFIED END-TO-END. Three thermochem_mod fixes, recorded in A.4:
+             the pre-existing Hint clamp, the 120 non-finite nodes, silent truncated files.
+
+ 2026-09-02a 0.1 A/B COMPLETED. AFTER conserves totCrb bit-exactly over 7001 steps; BEFORE leaks
+             5.161E+16 kg (0.0701%). ! SurfCrb3D (whole-sphere) and totCrb (domain) are in
+             different normalisations and must never be compared directly.
+             OPEN DEFECT logged: all three long runs SIGSEGV at the same site, untouched by this
+             campaign, with the A/B pair bracketing it and both arms crashing. Not cleared.
+
+ 2026-09-01c nR>1 MADE TO ACTUALLY RUN. multi_point_minimization must receive as many points as
+             the composition list holds - 2*nPnTnR, not 2*nPnT, which is self-consistent only at
+             nR = 1.
+
+ 2026-09-01b fO2 TABLE AXIS REWORKED, both sides. The axis matters ~100x more than the node count:
+             uniform-in-R needs >129 nodes for 1 log unit, log-spaced needs 49 for 0.008. The
+             loader reads the axis explicitly and extrapolates log-linearly rather than clamping
+             flat, which at R = 1e-6 is worth 15.7 log units.
+
+ 2026-09-01a PHASE 0 COMPLETE. Five repairs plus one defect found during testing (0.2b).
+
+ 2026-08-31  CORRECTION to B.8. TOex_maxdepth_fluid was wrong - DHMS breakdown produces real free
+             water beyond 10 GPa, and zeroing H at the solve while leaving it on the tracer is a
+             mass violation. Only the ZD09 EOS call clamps its input now.
+
+ 2026-08-30b B.4b added: one field index shared across solid and melt tracers, not two. The
+             separation is provided by tracer identity, not field identity.
+
+ 2026-08-30a Document created. B.1-B.15 settled: three-level architecture; hybrid runtime solver
+             over a tabled MAGEMin branch; OxC/ReC retained and OEX added; D forced to 1.0 with no
+             double partitioning; EM_Xhz/EM_Xbs as the composition base; two-box surface reservoir
+             in (C, O_ex) currency; H escape as +1 O per 2 H behind a required mode switch.
