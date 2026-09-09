@@ -1,662 +1,385 @@
 ===============================================================================================
- TOex_math.txt — the equations of src/TOex.jl and the exact order of operations
+ TOex_math.txt — the equations, and the order the solver asks its questions in
 ===============================================================================================
- Companions: TOex_workflow.txt (prose walkthrough), TOex_bench.txt (validation),
-             TOex_implementation.txt (the StagYY port).
- Notation: [:NNN] line in src/TOex.jl (indicative) · ⇒ therefore · ← assignment · ? branch
-           ! physical assumption or a place a limit binds.
+ Companions: TOex_workflow.txt (prose) · TOex_bench.txt (validation) · TOex_implementation.txt
+ Notation: ⇒ therefore · ← assignment · ! an assumption or a place a limit binds.
 
- ONE SENTENCE: one unknown (the shared log₁₀fO2), one equation (five sinks' oxygen demands sum to
- the budget). Everything else is a definition of one demand or the thermodynamics to evaluate it.
+ ONE SENTENCE. One unknown (the shared log₁₀fO2), one equation (the sinks' oxygen demands sum to
+ the budget). Everything else defines a demand or the thermodynamics needed to evaluate it.
 
-===============================================================================================
- PART 0 — NOTATION, UNITS, REFERENCE STATE
-===============================================================================================
-
- 0.1  SYMBOLS
- -----------------------------------------------------------------------------------------------
-   INPUTS
-     P          pressure                                    GPa      (Pbar = 10⁴·P internally)
-     T          temperature                                 K
-     p          basalt fraction of the solid                0-1
-     ϕ          MELT FRACTION                               0-1
-     TOex       excess-oxygen budget                        mass fraction of the tracer
-     TC         total carbon                                mass fraction of the tracer
-     H          free water                                  mass fraction of the tracer
-
-   ! ϕ (melt fraction) and φᵢ (fugacity coefficient) are different quantities; the code uses both.
-
-   MASSES (Mt = 10³ g reference cell mass, so mm.* in g/mol stay consistent)
-     Mf = ϕ·Mt   Ms = (1-ϕ)·Mt   Mc = TC·Mt   Mh = H·Mt
-     TOₑₓ = TOex·Mt         the budget IN GRAMS — the denominator of everything
-
-   THE UNKNOWN      f = log₁₀ fO2,  fO₂ = 10^f in mass-action terms
-
-   THE FIVE DEMANDS — each a DIMENSIONLESS FRACTION OF TOₑₓ
-     sOₑₓ      excess O held as Fe³⁺ in the solid — SIGNED, negative = Fe⁰ giving oxygen back
-     mOₑₓ      excess O held as Fe³⁺ in the melt
-     carbonO   excess O as CO₂ dissolved in the melt
-     carbO     excess O as solid carbonate
-     fₑₓ       NET excess O held by the C-O-H fluid — SIGNED
-
- 0.2  THE REFERENCE STATE
- -----------------------------------------------------------------------------------------------
-   Oxygen in excess of a fully REDUCED assemblage: Fe as FeO, C as graphite/diamond, H as H₂O.
-   ! H₂O is the reference and therefore NEUTRAL; counting its oxygen would double-count it.
-
-   Per-species excess oxygen:
-       CO₂, carbonate  +2/C     CO  +1/C     gph/dia  0     CH₄  -2/C     H₂O  0     H₂  -1/H₂
-       Fe³⁺  +0.5/Fe            Fe⁰  -1/Fe            (Fe²⁺ is the zero)
-
-   ! The negative entries are why fₑₓ and sOₑₓ are signed and can be SOURCES: reducing H₂O to
-     CH₄/H₂, or FeO to Fe⁰, strips oxygen and hands it to the rest. Rock shares then exceed 1
-     while all five still sum to 1.
-
- 0.3  MASS AND MOLE BOOKKEEPING, once before the solve   [mass_budget:155]
- -----------------------------------------------------------------------------------------------
-       X = p·XB + (1-p)·XH        over {SiO2,MgO,FeO,CaO,Al2O3,Na2O,Cr2O3,O}          (0.1)
-
-   Melt takes the BASALTIC end-member XB:
-       nB_per_mass = Σⱼ XBⱼ/Mⱼ                       mol oxide per gram               (0.2)
-       molfracXB   = (XBⱼ/Mⱼ)/nB_per_mass            mole fractions, Σ = 1            (0.3)
-       nOxideTotal ≡ molMf = Mf·nB_per_mass          mol oxide in the melt            (0.4)
-       nC_total = Mc/M_C                                                              (0.5)
-       Φ        = 2·M_O·molMf/TOₑₓ                                                    (0.6)
-
-   ! Φ converts a melt CO₂ MOLE FRACTION into a FRACTION OF TOₑₓ. With
-     nC_melt = XCO₂·molMf/(1-XCO₂) and 2 O per carbon,
-         carbonO = 2·M_O·nC_melt/TOₑₓ = Φ·XCO₂/(1-XCO₂)                               (0.7)
-
-       maxXCO₂ = molCav/(molMf + molCav),   molCav = Mc/M_C                           (0.8)
-   ! (0.8) is DIAGNOSTIC ONLY, never imposed — carbon balance is enforced exactly by the aC
-     solve (PART 3). Guarded against 0/0 when there is neither melt nor carbon.
+ ! UNITS, AND THIS CHANGED 2026-09-06. Every oxygen, carbon and hydrogen quantity below is an
+   ABSOLUTE MASS IN GRAMS on a 1 kg reference cell (Mt = 10³ g). Nothing is a share of TOₑₓ any
+   more. The budget appears in exactly one place — the right-hand side of (1.1) — because
+   dividing by it broke twice: a NEGATIVE budget (a cell with metallic iron) inverted every sink
+   bracket and froze the residual flat, and a NEAR-ZERO one inflated the shares 194x and with them
+   the tolerance. A host converts once, by mass: grams × Mtot/Mt.
 
 ===============================================================================================
- PART 1 — THE ONE EQUATION
+ PART 0 — THE FLOWCHART: what the solver asks, and what each answer makes it do
 ===============================================================================================
 
- 1.1  STATEMENT                                     [_coh_derive:689, unified_residual:712]
- -----------------------------------------------------------------------------------------------
-       F(f) ≡ sOₑₓ(f) + mOₑₓ(f) + carbonO(f) + carbO(f) + fₑₓ(f) - 1 = 0             (1.1)
+ SETUP — once per cell
+ ┌ Is there any excess oxygen to place?
+ │    TOₑₓ = 0 ⇒ return at once, converged, nothing partitioned.
+ ├ Is there a solid? a melt?
+ │    maxsOₑₓ ≤ 0 or maxmOₑₓ ≤ 0 ⇒ that sink is ABSENT, not empty. No oxybarometer exists for it,
+ │    so any fO2 attributed to it would be fictitious and is suppressed everywhere downstream.
+ ├ Do I have to build the solid oxybarometer table?
+ │    ϕ = 1 ⇒ no solid ⇒ skip it. This is the expensive step (2 endmembers × 30 R-nodes).
+ └ How tight must the residual be?
+      atol ← rel × max(|TOₑₓ|, 10⁻⁶ × capacity). Grams need a scale; the budget supplies it, and
+      the capacity floor stops a near-zero budget demanding impossible precision.
 
- 1.2  WHY POSED THIS WAY
- -----------------------------------------------------------------------------------------------
-   The naive form has five unknowns plus "all phases share one fO2". This inverts it: ONE unknown,
-   ONE equation. The consequence is structural —
+ BRACKET
+ └ Does F change sign across [-120, +40]?
+      No ⇒ no root exists anywhere ⇒ report the cell FAILED and return the closer endpoint. The
+      caller keeps the cell's previous partition and never stops the run.
 
-     fO2 EQUALITY IS AN IDENTITY, NOT AN EQUATION. An unsaturated sink is DEFINED as the loading
-     whose own oxybarometer reads f:
-         sOₑₓ(f) ≡ sfO2⁻¹(f)          mOₑₓ(f) ≡ melt_fO2⁻¹(f)                        (1.2)
-     so sfO2(sOₑₓ) = melt_fO2(mOₑₓ) = f by construction. It can fail ONLY for a sink pinned at a
-     physical end — correct physics: a phase holding no Fe³⁺, or all of it, no longer buffers.
+ EACH TRIAL f  — about 10 of them, bisection/Illinois on the bracket
+ │
+ ├─ SOLID IRON
+ │  ┌ At the metal floor, does the rock already read ABOVE f?
+ │  │    Yes ⇒ pin sOₑₓ = -minsOₑₓ. All Fe as Fe⁰; the solid has left the equilibrium and its own
+ │  │    reading is legitimately ≠ f.                                  :solid_metal_saturated
+ │  ├ At the ferric cap, does it still read BELOW f?
+ │  │    Yes ⇒ pin sOₑₓ = +maxsOₑₓ. Every Fe²⁺ oxidised, sink full.    :solid_saturated
+ │  └ Otherwise: invert the oxybarometer for the loading whose own reading IS f.
+ │       fO2 equality is an IDENTITY here, not an equation to solve — see (1.2).
+ │
+ ├─ MELT IRON — the same two questions, no metal branch (the melt has no Fe⁰).
+ │
+ ├─ CARBON, FLUID AND HYDROGEN — a COMPLETE C-H solve at this f, nested inside the oxygen one
+ │  ┌ Is there any carbon or hydrogen at all?
+ │  │    Neither ⇒ skip the whole loop, aC ← 0, all mole fractions 0. This is the common case in a
+ │  │    real run, and it saves ~78 EOS solves per cell.
+ │  └ Otherwise loop (2-3 passes typical, 30 max):
+ │     ┌ Does the melt want more hydrogen than the cell owns?
+ │     │    Yes ⇒ UNDERSATURATED: no fluid, solve for λ ∈ (0,1] in log space (2.37).
+ │     │    No  ⇒ solve the fluid/melt hydrogen split on [0, molH_tot] (2.36).
+ │     ├ Is the speciation valid at the EMOG ceiling aC_cap?
+ │     │    No ⇒ walk the ceiling DOWN a decade at a time until it is. Bracketing against an
+ │     │    activity where the speciation does not exist cannot converge.
+ │     ├ Does carbon demand at that ceiling exceed the budget?
+ │     │    No  ⇒ SATURATED: sit at the ceiling, precipitate the remainder as a solid phase.
+ │     │    Yes ⇒ solve log₁₀aC for exact carbon balance (3.4).
+ │     ├ Did the speciation return anything non-finite?
+ │     │    Yes ⇒ mark it invalid HERE. NaN passes every relational test, so a later `disc < 0`
+ │     │    or `c_q ≤ 0` guard would not catch it and it would reach a product like 0 × Inf.
+ │     └ Have φ, the carbon balance and the hydrogen balance all stopped moving?
+ │          Yes ⇒ stop. No ⇒ another pass, updating φ from ZD09.
+ │
+ └─ RESIDUAL
+    └ Do the demands add up to the budget?
+         F(f) = sOₑₓ + mOₑₓ + carbonO + carbO + fₑₓ + mH2ₑₓ - TOₑₓ.
 
- 1.3  MONOTONICITY ⇒ EXISTENCE AND UNIQUENESS
- -----------------------------------------------------------------------------------------------
-     sOₑₓ, mOₑₓ    inverses of increasing oxybarometers ⇒ increasing                  (1.3a)
-     carbonO       Bmelt ∝ 10^f ⇒ XCO₂ increasing ⇒ XCO₂/(1-XCO₂) increasing          (1.3b)
-     carbO         x_carb is a logistic in f ⇒ increasing                             (1.3c)
-     fₑₓ           2XCO2 + XCO - 2XCH4 - XH2 shifts oxidised as f rises               (1.3d)
+ UPDATE
+ ┌ Is |F| within atol?                    Yes ⇒ converged.
+ ├ Has the bracket collapsed with |F| still large?
+ │    Then F is DISCONTINUOUS there and no root exists. Report failure — never success.
+ └ Otherwise bisect and go again (≤ 500).
 
-   ⇒ F non-decreasing ⇒ at most one root, and F(-120) < 0 < F(40) whenever the capacity exists.
-     Hence plain bisection: no Jacobian, no guess, no divergence.
-   ! (1.3c) is why the EMOG(D) step is RAMPED, not switched: a hard switch puts a jump of 2 O per
-     carbon into F, and a discontinuous F can straddle zero without containing a root.
-   ! (1.3a) is why a non-monotonic MAGEMin table must be repaired (2.1.3) — a dip makes the
-     inversion multivalued and destroys the root.
+ AFTERWARDS
+ └ What is reported?
+      The state RE-DERIVED at the converged f, so what is reported is exactly what the residual
+      saw. Iron speciation, buffer offsets, a regime label (a label only, never an input).
 
-===============================================================================================
- PART 2 — THE FIVE DEMAND FUNCTIONS
-===============================================================================================
-
- 2.1  SOLID Fe³⁺ / Fe⁰  →  sOₑₓ                        [solid_fO2_interpolant:96]
- -----------------------------------------------------------------------------------------------
-
- 2.1.1  TABULATED, not analytic; built once per (P,T,p) on a SIGNED axis:
-
-     rᵢ = Rasinhspace(-1.96, Rmax, nr+nrm; R0)   Fe³⁺/ΣFe, signed   nr=100, nrm=15, Rmax=0.4
-     Xᵢ = oxidize_bulk(X, rᵢ)                    Fe + O basis (an FeO + O basis double-counts
-                                                 the iron's own oxygen and cannot express r < 0)
-     sOwtᵢ = X_O(rᵢ)·(0.5rᵢ)/(1 + 0.5rᵢ)         excess-O mass fraction at that r    (2.1a)
-     fO2ᵢ  = MAGEMin(10P, T-273.15, Xᵢ)          sb24
-     metalᵢ = Σ ph_frac_wt over {feg, fea, fee}  native iron, wt fraction of the solid
-
-     Abscissa re-expressed as a fraction of the budget, which is what makes the table directly
-     invertible for a demand:
-       gridᵢ = sOwtᵢ · (Ms/TOₑₓ)                                                      (2.1)
-
-   ! r ∈ [-2, 1]: 1 all ferric, 0 the FeO reference, -2 all metal. Not symmetric — Fe²⁺→Fe³⁺
-     takes half an O per iron, Fe²⁺→Fe⁰ returns a whole one — so iron carries nFe(1 + r/2) oxygen
-     throughout and the excess is 0.5·r·nFe. asinh spacing is used because the logit is undefined
-     at r ≤ 0 and cannot carry the reducing half at all.
-
- 2.1.2  STOICHIOMETRIC CEILING AND FLOOR — the true limits, independent of MAGEMin's sampling:
-       maxsOₑₓ = 0.5·(Ms·X_FeO/M_FeO)·M_O / TOₑₓ            every Fe²⁺ → Fe³⁺, 0.5 O each  (2.2)
-       minsOₑₓ = X_Fe(r=-2)·(M_O/M_Fe)·(Ms/TOₑₓ)            every Fe²⁺ → Fe⁰, 1 O each     (2.2b)
-     so sOₑₓ ∈ [-minsOₑₓ, +maxsOₑₓ], with minsOₑₓ ≈ 2·maxsOₑₓ by the asymmetry above.
-
- 2.1.3  MONOTONICITY REPAIR [_isotonic:68]. MAGEMin can return fO2 non-monotonic in r where the
-     assemblage changes. Repaired by pool-adjacent-violators isotonic regression, the least-squares
-     non-decreasing fit, so ordered points are untouched:
-       minimise Σᵢ (yᵢ - ŷᵢ)²   subject to  ŷ₁ ≤ ŷ₂ ≤ … ≤ ŷₙ                          (2.3)
-     Pooling produces TIES, and a FLAT segment is as fatal as a dip — the loading reading a given
-     fO2 stops being unique — so a negligible increasing ramp breaks them:
-       ŷᵢ ← ŷᵢ + 10⁻⁶·span·(i-1)/(n-1),   span = max(ŷₙ - ŷ₁, 1)                      (2.4)
-     Metal needs no repair: it is monotonically DEcreasing in the loading by construction.
-
- 2.1.4  THE OXYBAROMETER, with physical behaviour at both ends [sfO2:169]:
-     g₁,f₁ = first knot, g_N,f_N = last, slope = 1/0.1917, R_N = g_N/maxsOₑₓ           (2.5)
-
-                 ⎧ f₁                                                    s < g₁
-       sfO2(s) = ⎨ interp(s)                                        g₁ ≤ s ≤ g_N       (2.6)
-                 ⎩ f_N + slope·[log₁₀(R/(1-R)) - log₁₀(R_N/(1-R_N))]     s > g_N
-                                                       with R = min(s/maxsOₑₓ, 1-10⁻¹²)
-
-   ! THE TWO ENDS ARE DIFFERENT PROBLEMS. Below the table, FLAT is the physics: Fe⁰ + ½O₂ = FeO
-     buffers at a FINITE fO2 however much more metal is made. Above it, fO2 must keep climbing and
-     diverge at the STOICHIOMETRIC limit (2.2), hence the R/(1-R) form.
-   ! slope = 1/0.1917 is BORROWED — the Hirschmann (2022) MELT exponent (2.8) — because deriving
-     MAGEMin's own dilute-limit slope needs a full treatment of Fe³⁺ substitution in whichever
-     solid solution sb24 uses. Justification is that every Fe³⁺/Fe²⁺ oxybarometer of this family
-     is a mass-action law for the same couple and so becomes log-linear far from saturation. What
-     matters more is that it is correctly signed and non-flat; _invert_demand checks both
-     endpoints first, so it is read only when the root falls outside the table.
-   ! ϕ = 1 (no solid): Ms = 0 collapses (2.1) to one knot at zero. MAGEMin is skipped and the sink
-     is flagged ABSENT.
-
- 2.1.5  IRON SPECIATION AT THE SOLVED LOADING [:877]. Metal comes from the ASSEMBLAGE, not from
-     sOₑₓ, so ferric and metal can both be non-zero at once:
-       nO      = TOₑₓ·sOₑₓ/M_O                    net excess O in the solid
-       FeM_solid = metal_wt·Ms/M_Fe / nFe         Fe⁰/ΣFe, total, from MAGEMin        (2.6a)
-       FeM_net   = max(0, -nO/nFe)                Fe⁰/ΣFe the oxygen budget can see
-       FeR_solid = max(0, 2(nO + nFe⁰)/nFe)       nFe³⁺ = 2(nO + nFe⁰)                (2.6b)
-       FeM_diss  = min(FeM_net, FeM_solid)        made by FeO → Fe⁰ + ½O₂
-       FeM_disp  = FeM_solid - FeM_diss           made by 3Fe²⁺ → 2Fe³⁺ + Fe⁰
-
-   ! THE SPLIT IS EXACT, not a partition guess. Dissociation frees exactly 1 O per Fe⁰ and that O
-     IS -sOₑₓ, so the net coordinate measures dissociated metal alone; the rest was made at
-     constant oxygen. Disproportionation is the NULL DIRECTION of sOₑₓ — 2 Fe³⁺ consume exactly
-     the 1 O that 1 Fe⁰ frees — which is why it needs the assemblage and cannot drive the solve.
-   ! (2.6b) is why FeR_solid is not just 2nO/nFe: with metal present that form briefly reported
-     LESS ferric than metal. It gives the 2:1 ratio at nO = 0 and zero when metal is exactly paid
-     for by released O.
-
- 2.2  MELT Fe³⁺  →  mOₑₓ                                        [melt_fO2:189]
- -----------------------------------------------------------------------------------------------
-   Hirschmann (2022):  a=0.1917  b=-1.961  c=4158.1  ΔCp=33.25  T₀=1673.15
-                       y1=-520.46  y3=494.39  y4=1838.34  y5=2888.48  y8=-1245.09  y9=-1156.86
-
-       nOx = Mf·nB_per_mass ;  nO⁺ = TOₑₓ·mOₑₓ/M_O ;  θ = nOx + nO⁺                   (2.7)
-       XO  = nO⁺/θ ;           Xⱼ = molfracXBⱼ·nOx/θ
-
-       a·f = log₁₀[ XO/(XFeO - 2·XO) ] - b - c/T
-             + (ΔCp/(R·ln10))·[1 - T₀/T - ln(T/T₀)]
-             + IDV/(10⁻³·R·T·ln10)
-             - (1/T)·[ y1·XSiO2 + y3·XMgO + y4·XCaO + y5·XNa2O
-                       + y8·XSiO2·XAl2O3 + y9·XSiO2·XMgO ]                            (2.8)
-
-   ! XO/(XFeO - 2XO): each Fe³⁺ carries 0.5 O, so XO oxygen consumes 2·XO of the ferrous pool.
-     As XO → 0.5·XFeO the pool empties and f → +∞; guarded by a sentinel return of +14.
-       maxmOₑₓ = 0.5·molfracXB_FeO·nOx·M_O / TOₑₓ                                     (2.9)
-   ! No metal branch: a silicate melt's floor is lowclip, not -minsOₑₓ.
-   ! ϕ = 0: Mf = 0 ⇒ XFeO = 0 ⇒ the sentinel fires for any loading; maxmOₑₓ = 0 ⇒ ABSENT.
-
- 2.3  MELT CO₂  →  carbonO                     [carbon_buffer_fO2:217]
- -----------------------------------------------------------------------------------------------
-       f = 5.44 - 21380/T + 0.078·(10⁴P - 1)/T + log₁₀ XCO₂                          (2.10)
-       Bmelt(f) = 10^[ f - 5.44 + 21380/T - 0.078·(10⁴P - 1)/T ]                     (2.11)
-       XCO₂    = softcap(aC·Bmelt, XCO2max),      XCO2max = 0.3                      (2.12)
-       nC_melt = XCO₂·nOx/(1 - XCO₂)                                                 (2.13)
-       carbonO = Φ·XCO₂/(1 - XCO₂)              ≡ 2·M_O·nC_melt/TOₑₓ  by (0.7)       (2.14)
-
-   ! XCO2max = 0.3 is the least constrained number here. Without it (2.11) drives XCO₂ → 1 near
-     the carbonate boundary, where (2.13) diverges and a vanishing melt swallows all the carbon.
-
- 2.4  SOLID CARBONATE  →  carbO
- -----------------------------------------------------------------------------------------------
-       x_carb  = 1/(1 + exp[-(f - fE)/wEMOG]),   wEMOG = 0.25                        (2.15)
-       nC_carb = x_carb·nC_solid ;  nC_gph = (1 - x_carb)·nC_solid                   (2.16)
-       carbO   = 2·nC_carb·M_O/TOₑₓ                                                  (2.17)
-
-   ! Two reasons for the ramp: NUMERICAL — the univariant boundary is a step of 2 O per carbon in
-     F, and a step can straddle zero without containing a root; PHYSICAL — real carbonate is a
-     magnesite-dolomite-calcite solution, so the transition is genuinely smeared.
-     Carbonate is nevertheless approximated as pure MgCO₃ at unit activity.
-
- 2.5  C-O-H FLUID  →  fₑₓ                    [_coh_reaction_step:378, coh_state:439]
- -----------------------------------------------------------------------------------------------
- 2.5.1  Four mass-action reactions, K from HP98 (4.1-4.3):
-       K1: C + O₂ = CO₂    K2: C + ½O₂ = CO    K3: H₂ + ½O₂ = H₂O    K4: C + 2H₂ = CH₄
-
- 2.5.2  SPECIATION at fixed φᵢ and aC. Carbon species follow directly, aC and fO₂ both known:
-       XCO₂ = aC·K1·fO₂ /(φ_CO2·Pbar)                                                (2.18)
-       XCO  = aC·K2·√fO₂/(φ_CO ·Pbar)                                                (2.19)
-
-     Hydrogen species close the system. With
-       α = aC·K4·φ_H2²·Pbar/φ_CH4        β = K3·φ_H2·√fO₂/φ_H2O + 1
-       γ = 1 - XCO₂ - XCO                                                            (2.20)
-     the closure Σx = 1 with XCH4 = α·XH2², XH2O = (β-1)·XH2 gives
-       α·XH2² + β·XH2 - γ = 0                                                        (2.21)
-       XH2  = 2γ/(β + √(β² + 4αγ))                                                   (2.22)
-       XH2O = (β - 1)·XH2 ;   XCH4 = α·XH2²
-
-   ! α, β, γ are just the quadratic's coefficients (the code's `aq2`/`aq1`/`c_q`), not named
-     thermodynamic quantities.
-   ! (2.22) rather than (-β+√·)/(2α): dividing by α cancels catastrophically as aC → 0 and returns
-     0 instead of the correct linear limit γ/β.
-   ! γ ≤ 0 or β² + 4αγ < 0 ⇒ carbon species alone would overfill the fluid. The step returns
-     invalid and _solve_aC responds by LOWERING aC (PART 3) rather than failing.
-   ! Σx = 1 holds by construction, not by renormalisation — that is what (2.20) encodes.
-
- 2.5.3  EXTENSIVE AMOUNTS — the fluid is sized by the hydrogen it must contain:
-       molH = 2·Mh/M_H2O ;  nH = 2XH2O + 4XCH4 + 2XH2 ;  n_fluid = molH/nH      (2.23)-(2.24)
-       nC_fluid = n_fluid·(XCO₂ + XCH4 + XCO)                                        (2.25)
-
- 2.5.4  NET EXCESS OXYGEN — the 0.2 convention applied species by species:
-       netO = n_fluid·(2XCO₂ + XCO - 2XCH4 - XH2)·M_O/TOₑₓ                           (2.26)
-       fₑₓ  = clamp(netO, ±10³)                                                      (2.27)
-
-   ! The sign is the point: oxidised fluid (CO₂,CO) CONSUMES budget, reduced fluid (CH₄,H₂)
-     RELEASES oxygen taken off the H₂O reference. |fₑₓ| > 1 already exceeds the whole budget;
-     the clamp only keeps the outer bracket finite.
-   ! The two GROSS flows are reported separately (O_up, O_rel), because the net alone cannot tell
-     a host model how much oxygen H₂O dissociation ADDED — a source owed to the H reservoir.
-
- 2.5.5  FUGACITY COEFFICIENTS, Zhang & Duan (2009) — see 4.5. φᵢ = fᵢ/(xᵢ·Pbar).
+ ! CARBON AND HYDROGEN CLOSE EXACTLY AT EVERY TRIAL f, not only at the root. The outer solve does
+   OXYGEN ALONE; the C-H subsystem is already balanced whenever it is asked.
 
 ===============================================================================================
- PART 3 — THE CARBON SUBSYSTEM: the activity aC
+ PART 1 — SYMBOLS, REFERENCE STATE, THE ONE EQUATION
 ===============================================================================================
 
- 3.1  WHAT aC IS
- -----------------------------------------------------------------------------------------------
-   aC multiplies EVERY carbon-bearing reaction — (2.18), (2.19), the α of (2.20), the melt buffer
-   (2.12) — so it scales the whole carbon system at once. It exists because oxygen balance (1.1)
-   does not by itself conserve CARBON.
-       aC = aC_cap   ⇒ a solid carbon host IS present, holding what melt and fluid leave over
-       aC < aC_cap   ⇒ NO solid carbon; every atom is dissolved in melt + fluid
+ 1.0  INPUTS   P [GPa] (Pbar = 10⁴P) · T [K] · p basalt fraction · ϕ MELT fraction ·
+               TOex, TC, H as mass fractions of the tracer.
+      MASSES on Mt = 10³ g:  Mf = ϕMt · Ms = (1-ϕ)Mt · Mc = TC·Mt · Mh = H·Mt · TOₑₓ = TOex·Mt
+      THE UNKNOWN  f = log₁₀fO2.
+      THE DEMANDS, all GRAMS OF OXYGEN:
+        sOₑₓ    Fe³⁺ in the solid — SIGNED, negative = Fe⁰ handing oxygen back
+        mOₑₓ    Fe³⁺ in the melt
+        carbonO CO₂ dissolved in the melt          carbO  solid carbonate
+        fₑₓ     NET of the C-O-H fluid — SIGNED    mH2ₑₓ  melt H₂, always ≤ 0
+      ! ϕ (melt fraction) and φᵢ (fugacity coefficient) are different quantities.
 
-   ! ACTIVITY IS NOT AN AMOUNT. aC is an INTENSITY — carbon's escaping tendency referenced to pure
-     graphite/diamond — and says nothing about how much carbon exists; that is nC_solid (3.3).
+ 1.1  REFERENCE STATE — oxygen in excess of a fully REDUCED assemblage: Fe as FeO, C as graphite,
+      H as H₂O. H₂O is the reference and therefore NEUTRAL.
+        CO₂, carbonate +2/C · CO +1/C · gph/dia 0 · CH₄ -2/C · H₂O 0 · H₂ -1/H₂
+        Fe³⁺ +0.5/Fe · Fe⁰ -1/Fe · (Fe²⁺ is the zero)
+      ! The negative entries are why fₑₓ and sOₑₓ are signed and can be SOURCES.
 
- 3.2  THE CEILING
- -----------------------------------------------------------------------------------------------
-       aC_cap = min(1, 10^(fE - f))                                                  (3.1)
-     Below EMOG(D) the host is graphite/diamond, activity 1 by definition; above it the host is
-     carbonate, whose own equilibrium fixes aC = 10^(fE - f). Continuous at f = fE.
+ 1.2  BOOKKEEPING, once                                                    [mass_budget]
+        X = p·XB + (1-p)·XH   over {SiO2,MgO,FeO,CaO,Al2O3,Na2O,Cr2O3,O}              (0.1)
+        nB_per_mass = Σⱼ XBⱼ/Mⱼ · molfracXB = (XBⱼ/Mⱼ)/nB_per_mass                (0.2)-(0.3)
+        nOxideTotal ≡ molMf = Mf·nB_per_mass · nC_total = Mc/M_C                  (0.4)-(0.5)
+        Φ = 2·M_O·molMf                    grams of O per unit XCO₂/(1-XCO₂)          (0.6)
+        maxXCO₂ = molCav/(molMf + molCav), molCav = Mc/M_C   DIAGNOSTIC ONLY          (0.8)
 
-   DERIVATION — falls out of (4.7) once carbon is allowed a general activity. Holding carbonate
-   and both silicates at unit activity:
-       ΔG_rxn = ΔG° + 2RT·ln(aC·fO2)                                                 (3.1a)
-     At equilibrium ΔG_rxn = 0, and fE ≡ -ΔG°/(2RT ln10) by (4.8), so
-       fE = log₁₀(aC) + f    ⇒    aC = 10^(fE - f)                                   (3.1b)
-     The slope of exactly 1 is forced by stoichiometry: C and O₂ carry equal coefficients (2 and
-     2) in (4.7), so log(aC) and -f trade off 1:1.
+ 1.3  THE EQUATION                                                   [unified_residual]
+        F(f) ≡ sOₑₓ + mOₑₓ + carbonO + carbO + fₑₓ + mH2ₑₓ - TOₑₓ = 0                 (1.1)
+      ! WHY POSED THIS WAY. The naive form has five unknowns plus "all phases share one fO2".
+        This inverts it to ONE unknown and ONE equation, and fO2 EQUALITY BECOMES AN IDENTITY:
+            sOₑₓ(f) ≡ sfO2⁻¹(f)        mOₑₓ(f) ≡ melt_fO2⁻¹(f)                       (1.2)
+        It can fail only for a sink pinned at a physical end — correct physics, since a phase
+        holding no Fe³⁺, or all of it, no longer buffers.
 
-   ! WHY aC MUST FALL (Le Chatelier): raising fO2 past fE pushes (4.7) backward, consuming free
-     carbon to make more carbonate. Any carbon activity consistent with carbonate + silicates at
-     that fO2 is FORCED down by exactly this amount; it is not a modelling choice.
-   ! WHY aC PERSISTS ABOVE fE, WHERE THE HOST IS CARBONATE: K1, K2, K4 are built from HP98's
-     GRAPHITE Gibbs energy unconditionally — there is no second carbonate-referenced set. Above fE
-     aC_cap is a FORMAL BRIDGING VARIABLE ("the graphite-referenced carbon fugacity this
-     carbonate-buffered environment is consistent with"), which is what lets one set of equations
-     serve continuously on both sides of EMOG(D).
+ 1.4  MONOTONICITY ⇒ EXISTENCE AND UNIQUENESS
+        sOₑₓ, mOₑₓ  inverses of increasing oxybarometers                            (1.3a)
+        carbonO     Bmelt ∝ 10^f ⇒ XCO₂/(1-XCO₂) increasing                          (1.3b)
+        carbO       x_carb logistic in f                                             (1.3c)
+        fₑₓ         2XCO₂ + XCO - 2XCH₄ - XH₂ shifts oxidised as f rises              (1.3d)
+      ⇒ F non-decreasing ⇒ at most one root, and plain bisection suffices: no Jacobian, no guess.
+      ! (1.3c) is why the EMOG step is RAMPED, not switched — a jump of 2 O per carbon lets F
+        straddle zero without containing a root.
+      ! (1.3a) is why a non-monotonic table must be repaired (2.3)-(2.4).
+      ! THE SAME ARGUMENT FORBIDS ANY BOOLEAN INSIDE A DEMAND. One survived until 2026-09-06:
+        "solid carbon exists iff aC ≥ aC_cap(1-10⁻⁹)" punched a hole in carbO wherever the aC
+        solve landed a hair below its ceiling, and the bisection narrowed onto the hole. See (3.3).
 
- 3.3  THE CARBON DEMAND FUNCTION                                 [_carbon_demand:408]
- -----------------------------------------------------------------------------------------------
-       D(aC) = nC_melt(aC) + nC_fluid(aC)                                            (3.2)
-     Increasing in aC — checked by direct evaluation over aC ∈ [10⁻²⁰,1]: strictly non-decreasing,
-     ~5×10⁻²¹ up to ~0.22.
+===============================================================================================
+ PART 2 — THE DEMAND FUNCTIONS
+===============================================================================================
 
-   ! D IS A SOLUBILITY LAW: how much carbon melt+fluid would hold if buffered at activity aC, and
-     D(aC_cap) is how much at SATURATION. nC_total ≥ D(aC_cap) ⇒ genuine excess, precipitates as
-     solid (the solid's mass does not feed back on the activity, as a crystal's size does not
-     change a solution's saturation concentration). nC_total < D(aC_cap) ⇒ saturating melt+fluid
-     would need more carbon than exists, so no leftover, and monotonicity makes D(aC) = nC_total
-     the only self-consistent state. The activity is forced down by insufficiency; the demand
-     falls as a CONSEQUENCE.
-   ! Two load-bearing guards: molH ≤ 0 ⇒ return nC_melt alone (with no free water there is no
-     fluid, so gating on its validity would let a non-existent phase veto carbon balance);
-     invalid speciation ⇒ return +∞, which is what lets the bisection reject that aC from above.
+ 2.1  SOLID IRON — a tabulated oxybarometer                        [solid_fO2_interpolant]
+      Sample MAGEMin at R = Fe³⁺/ΣFe nodes on a SIGNED axis (metal branch available), and
+      re-express the x-axis as the oxygen the solid holds:
+        sOwtᵢ = X_O(rᵢ)·(0.5rᵢ)/(1 + 0.5rᵢ)                                          (2.1a)
+        gridᵢ = sOwtᵢ · Ms                              GRAMS, never divided by TOₑₓ  (2.1)
+        maxsOₑₓ = 0.5·(Ms·X_FeO/M_FeO)·M_O              every Fe²⁺ → Fe³⁺             (2.2)
+        minsOₑₓ = X_Fe(r=-2)·(M_O/M_Fe)·Ms              every Fe²⁺ → Fe⁰              (2.2b)
+      REPAIR, because MAGEMin returns occasional dips:
+        isotonic: minimise Σ(yᵢ-ŷᵢ)² s.t. ŷ non-decreasing                            (2.3)
+        then a 10⁻⁶ tilt to make it STRICTLY increasing so the inverse is single-valued (2.4)
+        linear extrapolation beyond the end knots, slope 1/0.1917                     (2.5)-(2.6)
+      IRON SPECIATION at the answer:
+        FeM_solid = metal_wt·Ms/M_Fe / nFe          FeR_solid = max(0, 2(nO+nFe⁰)/nFe)
+                                                                                (2.6a)-(2.6b)
 
- 3.4  THE SOLVE                                                    [_solve_aC:424]
- -----------------------------------------------------------------------------------------------
-     ? nC_total = 0                    ⇒ aC = 0
-     ? D(aC_cap) ≤ nC_total (finite)   ⇒ aC = aC_cap, SOLID CARBON PRESENT, holding
-                                          nC_solid = max(0, nC_total - nC_melt - nC_fluid)  (3.3)
-     ? otherwise                       ⇒ bisect D(aC) = nC_total over
-                                          log₁₀aC ∈ [-300, log₁₀aC_cap], 120 iters      (3.4)
-                                          and nC_solid = 0 — carbon-undersaturated.
+ 2.2  MELT IRON — Hirschmann (2022), analytic                                 [melt_fO2]
+        nOx = Mf·nB_per_mass ; nO⁺ = mOₑₓ/M_O ; θ = nOx + nO⁺                         (2.7)
+        log₁₀(Fe³⁺/Fe²⁺) = a·f + b/T + c + Σ dᵢXᵢ + composition cross-terms            (2.8)
+        maxmOₑₓ = 0.5·molfracXB_FeO·nOx·M_O                                           (2.9)
 
-   ! Floor -300, not -40: Bmelt can exceed 10⁴⁰ at high fO2, so a floor of 10⁻⁴⁰ leaves carbon
-     over-committed AT the bracket edge and the bisection converges wrong rather than failing.
-   ! Bisected in log₁₀aC because D spans decades. No lower sign check is needed — the branch is
-     only reached when D(aC_cap) > nC_total, and D → 0 as aC → 0.
+ 2.3  MELT CO₂ — a carbon buffer inverted for XCO₂                    [carbon_buffer_fO2]
+        f = 5.44 - 21380/T + 0.078(10⁴P-1)/T + log₁₀XCO₂                             (2.10)
+        Bmelt(f) = 10^[f - 5.44 + 21380/T - 0.078(10⁴P-1)/T]                         (2.11)
+        XCO₂ = softcap(aC·Bmelt, 0.3) · nC_melt = XCO₂·nOx/(1-XCO₂)             (2.12)-(2.13)
+        carbonO = Φ·XCO₂/(1-XCO₂)          ≡ 2·M_O·nC_melt   grams                   (2.14)
+      ! XCO₂ IS GATED ON THE MELT EXISTING. aC·Bmelt depends on P, T, fO2 alone, so ungated it
+        reports the mole fraction a melt WOULD have — and painted a whole melt-free lithosphere
+        at the 0.3 softcap.
 
- 3.5  THE φ ↔ aC OUTER LOOP                                          [coh_state:439]
- -----------------------------------------------------------------------------------------------
-   φ and aC are mutually dependent. Successive substitution, 6 passes, from the ideal gas φᵢ = 1:
-       (a) aC ← _solve_aC(…, φ frozen)          inner bisection, pure arithmetic
-       (b) speciate at (f, aC, φ)               (2.18)-(2.22)
-       (c) x ← x/Σx ; φ ← ZD09(x, Pbar, T)      the ONE expensive call                (3.5)
+ 2.4  SOLID CARBON — carbonate vs graphite, RAMPED across EMOG(D)
+        x_carb  = 1/(1 + exp[-(f - fE)/wEMOG]),  wEMOG = 0.25                        (2.15)
+        nC_carb = x_carb·nC_solid ;  nC_gph = (1-x_carb)·nC_solid                    (2.16)
+        carbO   = 2·nC_carb·M_O                                                      (2.17)
 
-   ! This nesting is what makes the model tractable: the inner bisection runs 120 iterations with
-     φ FROZEN, so the EOS is called 6 times per trial f instead of 6×120.
-   ! FIXED 6 passes, NO convergence test and no diagnostic if it stalls.
-   ! WHAT φ SOLVES — a different problem from carbon balance. K1-K4 are written in FUGACITIES, so
-     φ = 1 would solve every equilibrium as an IDEAL GAS at multi-GPa pressure. It does not cancel,
-     because φ differs species by species (H₂O and CO₂ most). This loop handles REAL-FLUID
-     NON-IDEALITY; _solve_aC handles carbon balance at whatever φ the previous pass supplied.
-   ! HOW φ IS QUANTIFIED — by definition, not a separate fit. φᵢ ≡ fᵢ/(xᵢ·Pbar), and zd_fugacity
-     already builds fug[i] = Pbar·exp(lnγᵢ)·vx[i], so
-         newφ = fug[i]/(vx[i]·Pbar) = exp(lnγᵢ)                                       (3.6)
-     exactly — vx[i] and Pbar cancel algebraically, verified bit-for-bit down to vx[i]=10⁻⁹. All
-     the physics is in lnγᵢ (4.5). The loop's only real decision is whether to KEEP it: for a
-     trace species the ratios εᵢ/ε, σᵢ/σ can lose precision before that cancellation completes,
-     so a non-finite or non-positive value is rejected in favour of the previous pass.
+ 2.5  THE C-O-H FLUID — speciation at fixed (f, aC, φ)              [coh_reaction_step]
+        XCO₂ = aC·K1·fO₂/(φ_CO2·Pbar)      XCO = aC·K2·√fO₂/(φ_CO·Pbar)        (2.18)-(2.19)
+      The H-bearing terms collapse to one quadratic in XH₂:
+        γ = 1 - XCO₂ - XCO ;  α·XH₂² + β·XH₂ - γ = 0 ;  XH₂ = 2γ/(β+√(β²+4αγ))  (2.20)-(2.22)
+        ⇒ XH₂O and XCH₄ follow, and ΣX = 1 identically.
+      ! INVALID IF γ ≤ 0, the discriminant is negative, XH₂ < 0, OR ANY X IS NON-FINITE. The last
+        test is not redundant: NaN fails every comparison, so it would pass the other three.
+        AMOUNTS:
+        molH = 2Mh/M_H2O · nH = 2XH₂O+4XCH₄+2XH₂ · n_fluid = molH/nH            (2.23)-(2.24)
+        nC_fluid = n_fluid·(XCO₂ + XCH₄ + XCO)                                       (2.25)
+        fₑₓ  = n_fluid·(2XCO₂ + XCO - 2XCH₄ - XH₂)·M_O    grams, SIGNED         (2.26)-(2.27)
+      ! GATED ON n_fluid > 0, and NEVER CLAMPED IF NON-FINITE. With no hydrogen n_fluid is 0 and
+        0 × Inf is NaN; the old ±10³ clamp turned that into a finite 1000 that passed the
+        is-finite guard and put a +1000 step into F.
+        The two GROSS flows O_up, O_rel are reported separately: a reducing fluid GROWS the Oₑₓ
+        inventory and that source must be booked against hydrogen, not re-derived from the net.
+
+ 2.6  MELT HYDROGEN — H₂ (a sixth sink) and H₂O (neutral, but competing for the same H)
+        ln K = ln K₀ + (ΔH/R)(1/T₀-1/T) - ΔV(P-P₀)/(RT),  K = X_H2/f_H2              (2.28)
+        X_H2 = softcap(K·f_H2, XH2max) ; n_H2 = X_H2·nOx/(1-X_H2) ; f_H2 = X_H2(fl)·φ_H2·Pbar
+                                                                                (2.29)-(2.30)
+        mH2ₑₓ = -n_H2·M_O                          always ≤ 0: an H₂ is one O short of an H₂O
+                                                                                     (2.31)
+        Sun & Yao H₂O solubility, molecular + hydroxyl:
+        lnS_H2O = a0lnP_H2O + a1lnT + a2P²/T + (a3√P + a4)X_Na2O/T                   (2.33)
+        lnS_OH  = a5lnP_H2O + a6lnT + (a7 + a8X_Al2O3 + a9X_Na2O)P/T                 (2.34)
+        n_H(melt) = 2(10⁻²Mf(S_H2O + S_OH))/M_H2O                                    (2.35)
+      THE SPLIT, one bracketed solve, branch chosen by whether a fluid can exist at all:
+        SATURATED       molH_fl + n_H(melt, λ=1) = molH_tot,  bracket [0, molH_tot]  (2.36)
+        UNDERSATURATED  n_H(melt, λ) = molH_tot, molH_fl = 0,  bracket log₁₀λ ∈ [-60,0]
+                                                                                     (2.37)
+      ! (2.36) STAYS LINEAR. At exactly molH = 0 the carbon demand takes its no-fluid branch, an
+        endpoint log space cannot represent; posing it in log turned a guaranteed sign change into
+        3151 same-sign brackets per step.
+      ! MELT H IS CLAMPED TO THE CELL BUDGET on the CONVERGED state only, never inside the inner
+        solves: clamping the demand there forces every residual ≤ 0 and the bracket never brackets.
+
+===============================================================================================
+ PART 3 — THE CARBON ACTIVITY aC
+===============================================================================================
+ aC is the one quantity that makes melt CO₂, fluid carbon and solid carbon consistent at a given
+ f. It is solved INSIDE each oxygen residual.
+
+        aC_cap = min(1, 10^(fE - f))          the EMOG(D) thermodynamic ceiling        (3.1)
+        D(aC)  = nC_melt(aC) + nC_fluid(aC)   what melt and fluid together demand      (3.2)
+
+ ┌ Is the speciation valid at aC_cap?
+ │    No ⇒ walk the ceiling down by decades to the highest VALID activity aC_use. The cap is an
+ │    upper bound from the buffer, NOT a guarantee that a fluid exists there; bracketing against
+ │    an invalid endpoint burned 100 iterations in 33 281 solves per step and returned garbage.
+ ├ Is D(aC_use) ≤ nC_total?
+ │    Yes ⇒ SATURATED. Sit at aC_use; the remainder is a solid phase:
+ │         nC_solid = max(0, nC_total - nC_melt - nC_fluid)                            (3.3)
+ │    ! NO BOOLEAN GUARD ON (3.3). max(0,·) IS the ramp: undersaturated it is max(0,0) because the
+ │      solve has just made D = nC_total, saturated it is the true remainder. Continuous either
+ │      way, which (1.4) requires.
+ └ Otherwise solve for exact balance:  D(aC) = nC_total,  log₁₀aC ∈ [-300, log₁₀aC_use]  (3.4)
+      In LOG activity on a LOG residual: at small aC demand is ∝ aC, so log-log is a straight line
+      and the secant lands in ~16 evaluations instead of a fixed 120.
+
+ THE NON-IDEALITY LOOP, around all of the above
+   (a) hydrogen split (2.36)/(2.37)   (b) aC (3.4)   (c) speciate (2.18)-(2.22)
+   (d) x ← x/Σx ; φ ← ZD09 — the one expensive call                                    (3.5)
+        newφᵢ = fugᵢ/(xᵢ·Pbar) = exp(lnγᵢ)                                             (3.6)
+ └ Have all three residuals settled — carbon share sum, hydrogen balance, and Δφ?
+      Yes ⇒ exit (2-3 passes typical). Checking φ alone is not enough: the C and H residuals were
+      measured at the OLD φ, and the loop ALTERNATES C and H, so either can sit at zero while the
+      other still moves.
 
 ===============================================================================================
  PART 4 — THERMODYNAMIC PRIMITIVES
 ===============================================================================================
-
- 4.1  GIBBS ENERGY AT TEMPERATURE — Holland & Powell (1998)        [hp98_gibbs:245]
- -----------------------------------------------------------------------------------------------
-   With Cp = c1 + c2·T + c3·T⁻² + c5·T⁻⁰·⁵ and Tr = 298.15:
-       ΔH = c1(T-Tr) + ½c2(T²-Tr²) - c3(1/T - 1/Tr) + 2c5(√T - √Tr)                  (4.1)
-       ΔS = c1·ln(T/Tr) + c2(T-Tr) - ½c3(1/T² - 1/Tr²) - 2c5(1/√T - 1/√Tr)           (4.2)
-       G(T) = G0 - (T-Tr)·S + ΔH - T·ΔS                                              (4.3)
-
- 4.2  PRESSURE TERM FOR SOLIDS — modified Tait/Murnaghan          [murnaghan_dG:253]
- -----------------------------------------------------------------------------------------------
-       V0(T) = V0·exp[ b1(T-Tr) + 2b5(√T - √Tr) ] ;   K = b6 + b7(T-Tr) ;   K' = b8
-       ΔG_P  = V0(T)·K/(K'-1) · [ (1 + K'(Pbar-1)/K)^(1-1/K') - 1 ]                  (4.4)
-
- 4.3  EQUILIBRIUM CONSTANTS                                       [reaction_Ks:262]
- -----------------------------------------------------------------------------------------------
-       μC = min[ G_graphite(T,P), G_diamond(T,P) ]                                   (4.5)
-       K1 = exp[-(μCO2 - μC  - μO2 )/(R·T)]      K2 = exp[-(μCO  - μC  - ½μO2)/(R·T)]
-       K3 = exp[-(μH2O - μH2 - ½μO2)/(R·T)]      K4 = exp[-(μCH4 - μC  - 2μH2)/(R·T)]  (4.6)
-
-   ! Only the carbon polymorphs carry (4.4); gases are referenced at 1 bar, which is what makes
-     fO₂ and the φᵢ·P products the pressure-carrying quantities.
-   ! Using graphite past the diamond transition (~2-5 GPa) would exaggerate its pressure-driven
-     destabilisation — hence the min in (4.5).
-
- 4.4  THE EMOG(D) BOUNDARY                                       [logfO2_EMOG:517]
- -----------------------------------------------------------------------------------------------
-       2 MgCO₃ + Mg₂Si₂O₆ = 2 Mg₂SiO₄ + 2C + 2O₂                                     (4.7)
-       ΔG = 2G(Fo) + 2μC + 2G(O₂) - 2G(Mag) - G(En) ;   fE = -ΔG/(2·R·T·ln10)        (4.8)
-     f < fE ⇒ graphite/diamond is the stable solid carbon host;  f > fE ⇒ carbonate is.
-
- 4.5  THE C-O-H EQUATION OF STATE — Zhang & Duan (2009)     [zd_volume:328, zd_fugacity:343]
- -----------------------------------------------------------------------------------------------
-   PRINCIPLE: CORRESPONDING STATES. One universal EOS (4.11) in REDUCED variables, with species
-   differing only through Lennard-Jones ε [K] and σ [Å]. Two fluids at the same (Tm,Pm) share Vm.
-
-       ZD_eps = (154.0, 510.0, 235.0, 31.2, 105.6, 124.5, 246.1)   order:
-       ZD_sig = (3.691, 2.88, 3.79, 2.93, 3.66, 3.36, 4.35)        (CH₄,H₂O,CO₂,H₂,CO,O₂,C₂H₆)
-
-   ! METHANE IS THE REFERENCE FLUID: the constants 154 and 3.06258806161 are chosen so that for
-     PURE CH₄ the reduced variables equal the real ones (checked: Tm/T = 1.0, Pm/P = 0.999999999999).
-
-   MIXING, FIRST ENTRY — van der Waals ONE-FLUID theory: the mixture is collapsed into a single
-   PSEUDO-PURE fluid by mole-fraction-averaging (ε,σ) over every pair (geometric mean for energy,
-   arithmetic for size — Lorentz-Berthelot), corrected by binary parameters K1ᵢⱼ, K2ᵢⱼ:
-       ε = Σᵢ Σⱼ xᵢxⱼ·K1ᵢⱼ·√(εᵢεⱼ)     K1[H2O,CO2]=0.85, K1[CH4,H2O]=0.8, else 1      (4.9)
-       σ = Σᵢ Σⱼ xᵢxⱼ·K2ᵢⱼ·(σᵢ+σⱼ)/2    K2[H2O,CO2]=1.02,                 else 1
-   ! Non-unity only for H₂O pairs: its polarity needs an empirical correction the nonpolar-
-     calibrated framework lacks. ONE EOS solve for the whole mixture — that is the "one-fluid".
-
-       Pm = 3.06258806161·σ³·Pbar/ε          Tm = 154·T/ε                            (4.10)
-       Z = 1 + (c1 + c2/Tm² + c3/Tm³)/V + (c4 + c5/Tm² + c6/Tm³)/V²
-             + (c7 + c8/Tm² + c9/Tm³)/V⁴ + (c10 + c11/Tm² + c12/Tm³)/V⁵
-             + (c13/Tm³/V²)·(c14 + c15/V²)·exp(-c15/V²)                              (4.11)
-       solve  R_gas·Tm·Z/V = Pm  for V ;   V[cc/mol] = 1000·V·(σ/3.691)³             (4.12)
-
-   ! (4.11) is a Benedict-Webb-Rubin virial expansion in 1/V with T-dependent coefficients, plus
-     one Duan-lineage exponential attraction term a pure power series cannot capture cleanly from
-     dilute gas to dense supercritical fluid. All 15 constants are UNIVERSAL; only (ε,σ) vary.
-
-   FUGACITY COEFFICIENTS — MIXING, SECOND ENTRY. φᵢ = fᵢ/(xᵢ·Pbar) is the standard departure
-   integral, and because P depends on composition only through ε(x), σ(x), the chain rule runs it
-   through the SAME mixing rule, producing per-species ONE-SIDED partial sums:
-       εᵢ = Σⱼ K1ᵢⱼ·xⱼ·√(εᵢεⱼ)          σᵢ = Σⱼ K2ᵢⱼ·xⱼ·(σᵢ+σⱼ)/2                    (4.12a)
-       ln γᵢ = Z - 1 - ln Z + S1 - 2·S2·(1 - εᵢ/ε) + 6(1-Z)·(1 - σᵢ/σ)               (4.13)
-       fᵢ = xᵢ·Pbar·exp(ln γᵢ)   ⇒   φᵢ = exp(ln γᵢ)   — see (3.6)
-
-   ! S1, S2 are the volume integral of (4.11) and its Tm-derivative moment. Their STRUCTURAL
-     correspondence to (4.11) was verified directly (S1 reuses its terms with 1,½,¼,⅕ against
-     V⁻¹,V⁻²,V⁻⁴,V⁻⁵; S2 reuses S1 with the T-power multiplied through, e.g. 2c2,3c3), but the
-     closed-form derivation is inherited from the Lee-Kesler-Plöcker lineage, not re-derived here.
-   ! PHYSICAL READING of (4.13): (Z-1)-lnZ is the whole-mixture ideal-gas departure; S1 the
-     pure-EOS pressure integral; -2S2(1-εᵢ/ε) corrects for species i's own ε differing from the
-     mixture average (Tm ∝ 1/ε); 6(1-Z)(1-σᵢ/σ) the size analogue (Vm ∝ 1/σ³ — the 6 is 2×3).
-   ! (4.12) has several real roots. Brackets tried widest-first — (1,1000), (0.01,10), (0.001,1) —
-     to land on the fluid-like branch. A heuristic, not Gibbs-energy phase selection.
-   ! 3.06258806161 is ε(CH₄)/σ(CH₄)³ at full precision, not the paper's rounded 3.0636.
-   ! C₂H₆ is carried in the arrays but never populated: its mass-action term scales as P²,
-     amplifying any inconsistency between an external ethane dataset and HP98.
-   ! Calibrated 673-2573 K and ≤10 GPa; outside that the speciation is extrapolated and the driver
-     says so.
-
- 4.6  REFERENCE BUFFERS — REPORTING ONLY, never entering the solve   [Section 4c]
- -----------------------------------------------------------------------------------------------
-   BOTH out of sb24, the dataset that produced the fO2 they are subtracted from. An offset means
-   nothing unless buffer and fO2 share a dataset.
-       FMQ:  3 fa + O₂ = 3 qtz + 2 mag      IW:  4 Fe + 2 O₂ = Fe₄O₄                 (4.14)
-       log₁₀fO2 = (ΔG - G°(O₂))/(R·T·ln10),  ΔG = oxidised side - reduced side per mole O₂
-
-   G of each end-member is computed HERE from SLB (2024) Table C1 — Mie-Grüneisen-Debye on a BM3
-   cold curve, Newton on V, plus metal electronic (A2-A3) and bcc-Fe magnetic (A5-A9) terms — so
-   the buffers need no live MAGEMin handle. FMQ prefers MAGEMin's own fO2 - dQFM when a solid scan
-   ran; the Gibbs form agrees to <0.01 log units.
-   ! SLB's `wu` is Fe₄O₄, not FeO (`pe` likewise Mg₄O₄), so IW is written per TWO O₂.
-   ! sb24's IW sits ~1.4 log units high because MAGEMin never applies the Landau term, so every
-     ferrous host is short R·ln5 per Fe²⁺. It CANCELS in ΔIW — do not add it to IW alone.
-   ! Frost (1991) forms are retained as logfO2_*_frost for the benchmark scripts only. Subtracting
-     them from an sb24 fO2 is a category error; see TOex_bench.txt §1.7-1.8.
-
- 4.7  SMOOTHING AND GUARD FUNCTIONS
- -----------------------------------------------------------------------------------------------
-       softmax2(a,b,β) = m + ln[e^{β(a-m)} + e^{β(b-m)}]/β,   m = max(a,b)
-       softmin2(a,b,β) = -softmax2(-a,-b,β)                                          (4.15)
-       softcap(x,cap)  = max(0, softmin2(x, cap, 30/cap))
-
-   ! Caps from ABOVE only: a smooth lower rounding would inject a phantom floor into XCO₂, which
-     Φ then amplifies into a spurious oxygen demand. max(0,·) trims the few-ulp undershoot at x≈0.
+ 4.1  HOLLAND & POWELL (1998) Gibbs energies
+        ΔH = c1(T-Tr) + ½c2(T²-Tr²) - c3(1/T-1/Tr) + 2c5(√T-√Tr)                      (4.1)
+        ΔS = c1ln(T/Tr) + c2(T-Tr) - ½c3(1/T²-1/Tr²) - 2c5(1/√T-1/√Tr)                (4.2)
+        G(T) = G0 - (T-Tr)S + ΔH - TΔS                                                (4.3)
+        ΔG_P = V0(T)·K/(K'-1)·[(1 + K'(Pbar-1)/K)^(1-1/K') - 1]         Murnaghan     (4.4)
+        μC = min[G_graphite, G_diamond]      the stable reduced carbon, by G alone     (4.5)
+        K3 = exp[-(μH2O-μH2-½μO2)/RT]    K4 = exp[-(μCH4-μC-2μH2)/RT]                 (4.6)
+ 4.2  EMOG(D) BUFFER
+        2 MgCO₃ + Mg₂Si₂O₆ = 2 Mg₂SiO₄ + 2C + 2O₂                                     (4.7)
+        ΔG = 2G(Fo) + 2μC + 2G(O₂) - 2G(Mag) - G(En) ;  fE = -ΔG/(2RT ln10)           (4.8)
+ 4.3  ZHANG & DUAN (2009) C-O-H EOS — φᵢ and the mixture molar volume
+        ε = ΣᵢΣⱼ xᵢxⱼK1ᵢⱼ√(εᵢεⱼ)   K1[H2O,CO2]=0.85, K1[CH4,H2O]=0.8, else 1          (4.9)
+        Pm = 3.06258806161σ³Pbar/ε ;  Tm = 154T/ε                                    (4.10)
+        solve R_gas·Tm·Z/V = Pm for V ; V[cc/mol] = 1000V(σ/3.691)³             (4.11)-(4.12)
+        lnγᵢ = Z - 1 - lnZ + S1 - 2S2(1 - εᵢ/ε) + 6(1-Z)(1 - σᵢ/σ)                    (4.13)
+      ! THE SAME ROOT GIVES THE FLUID DENSITY: ρ = 1000·M̄/V. It comes free, and it carries no
+        validity assumption the fugacity coefficients do not already carry, since Z = P·V/RT.
+        Clamped to the calibration box (≤ 10 GPa), as ZD09 is.
+ 4.4  BUFFERS, reported only
+        FMQ: 3fa + O₂ = 3qtz + 2mag      IW: 4Fe + 2O₂ = Fe₄O₄                        (4.14)
+      ! dFMQ IS MEANINGLESS AT LOW T. Measured: fO2 = -41.6 at 305 K reads dFMQ = +38.5 because
+        the BUFFER is at -80 there. The reference is what is extrapolated, not the solution.
+ 4.5  SOFT LIMITERS   softmin2(a,b,β) = -softmax2(-a,-b,β) — used so caps never introduce a corner.
 
 ===============================================================================================
- PART 5 — THE EXACT PROCESS, STEP BY STEP
+ PART 5 — WHERE THE LIMITS BIND
 ===============================================================================================
- Steps 2-4 are the residual, evaluated ~40-60 times.
+ A limit being touched is a BRANCH, not an error. Only the last row is a failure.
 
- STEP 0 — SETUP, once per call                                    [partition_Oₑₓ:833]
- -----------------------------------------------------------------------------------------------
-   0.1  X ← p·XB + (1-p)·XH                                                    (0.1)
-   0.2  Masses Mf, Ms, Mc, Mh, TOₑₓ; moles molMf, nC_total; the factor Φ       (0.2)-(0.6)
-   0.3  ? TOₑₓ = 0  ⇒  RETURN immediately, nothing to partition
-   0.4  IDV ← ∫ΔV dP, for the melt oxybarometer
-   0.5  Ceilings maxsOₑₓ (2.2), maxmOₑₓ (2.9); lowclip = 10⁻¹⁰
-   0.6  BUILD THE SOLID OXYBAROMETER — the expensive step, nr+nrm MAGEMin calls  (2.1)-(2.6)
-        Returns sfO2, table bounds, monotonicity flag, the metal floor (2.2b), QFM, and the
-        native-iron interpolant.   ? Ms = 0 (ϕ=1) ⇒ skip MAGEMin, return a placeholder
-   0.7  minsOₑₓ ← -s_floor;  pack ctx
-
- STEP 1 — BRACKET                                                   [bisect_solve:807]
- -----------------------------------------------------------------------------------------------
-   1.1  Evaluate F(-120) and F(+40).
-   1.2  ? sign F(-120) = sign F(+40) ⇒ NO ROOT. Return the endpoint with smaller |F|, flagged
-        converged = false. This is the `capacity_exceeded` exit.
-   1.3  Otherwise the root is bracketed.
-   ! The bracket is far wider than any physical fO2. Every demand saturates outside its own range,
-     so this only has to straddle the root — it is not a constraint on the answer.
-
- STEP 2 — AT A TRIAL f: THE TWO Fe SINKS                          [_coh_derive:737]
- -----------------------------------------------------------------------------------------------
-   Each inverts a monotone oxybarometer, 80 bisections, saturation branches checked FIRST:
-     2.1  SOLID over [-minsOₑₓ + lowclip, maxsOₑₓ - lowclip] — the bracket STRADDLES ZERO:
-          ? hi ≤ lo         ⇒ sOₑₓ = lo.  Zero capacity — ABSENT (ϕ=1).
-          ? sfO2(lo) ≥ f    ⇒ sOₑₓ = lo.  PINNED AT THE METAL FLOOR: all Fe as Fe⁰, not buffering.
-          ? sfO2(hi) ≤ f    ⇒ sOₑₓ = hi.  PINNED AT CAP: every Fe²⁺ oxidised, no longer buffering.
-          ? otherwise       ⇒ bisect for sfO2(sOₑₓ) = f exactly.
-     2.2  MELT: identical, over [lowclip, maxmOₑₓ - lowclip] — no metal branch.
-   ! Only in the "otherwise" branch does that sink's own fO2 equal f. In the pinned branches it
-     does not, and that is correct, not an error (1.2). classify_regime records which.
-
- STEP 3 — AT THE SAME f: THE JOINT CARBON + FLUID SOLVE            [coh_state:439]
- -----------------------------------------------------------------------------------------------
-   3.1  Pbar ← 10⁴P;  fO₂ ← 10^f;  K1..K4 ← (4.6);  molH ← (2.23);  nC_total ← (0.5)
-   3.2  Bmelt ← (2.11);  fE ← (4.8);  aC_cap ← min(1, 10^(fE - f))                   (3.1)
-   3.3  Initialise φᵢ = 1 (ideal gas), aC = aC_cap
-   3.4  REPEAT 6 TIMES:                                                              (3.5)
-        (a) aC with φ frozen [_solve_aC]:
-            ? nC_total = 0          ⇒ aC = 0
-            ? D(aC_cap) ≤ nC_total  ⇒ aC = aC_cap ⇒ SOLID CARBON PRESENT, holding (3.3)
-            ? otherwise (or D = ∞)  ⇒ bisect (3.4) ⇒ NO SOLID CARBON, carbon-undersaturated.
-                                      This branch also resolves an INVALID speciation, since
-                                      D = +∞ there pushes aC down.
-        (b) speciate at (f, aC, φ): (2.18)-(2.22). Σx = 1 by construction.
-        (c) x ← x/Σx; φᵢ ← ZD09 (4.9)-(4.13). Non-finite or non-positive values discarded.
-   3.5  MELT CO₂ (2.12)-(2.13);  FLUID (2.24)-(2.25)
-   3.6  SOLID CARBON: present only if aC is still pinned at its ceiling —
-            solid_present = (nC_total > 0) AND (aC ≥ aC_cap·(1 - 10⁻⁹))
-   3.7  HOST SPLIT (2.15)-(2.17);  FLUID OXYGEN (2.26)-(2.27)
-   ! CARBON MASS BALANCE HOLDS EXACTLY AT EVERY TRIAL f, not only at the root. Step 3 is a complete
-     carbon solve nested inside each oxygen residual; the outer bisection solves OXYGEN alone.
-
- STEP 4 — ASSEMBLE THE RESIDUAL                                       [_coh_derive:756]
- -----------------------------------------------------------------------------------------------
-   4.1  carbonO ← Φ·XCO₂/(1 - XCO₂)                                                  (2.14)
-   4.2  Check fₑₓ, carbO, fₛ, fₗ are finite; abort loudly if not [nancheck]
-   4.3  Record each phase's OWN reading: fₛ = sfO2(sOₑₓ), fₗ = melt_fO2(mOₑₓ)
-   4.4  total ← sOₑₓ + mOₑₓ + carbonO + carbO + fₑₓ ;   F(f) ← total - 1             (1.1)
-
- STEP 5 — BISECTION UPDATE                                          [bisect_solve:816]
- -----------------------------------------------------------------------------------------------
-   5.1  x ← ½(lo + hi);  fx ← F(x)
-   5.2  ? |fx| ≤ 10⁻⁸  OR  (hi - lo) ≤ 10⁻¹⁴·max(1,|x|)   ⇒ stop
-   5.3  ? sign fx = sign F(lo)  ⇒ lo ← x   else   hi ← x ;   repeat from STEP 2, ≤500 iters
-   ! CONVERGENCE IS JUDGED ON THE RESIDUAL ALONE. A collapsed bracket with |F| still large means
-     F is DISCONTINUOUS there and no root exists — which must not be reported as success.
-
- STEP 6 — POST-PROCESS
- -----------------------------------------------------------------------------------------------
-   6.1  Re-derive the full state at the converged f, so what is reported is exactly what the
-        residual saw — the same function, not a reconstruction.
-   6.2  Iron speciation (2.6a)-(2.6b): metal_wt, FeM_solid/net/diss/disp, FeR_solid/net, FeR_melt.
-   6.3  Reference buffers (4.14); classify_regime — a label only, never an input to the solve.
-   6.4  Return both budgets as fractions of their own totals:
-          sOₑₓ, mOₑₓ, carbonO, carbO, cohsink — of TOₑₓ, summing to 1 when converged
-          fC_gph, fC_carb, fC_melt, fC_fluid  — of TC,   summing to 1 when TC > 0
+  solid at metal floor   sfO2(-minsOₑₓ) ≥ f    sOₑₓ = -minsOₑₓ, fₛ ≠ f legitimately
+  solid at ferric cap    sfO2(maxsOₑₓ) ≤ f     sink full
+  melt floor / cap       same, no metal branch  :melt_depleted / :melt_saturated
+  both Fe caps           both saturated         the rock's capacity binds the whole budget
+  phase absent           maxOₑₓ ≤ 0             ABSENT: no oxybarometer, so no fO2 is attributed
+  XCO₂ at the softcap    aC·Bmelt > 0.3         the cell reports the CAP, not the chemistry
+  aC ceiling invalid     speciation fails       walk down to aC_use, bracket against that
+  fluid non-finite       any X not finite       invalid speciation, propagated — never clamped
+  NO SIGN CHANGE         F(-120)·F(+40) > 0     FAILURE: no root. Keep the previous partition,
+                                                count it, never stop the run.
 
 ===============================================================================================
- PART 6 — THE LIMITS, AND WHAT HAPPENS WHEN EACH IS TOUCHED
+ PART 7 — THE SURFACE BOX: Θ, AND HOW ONE NUMBER CARRIES BOTH CARBON AND HYDROGEN
 ===============================================================================================
- A limit being touched is a branch, not an error. Only the last row is a failure.
- -----------------------------------------------------------------------------------------------
-  LIMIT                    TEST                        CONSEQUENCE
- -----------------------------------------------------------------------------------------------
-  solid at metal floor     sfO2(-minsOₑₓ) ≥ f          sOₑₓ = -minsOₑₓ. All Fe as Fe⁰; the solid
-                                                       has left the equilibrium, so fₛ ≠ f is
-                                                       legitimate.  :solid_metal_saturated
+ 7.1  Oₑₓ IS AN ELEMENT COUNT, NOT A SPECIATION. From the reference state (Fe as FeO, C as
+      graphite, H as H₂O):
 
-  solid at cap             sfO2(maxsOₑₓ) ≤ f           Every Fe²⁺ oxidised, sink full.
-                                                       :solid_saturated
+        Oₑₓ ≡ n_O − n_H/2                                                              (7.1)
 
-  melt at floor / cap      same with melt_fO2          :melt_depleted / :melt_saturated
+      Check every carrier: CO₂ 2−0 = +2 · CO +1 · C(gr) 0−0 = 0 · CH₄ 0−2 = −2 · H₂O 1−1 = 0 ·
+      H₂ 0−1 = −1 · O₂ +2. The whole table is reproduced by one subtraction.
+      ! THE −n_H/2 IS HYDROGEN'S WATER BILL, PAID UP FRONT. Oₑₓ is the oxygen that remains after
+        EVERY hydrogen atom has already been given the ½ O it needs to be H₂O. That is the whole
+        answer to "how does one number track carbon and hydrogen at once": hydrogen's demand is
+        not tracked alongside Oₑₓ, it is SUBTRACTED INSIDE IT.
+      ! ⇒ EVERY ATOM-CONSERVING REACTION IS THE IDENTITY ON (n_C, n_H, Oₑₓ). CH₄ + 2O₂ → CO₂ +
+        2H₂O is 4−2 = 2 on both sides; 2H₂ + O₂ → 2H₂O is 2−2 = 0 on both. Chemistry inside the
+        box is invisible; only TRANSPORT ACROSS ITS BOUNDARY moves Oₑₓ.
 
-  both Fe caps             both saturated              :oxidant_exhausted — the rock's capacity
-                                                       binds the whole budget
+ 7.2  Θ ADDS CARBON'S BILL. Per carbon atom, CO₂ costs 2:
 
-  phase absent             maxsOₑₓ ≤ 0 or maxmOₑₓ ≤ 0  ABSENT, not merely empty: no oxybarometer
-                                                       exists, so any fO2 attributed to it is
-                                                       fictitious and suppressed in the report.
-                                                       :melt_only / :solid_only
+        Θ ≡ Oₑₓ/n_C − 2                    ⇒   Θ·n_C = Oₑₓ − 2n_C                      (7.2)
 
-  melt CO₂ ceiling         aC·Bmelt → XCO2max = 0.3    softcap rolls XCO₂ over smoothly, stopping
-                                                       (2.13) diverging near the carbonate boundary
+      so Θ·n_C is the oxygen left over once BOTH bills are paid — hydrogen's inside (7.1), carbon's
+      by the −2. Three regimes, and Θ is a RATIO so it is undefined on an empty box:
 
-  carbon over-committed    D(aC_cap) > nC_total        aC drops below its ceiling (3.4) until melt
-                                                       + fluid hold exactly nC_total; solid carbon
-                                                       disappears.  :carbon_undersaturated — the
-                                                       normal resolution
+        Θ > 0   both paid, surplus is free O₂:  n_O2 = Θ·n_C/2
+        Θ = 0   exactly CO₂ + H₂O, nothing spare
+        Θ < 0   cannot pay both. DEFICIT = |Θ|·n_C oxygen atoms.
 
-  fluid overfilled         γ ≤ 0 or disc < 0 (2.20)    speciation invalid ⇒ D = +∞ ⇒ the same aC
-                                                       reduction resolves it. Not a failure.
+ 7.3  WHO GOES WITHOUT. Split each carrier's Oₑₓ between its carbon and its hydrogen. CH₄'s −2 is
+      0 (its CARBON is graphite-like) plus 4 × (−½) (its hydrogen); H₂'s −1 is 2 × (−½); H₂O's 0
+      is 2 × 0. So hydrogen contributes −½ per atom in ANY reduced carrier and 0 in water, and
+      carbon contributes +2 as CO₂ and 0 otherwise. With C_ox + C_red = n_C and H_red the hydrogen
+      in CH₄ or H₂:
 
-  EMOG(D) crossed          f ≈ fE                      solid carbon splits over a 0.25-log ramp
-                                                       (2.15).  :carbonate_graphite_buffered
+        Oₑₓ = 2·C_ox + 2·n_O2 − ½·H_red                                                (7.3)
 
-  MAGEMin table edge       sOₑₓ ∉ [tbl_lo, tbl_hi]     below: held FLAT at the metal plateau;
-                                                       above: log-linear (2.6). Answer valid, but
-                                                       the report says it relies on extrapolation.
+      Substituting into (7.2) at n_O2 = 0 gives the identity the whole surface model rests on:
 
-  MAGEMin non-monotonic    !issorted(fO2)              repaired by isotonic regression (2.3)-(2.4)
-                                                       and warned. Without it the root can vanish.
+        Θ·n_C = −(2·C_red + ½·H_red)                                    MASTER          (7.4)
 
-  metal vs budget clash    FeM_net > FeM_solid         sOₑₓ implies more metal than the assemblage
-                                                       holds — the R axis is too coarse near the
-                                                       metal edge. Flagged, never absorbed.
+      IN WORDS: the deficit is paid by REDUCED CARBON at 2 apiece and by REDUCED HYDROGEN at ½
+      apiece. That is how Θ carries both at once — not as two tracked amounts, but as ONE deficit
+      with TWO possible payers.
+      ! ONE EQUATION, TWO UNKNOWNS ⇒ Θ FIXES THE TOTAL AND NOT THE SPLIT. C_red and H_red trade
+        off along (7.4) at fixed Θ, so any rule that names them is a CHOICE, not a derivation.
+        CH₄ and H₂ are indistinguishable here — both are −½ per H — so the CH₄/H₂ ratio is pure
+        gauge: 0.5 CH₄ + 0.5 C(gr) and 1 C(gr) + 1 H₂ are the SAME (n_C, n_H, Oₑₓ).
 
-  NO ROOT AT ALL           sign F(-120) = sign F(+40)  :capacity_exceeded. Even with every sink at
-                                                       its cap the assemblage cannot hold the
-                                                       budget — physically, a new Fe³⁺-rich phase
-                                                       must precipitate. Reported, never patched.
- -----------------------------------------------------------------------------------------------
- ! The shortfall 1 - Σ is printed WITH ITS SIGN, because the directions mean opposite things:
-     > 0  UNPLACED — that much of TOₑₓ has no sink;  < 0  OVER-SUBSCRIBED — the sinks demand more.
- ! In testing every such case was pinned by the sampled Fe³⁺ range (Rmax), not by stoichiometry.
-   Raise Rmax before concluding a new phase is needed.
+ 7.4  Θ = −4x, THE CO₂/CH₄ ENDMEMBER RULE. Let carbon be only CO₂ or CH₄ and hydrogen only CH₄ or
+      H₂O. Then all reduced carbon is CH₄, which fixes H_red = 4·C_red. With C_red = x·n_C, (7.4):
+
+        Θ·n_C = −(2x·n_C + ½·4x·n_C) = −4x·n_C      ⇒     Θ = −4x                      (7.5)
+
+      equivalently, directly:  Oₑₓ = n_C[(1−x)(+2) + x(−2)] = n_C(2 − 4x) ⇒ Θ = −4x.
+      ! THE 4 IS THE CO₂ → CH₄ SWING, +2 to −2. Half of it (2) is the carbon leaving CO₂, half
+        (4 H × ½) is the hydrogen it takes with it. This is the split already in
+        toex_degas_species as xCO2 = (r_deg + 2)/4, with r_deg = Oₑₓ/n_C = Θ + 2.
+      ! x = 1 AT Θ = −4 SATURATES THE CARBON. Below that only H_red can pay, and since free H₂ has
+        no carbon, Θ IS UNBOUNDED BELOW: CH₄ + n H₂ sits at Θ = −4 − n. −4 is the CARBON-ONLY
+        floor, not a floor on Θ.
+
+ 7.5  THE MINIMISE-H_red RULE, used for the surface box. Water is the most stable hydrogen carrier
+      at surface T, so carbon pays first — and graphite pays 2 apiece while costing no hydrogen:
+
+        C_ox  = min(n_C, max(Oₑₓ, 0)/2)      C_red = n_C − C_ox                         (7.6)
+        n_O2  = max(Oₑₓ − 2·n_C, 0)/2                                                   (7.7)
+        H_red = max(−2·Oₑₓ, 0)               H_wat = n_H − H_red                        (7.8)
+
+      Closes (7.3) exactly on all three branches. NO HYDROGEN-AVAILABILITY BRANCH: feasibility is
+      H_red ≤ n_H ⟺ Oₑₓ ≥ −n_H/2 ⟺ n_O ≥ 0, which is physical, not extra.
+      ! ⇒ H_red > 0 ONLY WHERE Oₑₓ < 0, i.e. Θ < −2. Under this rule the air holds no H₂ until the
+        excess oxygen is literally negative; under (7.5) reduced H appears as soon as Θ < 0. Same
+        state, different reported speciation — 7.3's gauge freedom made visible.
+
+ 7.6  BURIAL, AND WHY IT NEEDS NO SPECIATION. Two independent scalars (B.11), with the
+      availability floor f_eff and r ≡ Oₑₓ/n_C = Θ + 2:
+
+        dO = 2(1 − f_eff)·dC          f_eff = min(max(f_org, 1 − r/2), 1)               (7.9)
+
+      At the floor, 1 − f_eff = r/2 = Oₑₓ/(2n_C), and for Θ ≤ 0 that is exactly C_ox/n_C of (7.6):
+
+        1 − f_eff  =  C_ox/n_C                                                         (7.10)
+
+      ! THE AVAILABILITY FLOOR IS THE BOX'S OWN CO₂ FRACTION. Carbonate can only be made from
+        carbon that is actually CO₂. (7.9) is the FLUX projection of that statement and (7.6) is
+        the INVENTORY projection; they agree identically, verified across Θ ∈ [−1.5, +0.5].
+      ! AND BURIAL MOVES CARBON AND OXYGEN AND NEVER HYDROGEN ⇒ no burial ratio, however tuned,
+        carries information about the H₂O/H₂ split. That comes only from (7.8).
 
 ===============================================================================================
- PART 7 — NUMERICAL CONSTANTS IN ONE PLACE
+ PART 6 — CONSTANTS
 ===============================================================================================
-   Mt              10³ g          reference cell mass
-   lowclip         10⁻¹⁰          floor of both Fe inversions
-   outer bracket   [-120, +40]    log₁₀fO2 search range
-   tol (atol)      10⁻⁸           accepted |F|; above bisection's ~10⁻¹¹ floor, far below the
-                                  ~0.1-3.5 graphite cliff
-   xtol            10⁻¹⁴          relative bracket-width stop
-   maxiter         500            outer bisection
-   _invert_demand  80 iters       each Fe inversion
-   _solve_aC       120 iters      over log₁₀aC ∈ [-300, log₁₀aC_cap]
-   outer_iters     6              φ ↔ aC successive substitution, NO convergence test
-   wEMOG           0.25           logistic width of the graphite→carbonate ramp
-   XCO2max         0.3            melt CO₂ ceiling — least constrained number here
-   nr, nrm, Rmax   100, 15, 0.4   MAGEMin scan resolution and Fe³⁺/ΣFe reach
-   R0              2×10⁻³         asinh scale of the signed Fe axis
-   r range         [-1.96, Rmax]  scan span; -2 is singular, hence -1.96
-   softcap sharp.  30             smoothing of the melt CO₂ ceiling
-   fₑₓ clamp       ±10³           keeps the outer bracket finite
-   ctol            10⁻⁶·nC_total  threshold for declaring a solid C phase present
-   atcap / atfloor 0.999 / 0.999·minsOₑₓ    regime pinning tests
-   fO2_equal tol   10⁻⁶           |fₛ - fₗ| below this counts as equal
-   ZD09 root       200 iters      brackets (1,1000), (0.01,10), (0.001,1)
-
-===============================================================================================
- PART 8 — WHAT THE MATHEMATICS DOES NOT CAPTURE
-===============================================================================================
- Each is a property of the FRAMEWORK, not of the implementation.
-
-   1. ABSOLUTE fO2 OFFSET, ~1.9 log units. Relative behaviour benchmarks well; the mapping onto an
-      absolute scale is shifted. ~1.4 of it is now attributed to MAGEMin's missing Landau term
-      (bench §1.8, issue 10). The reference-buffer half of the original diagnosis is resolved.
-
-   2. NO PRECIPITATING Fe³⁺ PHASE. The five sinks are the only sinks; a budget exceeding their
-      combined capacity is reported, not resolved.
-
-   3. XCO2max = 0.3 stands in for a real CO₂ solubility model in silicate melt.
-
-   4. Carbonate is pure MgCO₃ at unit activity, not a magnesite-dolomite-calcite solution; the
-      wEMOG ramp approximates the resulting smearing rather than modelling it.
-
-   5. The φ ↔ aC loop is a FIXED 6 passes with no convergence test.
-
-   6. C₂H₆ is excluded from the fluid.
-
-   7. METAL CANNOT DRIVE THE SOLVE. Disproportionation is oxygen-neutral, so it is the null
-      direction of sOₑₓ; metal is harvested from the assemblage and REPORTED (2.6a), never solved
-      for. Driving it needs Fe³⁺ and Fe⁰ as independent unknowns — a second equation.
-
-   8. No kinetics anywhere: every equation above is an equilibrium statement at a single (P,T),
-      and all sinks are assumed to equilibrate instantaneously.
-===============================================================================================
+   Mt = 10³ g reference cell · outer bracket [-120, +40] · outer iters ≤ 500
+   ideality passes 2..30, tol 10⁻⁸ · wEMOG 0.25 · XCO2max 0.3
+   aC bracket log₁₀ ∈ [-300, log₁₀aC_use], ceiling walk ≤ 320 decades
+   λ bracket log₁₀ ∈ [-60, 0] · ZD09 clamped to ≤ 10 GPa · isotonic tilt 10⁻⁶
+   residual tolerance = rel × max(|TOₑₓ|, 10⁻⁶ × capacity)

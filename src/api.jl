@@ -213,7 +213,8 @@ function time_vs_field(Dblock::Vector{DataBlock}, field::String; logy=logy, yran
                                 ylabelpadding=ylabelpadding, xreversed=xreversed, yreversed=yreversed, xgrid=xgrid, ygrid=ygrid, savein=savein, scatter=scatter, marker=marker,
                                 markersize=markersize, strokewidth=strokewidth, strokecolor=strokecolor, line=line, linewidth=linewidth, linestyle=linestyle,
                                 cmap_reverse=cmap_reverse, subsample=subsample, color=color, cmap=cmap, mov_avg_window=mov_avg_window, yconv=yconv, mavg_excl_floor=mavg_excl_floor, mavg_intensity=mavg_intensity, zero_at_tstart=zero_at_tstart,
-                                error_bars=error_bars, error_bar_capwidth=error_bar_capwidth, error_bar_leg=error_bar_leg, error_bar_legpos=error_bar_legpos)
+                                error_bars=error_bars, error_bar_capwidth=error_bar_capwidth, error_bar_leg=error_bar_leg, error_bar_legpos=error_bar_legpos,
+                                rprof_top=nothing, ylabel=nothing)
 
     @assert 0<=mavg_intensity<=1 "mavg_intensity must be between 0 and 1"
     # field to use
@@ -227,7 +228,7 @@ function time_vs_field(Dblock::Vector{DataBlock}, field::String; logy=logy, yran
 
     # Plot
     isnothing(fig) && (fig = Figure(size = fsize))
-    ylab = fin2label(field, in_rprof, logy)
+    ylab = isnothing(ylabel) ? fin2label(field, in_rprof, logy) : ylabel
     (yconv[2] != "") && (ylab = L"%$ylab\;\mathbf{\rightarrow\;[%$(yconv[2])]}")
     ax = Axis(fig[fpos[1], fpos[2]], xlabel = L"Time\;[Gyr]", ylabel = ylab, xlabelsize=xlabelsize, ylabelsize=ylabelsize, xgridvisible=xgrid, ygridvisible=ygrid, xreversed=xreversed, yreversed=yreversed,
                xticklabelsize=xticklabelsize, yticklabelsize=yticklabelsize, xticksize=xticksize, yticksize=yticksize, xlabelpadding=xlabelpadding, ylabelpadding=ylabelpadding, yscale=logy ? log10 : identity,
@@ -248,7 +249,13 @@ function time_vs_field(Dblock::Vector{DataBlock}, field::String; logy=logy, yran
         idxT, idxR, idxP = data_encoding(blck.timeheader, blck.rprofheader, blck.platesheader)
         # Find radial phase boundaries
         pv_ring, wad_ol, lith_ol = idx_ph_transitions(blck; timeidx=1)
-        rprof_range = if contains(field, "_lm")
+        rprof_range = if !isnothing(rprof_top)
+                # Top rprof_top metres of the mantle, i.e. r >= (mantle thickness - rprof_top)
+                # measured from the CMB. Scalar, or one thickness per block.
+                rtop = rprof_top isa Number ? rprof_top : rprof_top[b]
+                rvec = @view blck.rprofdata[:, 1, idxR["r"]]
+                findall(>=(maximum(rvec) - rtop), rvec)
+            elseif contains(field, "_lm")
                 1:pv_ring-1
             elseif contains(field, "_tz")
                 pv_ring:wad_ol-1
@@ -266,8 +273,20 @@ function time_vs_field(Dblock::Vector{DataBlock}, field::String; logy=logy, yran
         (subsample==0 && in_rprof) && (subsample = max(1, Int(length(blck.rproftime) ÷ 500)))
         # Vectors
         xvec = in_plates ? (@view blck.platesdata[1:subsample:end, idxP["time"]]) : in_time ? (@view blck.timedata[1:subsample:end,idxT["time"]]) : (@view blck.rproftime[1:subsample:end])
-        yvec = in_plates ? blck.platesdata[1:subsample:end, idxP[field2use]] : in_time ? blck.timedata[1:subsample:end, idxT[field2use]] : 
-                    map(col -> mean(skipmissing(col)), eachcol(replace(blck.rprofdata[rprof_range, 1:subsample:end, idxR[field2use]], NaN=>missing)))
+        yvec = if in_plates
+                blck.platesdata[1:subsample:end, idxP[field2use]]
+            elseif in_time
+                blck.timedata[1:subsample:end, idxT[field2use]]
+            elseif isnothing(rprof_top)
+                map(col -> mean(skipmissing(col)), eachcol(replace(blck.rprofdata[rprof_range, 1:subsample:end, idxR[field2use]], NaN=>missing)))
+            else
+                # Mass-weighted, so a concentration averaged over a shell stays comparable to the
+                # bulk means StagYY writes to time.dat. The sector means above are left unweighted.
+                v = blck.rprofdata[rprof_range, 1:subsample:end, idxR[field2use]]
+                w = blck.rprofdata[rprof_range, 1:subsample:end, idxR["dM"]]
+                ok = .!isnan.(v)
+                vec(sum(ifelse.(ok, v .* w, 0.0), dims=1) ./ sum(ifelse.(ok, w, 0.0), dims=1))
+            end
         # Partials if reuested
         contains(field, "∂")   && (yvec = diff(yvec); xvec = 0.5(xvec[1:end-1].+xvec[2:end]))
         # Time axis cuts

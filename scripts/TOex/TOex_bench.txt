@@ -288,36 +288,55 @@
     1296 cases: P {1,3,10,25} GPa x T {1100,1500,1900,2100} K x phi {0.001,0.01,0.1}
                 x TOex {1e-4,1e-3,1e-2} x TC {1e-6,1e-2,1e-1} x H {0,1e-4,1e-2}.  Mock solid branch.
 
- 3.1  Convergence history
+ 3.1  Convergence history                                        [RERUN 2026-09-06]
 -----------------------------------------------------------------------------------------------
+      The historical rows below used a MOCK solid branch. The last row is the CURRENT solver, run
+      through the production table via toex_probe_file() - so it is not a like-for-like successor
+      to the rows above it, and the drop is not a regression. See 3.1b.
       state of the model                                          converged      main failure mode
       3-unknown LM solve, multi-regime cascade                        50.5 %      carbon_undersat gap
       + removed double-imposed budget cap; log-linear low-end
         extrapolation of the solid oxybarometer                       69.0 %      carbon_undersat gap
       + carbon activity aC < 1 (carbon-undersaturated fluid)          81.3 %      capacity_exceeded
-      + Rmax 0.18 -> 0.4 (wider Fe³⁺ sampling)                        98.5 %      capacity_exceeded
+      + Rmax 0.18 -> 0.4 (wider Fe3+ sampling)                        98.5 %      capacity_exceeded
       + solid carbonate as a sink                                    100.0 %      —
-      + upper-end extrapolation of the solid oxybarometer            100.0 %      —   (also 100 %
-                                                                                  at Rmax = 0.18)
+      + upper-end extrapolation of the solid oxybarometer            100.0 %      —
+      ABSOLUTE-MASS SOLVER, real tabulated oxybarometer               88.9 %      capacity_exceeded
 
- 3.2  Conservation invariants at the final state
+ 3.1b WHERE THE 11.1 % GOES, and it is not a defect                  [new 2026-09-06]
 -----------------------------------------------------------------------------------------------
-      oxygen budget closure failures                     0 / 1296   (worst |Σ-1| = 1.0e-8)
-      carbon budget closure failures                     0 / 1296   (worst |Σ-1| = 4.6e-15)
-      negative partition shares                          0 / 1296
-      carbon over-committed beyond TC                    0 / 1296   (worst = 1.0000 x budget)
-      unexplained fO2-equality violations                0 / 1296
-      cost                                               ~3 ms per case
+      144 of 1296 do not converge, and they are PERFECTLY LOCALISED:
+          by TOex   1e-4: 0/432    1e-3: 0/432    1e-2: 144/432
+          by TC     1e-6: 144/432  1e-2: 0/432    1e-1: 0/432
+          by P, T, phi, H            36/324 or 48/432 each - i.e. FLAT, no dependence at all
+      Every failure is exactly (TOex = 1e-2) AND (TC = 1e-6): 144/144 of that combination, zero
+      everywhere else. That is genuine capacity_exceeded. The rock's entire ferric capacity is
+          maxsOex = 0.5*(Ms*X_FeO/M_FeO)*M_O ~ 8.8 g per 1000 g ~ 0.89 wt%
+      so a 1 wt% budget cannot be held by iron alone, and with TC = 1e-6 there is no carbon sink
+      to take the rest. No root exists; the solver correctly reports so and the cell keeps its
+      previous partition. The mock branch of the historical rows had a different capacity, which
+      is the whole reason those rows read 100 %.
 
- 3.3  capacity_exceeded — an artefact, not physics
+ 3.2  Conservation invariants at the final state                     [RERUN 2026-09-06]
 -----------------------------------------------------------------------------------------------
-      Was the solid Fe³⁺ ceiling set by STOICHIOMETRY (needs a new phase) or by TABLE REACH (Rmax)?
-        at Rmax = 0.18, before the aC work:   96 cases — 96 table-limited,   0 stoichiometric
-        after the aC work:                   242 cases — 242 table-limited,  0 stoichiometric
-      Not one case had exhausted its Fe²⁺. With the ceiling now stoichiometric and the oxybarometer
-      extrapolated above the table, capacity_exceeded is 0/1296 even at the original Rmax = 0.18.
-      IN PRODUCTION: genuine exhaustion means every Fe atom is Fe³⁺ — an enormous budget. More
-      likely an upstream bookkeeping error (TOex inflated by double-counted oxygen).
+      cases                                              1296
+      converged                                          1152 / 1296 = 88.9 % (3.1b)
+      worst |Sum(O demands)/TOex - 1|                    6.3e-08
+      worst |Sum(C)/TC - 1|                              1.0e-09
+      carbon over-committed beyond TC                    1.000000 x budget
+      negative carbon partitions                         0 / 1296
+      cost                                               22.3 ms per case (real table, 1 core)
+      ! THE OXYGEN CLOSURE MUST INCLUDE meltH2ex. Omitting it reads 8.6 rather than 6.3e-08 - the
+        melt-H2 term is a SOURCE and a genuine sixth row, not a diagnostic.
+
+ 3.3  capacity_exceeded — an artefact THEN, physics NOW              [REVISED 2026-09-06]
+-----------------------------------------------------------------------------------------------
+      Historically the ceiling was set by TABLE REACH (Rmax) rather than stoichiometry, and every
+      one of the 96/242 flagged cases still had unused Fe2+ - an artefact, removed by extrapolating
+      above the table. With the production table and a stoichiometric ceiling the remaining 144
+      cases are the opposite: the budget genuinely exceeds what iron plus carbon can hold (3.1b).
+      IN PRODUCTION a 1 wt% excess-oxygen budget with no carbon is not a physical mantle state; it
+      is far more likely an upstream bookkeeping error (TOex inflated by double-counted oxygen).
 
  3.4  Effect of Fe³⁺ sampling range, before the upper-end extrapolation existed
 -----------------------------------------------------------------------------------------------
@@ -477,3 +496,774 @@
      offset in 1.5 is now accounted for. Fixing it means restoring the Landau term for ALL ferrous
      end-members — an upstream MAGEMin change.
 ===============================================================================================
+
+===============================================================================================
+ SECTION 6 — MELT HYDROGEN (H₂ AND H₂O) AND THE SOLVER REWRITE     added 2026-09-04
+===============================================================================================
+
+ 6.1  H₂ SOLUBILITY LAW — Hirschmann et al. (2012), against their own figures
+ -----------------------------------------------------------------------------------------------
+   basalt + PURE H₂, 1 GPa, 1400 °C      0.603 wt% H₂   vs Fig. 5 ~0.57 wt%      6 % miss
+   ! This test NEVER TOUCHES fO₂ — it is K·f_H2 alone, so it validates (2.28)-(2.29) and every
+     unit conversion in them end to end. 6 % sits well inside their own ±50 % FTIR uncertainty.
+   ! ΔH is set to ZERO deliberately, not dropped: their 1400-1500 °C range cannot calibrate it.
+
+ 6.2  O-H FLUID SPECIATION — the same figures, and what they expose
+ -----------------------------------------------------------------------------------------------
+   X_H2 in an O-H fluid, 1 bar, 1673 K, at IW / IW-1 / IW-2:
+       at the LITERATURE IW (-9.727)   52.6 / 77.9 / 91.8 %   vs Hirschmann Fig. 7  48 / 74 / 90 %
+       at TOex's OWN IW    (-8.241)    16.7 / 38.8 / 66.8 %
+   ! THE SPECIATION IS RIGHT; THE BUFFER POSITION IS NOT. Evaluated at the literature IW the
+     existing COH module reproduces the paper to ~4 percentage points across all three levels.
+     The whole discrepancy is the +1.49 log unit gap between TOex's internal SLB IW and the
+     literature value — the Section 4c absolute offset, now measured precisely.
+   ⇒ CONSEQUENCE, AND IT IS NEW: melt H₂ is the FIRST sink that depends on the ABSOLUTE fO₂ scale.
+     Every earlier sink is relative, so offsets within sb24 cancelled. Here they do not: f_H2 is
+     understated by ~10^0.75 ≈ 5.6x, and dissolved H₂ with it. This promotes the absolute-offset
+     problem from cosmetic to quantitative.
+
+ 6.3  H₂O SOLUBILITY LAW — Sun & Yao (2026), and its real pressure limit
+ -----------------------------------------------------------------------------------------------
+   TOex's basaltic melt, pure H₂O fluid (P_H2O = P):
+       1 GPa, 900 °C    18.93 wt% total, OH/total = 0.185     vs Fig. 5a ~15-18 wt%, Fig. 5b ~0.1-0.2
+       1 GPa, 1200 °C   15.97 wt%                              their stated ~20 % T reduction ✓
+   ! THE H₂O HALF IS CALIBRATED ONLY TO 2 GPa. Their headline 1 bar-6 GPa envelope is the CO₂ half
+     (§2.2: "H2O solubility experiments cover pressures up to 2 GPa"). Unclamped, the a₂·P²/T term
+     diverges:
+         2 GPa   41.71 wt%      calibration edge
+         3 GPa  142.09 wt%      unphysical
+         6 GPa  4.99e4 wt%      nonsense
+     P is therefore clamped to SY_PMAX = 2e4 bar at fixed X_H2O. Above that depth the melt's water
+     capacity stops rising with P, which is wrong in DIRECTION but bounds the error instead of
+     inventing a number. Same posture as the ZD09 clamp.
+   ? Chosen over Moore et al. (1998) regardless of that: Moore stops at 3 kbar = 0.3 GPa, out of
+     range for essentially the whole mantle, and does not resolve molecular H₂O vs OH⁻.
+
+ 6.4  THE FUGACITY-COEFFICIENT LOOP IS THE ACCURACY FLOOR
+ -----------------------------------------------------------------------------------------------
+   coh_state at f = -8, T = 1600 K. One pass means φ ≡ 1, i.e. ideal gas; compared to converged:
+       0.1 GPa   X_H2O   0.766  ->  0.785                              2 %
+       1   GPa   X_CO2   0.113  ->  0.020                              5.6x
+       5   GPa   X_CO2   0.182  ->  1.5e-4                             1200x
+                 X_CH4   0.019  ->  0.294 ,   aC  0.0156  ->  0.407
+   ! A SOLUTION IS STILL REACHED without the loop — but at ≥1 GPa it is a different fluid entirely,
+     CO₂-bearing where the real one is methane-dominated. φ is not a refinement; it enters the
+     mass-action equations directly through f = X·φ·P.
+   ! CONVERGENCE IS GEOMETRIC at ~1e-2 per pass, so the default 6 passes leave ~2e-4 in the mole
+     fractions — ABOVE the outer solve's 1e-8 tolerance. Tightening the root finds buys nothing
+     until this loop gets a convergence test.
+
+ 6.5  HYDROGEN BALANCE — both branches exercised
+ -----------------------------------------------------------------------------------------------
+   ϕ = 1, 2 GPa, 1600 K: melt capacity ~40 wt%, so no fluid forms even at H = 30 wt%; λ climbs
+   0.0116 → 0.766 as H rises 0.1 → 30 wt%, which is the undersaturated branch working.
+   ϕ = 0.02, 3 GPa, 1700 K — the realistic mantle case:
+       H = 0.10 wt%   no fluid, melt at 4.84 wt% H₂O
+       H = 0.50 wt%   no fluid, melt at 24.1 wt% H₂O
+       H = 2.00 wt%   fluid present, holding 67.2 % of H, melt at 32.2 wt% H₂O
+   ⇒ A melt-bearing cell does NOT exsolve a fluid until H exceeds ϕ × the melt's capacity. With
+     melt H₂O live the COH fluid disappears from most melt-bearing cells at depth, which changes
+     the whole balance of the five original sinks.
+
+ 6.6  ROBUSTNESS AND THE PRESERVED BASELINE
+ -----------------------------------------------------------------------------------------------
+   540 cases each: P 0.5-9 GPa, T 1200-2100 K, TOex 1e-5..1e-3, TC 0..5e-3, H 1e-4..1e-2, ϕ = 1.
+       both OFF   540/540 converged, worst |F| 9.98e-9,   0 no-fluid
+       H₂ only    540/540,            9.87e-9,          370 no-fluid
+       H₂O only   540/540,            9.95e-9,          344 no-fluid
+       both ON    540/540,            9.97e-9,          540 no-fluid
+   BASELINE PRESERVED: with both terms off, against the ORIGINAL 120-step bisection over 48 cases —
+       converged, fO₂, mOₑₓ   BIT-IDENTICAL
+       aC, carbonO, cohsink   7.0e-13 relative
+
+ 6.7  THE aC SOLVE — bisection to bracketed Newton
+ -----------------------------------------------------------------------------------------------
+       old   fixed 120 bisections on a 300-decade bracket, regardless of anything
+       new   safe_root (Illinois) on  g(u) = log10(demand(10^u)/nC_total)
+             16-17 demand evaluations at |F| ~ 1e-16
+   ! THE WIN IS IN THE RESIDUAL, NOT THE METHOD. Illinois on the RAW residual took 59-94 — barely
+     better than 120 — because demand is exponential in log aC over that bracket. At small aC the
+     demand is proportional to aC, so log-log is a straight line and the secant lands immediately.
+   ! ILLINOIS RATHER THAN PLAIN NEWTON because the demand has two kinks in it, the melt XCO₂ softcap
+     and the aC_cap clamp. A bracketed method cannot be thrown by either.
+   Whole driver: 2.661 -> 1.826 ms/case, 31 % faster. The remaining cost is ZD09, not the roots.
+   ? THE OUTER fO₂ SOLVE STAYS BISECTION deliberately: the solid branch is a bilinear TABLE, so its
+     derivative is a step function and a secant step across a node can stall.
+
+ 6.8  THE FORTRAN PORT OF ALL OF THE ABOVE
+ -----------------------------------------------------------------------------------------------
+   Same 48 cases (P 0.5-9 GPa, T 1200-2000 K, TOex 1e-3, TC 1e-4/3e-3, H 1e-4/5e-3, ϕ = 1), Julia
+   against the ported Fortran, on the identical algorithm both sides:
+       convergence verdict          48/48 AGREE
+       max |Δ log10 fO₂|            0.0105 log units  with melt H ON
+                                    0.0105 log units  with melt H OFF
+       aC / carbonO                 2.3e-2 / 4.6e-2 relative, both switch states
+   ! THE NEW PHYSICS ADDS EXACTLY ZERO DIVERGENCE — the two numbers are the same to four digits
+     whether the melt H terms are on or off, so the H₂ law, the H₂O law, the two-branch hydrogen
+     balance and the Illinois solver all port faithfully.
+   ! THE PORTED FORTRAN WITH MELT H OFF ALSO MATCHES THE PRE-REWRITE JULIA to the SAME 7.49e-4, so
+     the aC-solver change is consistent on both sides and introduced nothing.
+   ! BUT 0.0105 MARGINALLY EXCEEDS GATE 1's 0.01 log unit criterion, and it PREDATES this work.
+     Phase 1 measured 1.7e-4 over its own 21 driver cases; this sweep reaches 9 GPa and 2000 K,
+     where the gap is ~60x larger. Either the criterion needs restating with its (P,T) domain, or
+     the residual difference needs attributing — it is NOT the melt hydrogen.
+
+ 6.9  WHEN DOES A FREE COH FLUID EXIST? — the condition is a MASS balance, not a threshold
+ -----------------------------------------------------------------------------------------------
+   A fluid exists when  H_cell > ϕ·S(P,T,X_H2O).  The ~40 wt% figure is the melt's SATURATION
+   CONCENTRATION; it only appears as the melt's actual content when ϕ is small enough that a tiny
+   melt must absorb everything. 3 GPa, 1700 K, TOex 1e-4, TC 1e-3, H = 0.05 wt%:
+       ϕ = 0       fluid PRESENT, 100 % of H      subsolidus - nothing to dissolve into
+       ϕ = 0.001   fluid PRESENT,  37 % of H      melt saturated at 31 wt%, cannot take more
+       ϕ = 0.005   absent, melt at  9.78 wt%
+       ϕ = 0.02    absent, melt at  2.43 wt%
+       ϕ = 0.10    absent, melt at  0.48 wt%
+   ⇒ THIS IS THE TEXTBOOK PICTURE, not an artefact: free COH fluid belongs to SUBSOLIDUS rock or to
+     volatile-rich, low-melt-fraction settings. In a damp partially molten mantle the volatiles sit
+     in the melt and no separate fluid is stable.
+   ! ϕ = 0 works because nOxideTotal = 0 short-circuits the hydrogen split - nothing competes.
+
+   THREE REAL CAVEATS, in order of how much they could move the answer:
+     (a) THE SATURATION VALUE AT DEPTH IS EXTRAPOLATED. 41.7 wt% at 2 GPa is Sun & Yao's edge
+         (their figures stop at 1 GPa) and the clamp freezes it for everything deeper. The
+         fluid/no-fluid verdict at small ϕ rests on exactly that number.
+     (b) ABOVE THE SECOND CRITICAL ENDPOINT (~3-4 GPa for basalt-H2O) melt and aqueous fluid are
+         COMPLETELY MISCIBLE, so "is there a separate fluid?" has no answer. The model's "no fluid"
+         is the better of the two available answers there, but it is not physics, and nothing in
+         the code knows the endpoint exists.
+     (c) THE VERDICT IS DOWNSTREAM OF THE OPERATOR SPLIT. In the coupled model H is what remains
+         after the SOLID takes its bound water, outside the solve on a lagged activity (B.16,
+         B.19). A small error in the solid's share flips the fluid between existing and not - the
+         same buffer-ratio problem, now with a visibly binary consequence.
+
+===============================================================================================
+ SECTION 7 — THE SOLVER IN StagYY: 3.C ACCEPTANCE RUNS               added 2026-09-04
+===============================================================================================
+   All runs: 1 x 256 x 64 = 16384 cells, carbon ON, melt H2 and H2O ON, Sun & Yao water law,
+   random_repeatable = .true., identical par file except the switch under test.
+
+ 7.1  CONVERGENCE — does the cell solver ever fail in the wild?
+ -----------------------------------------------------------------------------------------------
+   20 steps, no skip:   16384/16384 SOLVED, ZERO FAILURES, EVERY STEP.
+   Mean 11.21 outer iterations, max 20.
+   ! Zero failures over 327 680 cell-solves is the result that matters. The bracket is
+     [lowclip, maxOex] by construction and Illinois cannot leave it, so a failure could only be a
+     tolerance stall — and none occurred.
+   ! CAVEAT, found 2026-09-04 (implementation 3.G.6): THE MANTLE CARBON RESERVOIR WAS EMPTY in
+     every run in this section — carbon enters only by ingassing and 20 steps ingassed none. The
+     result covers the iron excess-oxygen partition and melt hydrogen, NOT the carbon sinks.
+     Seeding 2.5e19 kg of mantle carbon gives 1-6 failures per step (0.01-0.04 %) and an
+     iteration tail of 110. Section 7 must be re-run on a carbon-bearing mantle before 3.E.
+
+ 7.2  BISECTION -> ILLINOIS, in the coupled code
+ -----------------------------------------------------------------------------------------------
+       bisection   29.07 mean iterations, max 36
+       Illinois    11.21 mean iterations, max 20        2.59x fewer
+   ! The A.3 cold single-cell figure was 34. Warm start (f_guess = cl%fO2) plus Illinois takes it
+     to 11.2, and the two are NOT separable — a warm start is worth much more to a superlinear
+     method than to a bisection, whose cost is logarithmic in bracket width alone.
+
+ 7.3  FIELD SMOOTHNESS — the cell-independent-solve failure mode
+ -----------------------------------------------------------------------------------------------
+   Roughness of dFMQ, |2c - n1 - n2| / spread, averaged over the domain:
+       lateral  0.0034        radial  0.0187        checkerboard would be ~1
+   dFMQ spans about -28 to +19 across the domain.
+   ! Each cell is solved in complete isolation, so a rough field was the thing to fear. Three
+     orders of magnitude clear of it. The smoothness is INHERITED — T, P, ϕ and the budgets are
+     smooth, and the solution is a continuous function of them.
+
+ 7.4  CONSERVATION
+ -----------------------------------------------------------------------------------------------
+   EW_time.dat BYTE-IDENTICAL across stub / full solve / dirty skip.
+   ! The solve REDISTRIBUTES within a cell and creates nothing. This is the strongest available
+     statement and it is exact, not a tolerance.
+
+ 7.5  COST — measured SERIALLY, one run at a time, 10 steps
+ -----------------------------------------------------------------------------------------------
+       stub (gather/scatter only)     4.20 s/step        —
+       full solve, no skip           14.80 s/step        solve = 10.60 s/step = 647 us/cell
+       full solve, dirty skip        5.30 s/step         solve =  1.10 s/step
+   ! THE SOLVE IS 72 % OF A TIMESTEP and makes the step 3.5x more expensive. Dirty skip takes that
+     to a 26 % overhead, 9.6x cheaper.
+   ! Earlier PARALLEL numbers (20 steps: bisec 558 s, newt 303 s, skip 94 s) are contaminated by
+     core contention and are quoted only as ratios.
+
+ 7.6  DIRTY SKIP — what 98.5 % skipped actually costs
+ -----------------------------------------------------------------------------------------------
+   Step 1 solves all 16384 (force flag), then 150-330 cells/step.
+   Horizontally averaged fO2 profile vs the no-skip run, over 20 steps:
+       max drift 0.42 log units        mean drift 0.059 log units
+   The O_ex field differs in 46 % of its bytes.
+   ! 0.42 log units is FORTY TIMES GATE 1's 0.01 tolerance on the solver itself. It is not noise —
+     it is a cell whose trigger never fired while its neighbours moved.
+   ! The drift is currently HARMLESS ONLY BECAUSE NOTHING CONSUMES fO2 YET. B.16, 3.E and 3.F are
+     the consumers. Default toex_dirty_skip = .false. until they are wired; revisit then, when the
+     comparison has a physical meaning rather than a numerical one.
+
+ 7.7  CARBON ON, WATER OFF — 3.G                                      added 2026-09-04
+ -----------------------------------------------------------------------------------------------
+   6 steps, 16384 cells, mantle carbon seeded to 2.5e19 kg (temporary seed, since reverted).
+                             water ON          water OFF
+       solved / step         16378-16383       16384, and 16382 at step 6
+       failed / step         1-6               0-2
+       mean outer iters      7.33              7.31
+       max outer iters       54-110            12-24
+       roughness y / z       0.0047 / 0.0086   0.0045 / 0.0082
+       total carbon drift    -5.9e-6 rel       -2.8e-6 rel
+   ! WATER OFF IS STRICTLY EASIER: no hydrogen split and no alternation with the aC solve, so the
+     outer residual is smoother and the iteration tail collapses.
+   ! WHAT WATER OFF COSTS PHYSICALLY: the fluid's amount is n_fluid = molH_fluid/nH, so at H = 0
+     no C-O fluid can form. Carbon that would be a CO2 fluid becomes carbonate or melt CO2 —
+     fC_fluid 0.791 -> 0.000 at 1 GPa / phi 0.01, and 0.995 -> 0.000 at 0.5 GPa / phi 0.001.
+     fO2 moves only 0.005-0.02 log units, because carbonate and CO2 carry the SAME +2 O per C:
+     the REDOX answer survives, the MOBILITY does not. See implementation 3.G.4.
+   ! The 1e-6 carbon drift appears with water ON as well, so it is not a water-off defect.
+
+ 7.8  CARBON ACTUALLY IN THE MANTLE — THE CONSERVATION AUDIT        added 2026-09-05
+ -----------------------------------------------------------------------------------------------
+   initCarbon_conc = 0.01 wt% C (100 ppm → 4.94e18 kg), 10 steps, 16384 cells, dirty skip off.
+
+   CARBON CONSERVATION, relative drift over 10 steps:
+       TOex_stub_solve (control)             +4.2e-14      advection/melting/eruption are exact
+       full solve, as it stood               -1.75e-4
+       + writeback double-subtraction fixed  -1.12e-4
+       + carbon shares renormalised          +3.6e-13      water ON
+                                             +2.9e-13      water OFF
+   O_ex over the same runs: -3.9e-10, unchanged by any of it.
+   ! THE ASYMMETRY IS WHAT FOUND THE BUG: O_ex conserved and carbon did not, and the solid O_ex
+     slot is the only UNFLOORED slot in the writeback. See implementation 3.H.1-3.H.2.
+
+   ! max |sum(fC) - 1| PER SWEEP — the solver's own carbon-balance inconsistency:
+       water ON    0.50  6.6e-13  0.11  0.51  5e-11  2e-12  0.88  1.9e-8  2e-12  2e-12
+       water OFF   2e-12 8e-13    2e-12 2e-12 2.5e-13 1e-12 8e-10 2e-12   1e-12  3e-11
+     A HANDFUL OF CELLS PER STEP ARE OFF BY UP TO 88 % WITH WATER ON AND BY NOTHING WITHOUT IT.
+     The hydrogen split and the aC solve alternate inside a fugacity-coefficient loop that exits
+     after a FIXED six iterations with no joint residual test. The writeback renormalises so the
+     model conserves; the cell's phase split is still wrong. Open as G.6.
+
+   WHAT 100 ppm C PRODUCES: free fluid carbon oscillates between 1e-19 and 2.7e4 kg — FOURTEEN
+   orders of magnitude below the rock-hosted carbon. Correct, not a bug: this mantle is mostly
+   subsolidus and reduced, so carbon sits as graphite, carbonate and melt CO2, and a free COH fluid
+   needs H beyond what solid and melt hold (6.9). 3.E will have almost nothing to move until the
+   model is run hot, wet or carbon-rich.
+
+   SOLVER, same runs:            water ON        water OFF
+       failures / step           0-3             0-2
+       mean outer iterations     10.20           10.20
+       max outer iterations      15-95           15-35
+   ! Water off is again the easier problem, and by the same mechanism as 7.7.
+
+ 7.9  THE IDEALITY-LOOP CONVERGENCE TEST — TESTED, AND IT DOES NOT FIX G.6   added 2026-09-05
+ -----------------------------------------------------------------------------------------------
+   Same carbon-seeded case as 7.8. The loop in toex_coh_state now exits on a joint residual —
+   |sum(fC)-1|, the hydrogen balance, and the relative change in phi — between toex_ideality_min
+   and toex_ideality_max.
+
+   STEP 1, IDENTICAL CELL POPULATION:
+       min=max=6  (the old fixed loop)   |sum(fC)-1| 4.96E-01   worst joint residual 7.21E+06
+       min=6 max=60                      |sum(fC)-1| 4.96E-01   worst joint residual 7.21E+06
+   Mean iterations 6.00 -> 6.82: the long cells DID iterate, and not one digit moved.
+   ! A fixed point re-entered sixty times that returns the same wrong number has not failed to
+     converge — it has CONVERGED TO A NON-SOLUTION. That is the diagnosis.
+   ! The 6/6 default reproduces the pre-change |sum(fC)-1| sequence to the last digit, so the
+     instrumentation itself changes nothing.
+
+   WHAT THE JOINT RESIDUAL EXPOSED, which nothing was measuring before:
+       worst hydrogen residual   7.2E+06   2.9E+06   2.7E+08   2.9E+06   ... every step
+   The hydrogen balance is violated by SIX TO EIGHT ORDERS OF MAGNITUDE in a handful of cells on
+   every single step. It was invisible because the outer solve tests oxygen only (I.15).
+
+   THE ACTUAL CAUSE — inner Illinois solves that FAILED TO BRACKET, per step:
+       carbon (_solve_aC)          0        0        0
+       hydrogen (_solve_hydrogen)  12355    7205     3518
+   Both callers DISCARD toex_illinois's `bracketed` flag, so an un-bracketed solve is accepted as
+   a root; _solve_hydrogen's fallback puts ALL hydrogen in the fluid, which inflates nC_fluid and
+   is exactly how sum(fC) ends up at 1.5. Carbon never fails to bracket — the carbon symptom is
+   downstream of the hydrogen fallback. Open as G.6; fix by reading `br` before 3.E.
+
+   THE BRACKET FAILURE MODE, split three ways in one run:
+       non-finite residual   0        both ends POSITIVE   12355 / 7205        both ends -ve   0
+   Every one is "root below the bracket", and since the saturated branch brackets by its own
+   precheck, every one is the UNDERSATURATED (lam) branch with its hard-coded floor of lam = 1e-12.
+   In a nearly dry cell that still has melt, the melt wants more hydrogen at lam = 1e-12 than the
+   cell owns. FIXED by solving that branch in log10(lam) over 60 decades on a log residual:
+       bracket failures        12355 / 7205 / 3518  ->  ZERO, every step
+       worst joint residual    2.85E+06 -> 1.32E-12 on the steps it fixed
+       cell failures / step    0-3 -> 0-1        iteration tail 110 -> 62
+       carbon conservation     unchanged at 2.1e-13
+   ! A SECOND MECHANISM REMAINS: steps 1 and 3 still show 7.2E+06 and 2.7E+08 with ZERO bracket
+     failures, so those solves BRACKETED AND STILL RETURNED A NON-ROOT. toex_illinois falls out of
+     MAXIT with bracketed = .true., and its width test abs(b-a) <= 1e-14*max(1,|x|) is ABSOLUTE —
+     the saturated bracket [0, molH_tot] with molH_tot ~ 1e-13 mol is satisfied before the first
+     iteration. Same mistake as the lam floor, one level down. Open as G.6.
+
+ 7.10 THE aC CEILING BUG — COST AUDIT AND FIX                         added 2026-09-05
+ -----------------------------------------------------------------------------------------------
+   WORK PER SOLVED CELL, measured with counters on the innermost kernels (carbon-seeded case):
+       coh_reaction_step 390.8    solve_aC 164.9    ZD fugacity EOS 77.9    melt H2O 9.0
+   The nesting is why: toex_melt_H re-solves aC on EVERY hydrogen residual evaluation, so the
+   chain is outer fO2 (10) x ideality (6) x hydrogen Illinois (<=100) x aC Illinois (<=100).
+
+   NON-CONVERGENT aC SOLVES, split by reason — one answer and no other:
+       aC_cap below bracket floor 0    LOW end on sentinel 7845    HIGH end on sentinel 33281
+   aC_cap is an EMOG-buffer upper bound, not a guarantee the speciation exists there. Where it
+   does not, carbon_demand returns +Inf and _solve_aC bracketed against an endpoint it had already
+   computed as invalid — 100 wasted iterations, then whichever endpoint had the smaller residual.
+
+   BEFORE / AFTER, 4 steps, 16384 cells:
+       max |sum(fC) - 1|        0.496, 0.506      ->  1.4E-12, 1.5E-12   every step
+       coh_reaction_step/cell   390.8             ->  162-167            2.3x less work
+       bracket failures/step    33281 C, 12 H     ->  ZERO, both
+       cell failures/step       0-3               ->  0, every step
+       outer iteration tail     110-139           ->  15-19
+       carbon conservation      2.1e-13           ->  2.1e-13  (already exact via 3.H.3)
+   ! ONE FAULT PRODUCED BOTH G.6 AND ROUGHLY HALF THE RUN TIME.
+   ! STILL OPEN: the joint HYDROGEN residual reaches 1e9-1e12 with zero bracket failures — those
+     solves converge and are then invalidated by the aC/H alternation. See implementation 3.J.5.
+
+ 7.11 WHERE THE SOLVER'S TIME ACTUALLY GOES                            added 2026-09-05
+ -----------------------------------------------------------------------------------------------
+   Sampling profile of a live run, 16384 cells, carbon-seeded:
+       11536  toex_solve_cells
+        10327   toex_partition
+         6096     toex_bisect_solve
+          5934       invert_demand
+           5924         toex_solid_fO2_table -> thermochem_int        51 % OF THE SOLVE
+   ! THE C-O-H CHEMISTRY IS NOT THE BOTTLENECK — the solid fO2 table lookup is. Fixing the aC
+     ceiling bug cut coh_reaction_step work 2.3x and bought 1.6 % of wall time, which is what
+     prompted profiling instead of more inference.
+
+   INSIDE thermochem_int, the cost is CALL OVERHEAD, not interpolation:
+       ~800 samples  IEEE FPU state save/restore — from a `use IEEE_ARITHMETIC` with NO IEEE_
+                     procedure called anywhere in the routine. A dead import.
+       ~500 samples  malloc/free/memset — nPPcompositions and nP_sH2O are runtime VARIABLES, so
+                     those declarations are AUTOMATIC ARRAYS, heap-allocated and zeroed per call.
+                     Same for character(len=len(property)).
+       ~320 samples  select case (trim(property)) string dispatch
+       ~330 samples  the actual interpolation
+
+   WALL TIME, 4 steps, one run at a time:
+       baseline                                    62.5 s
+       + aC ceiling fix (7.10)                     61.5 s    correctness, not speed
+       + dead IEEE import and fixed-length string  57.5 s    6.4 %
+       + ideality convergence test                 54.9 s    mean iters 6.00 -> 2.26
+       ALL THREE                                   52.2 s    16.4 %
+   Work per cell across the same sequence: reaction_step 390.8 -> 63.4, EOS 77.9 -> 30.0, with
+   max |sum(fC)-1| at 1e-12 and zero cell failures throughout.
+
+   ! THE REMAINING LEVER IS ~10x AND UNTAKEN: within one cell's outer solve P, T and composition
+     are FIXED and only R varies, yet the (P,T) coordinate search and interpolation are redone ~10
+     times per cell on identical inputs. Hoisting them to once per cell collapses the lookup to a
+     1-D interpolation in R. Needs a specialised fO2 entry point — thermochem_int has 41 call
+     sites and is shared with all of StagYY. See implementation 3.K.4.
+
+ 7.12 THE PER-CELL OXYBAROMETER PROXY, AND THE DRY-CELL H FLOOR       added 2026-09-05
+ -----------------------------------------------------------------------------------------------
+   THE CALL COUNT: invert_demand does a FIXED 80-iteration bisection, once per outer iteration —
+   ~800 solid-fO2 lookups per cell. The bracket halves each pass, so after ~53 it is at the
+   double-precision floor: 27 of every 80 calls re-confirmed an answer that could not change.
+       exit on bracket width alone        52.2 -> 42.8 s     18 %
+
+   THE PROXY (implementation 3.L). thermochem_int's fO2 branch is bilinear in (P,T) on two
+   R-slices then LINEAR in u — separable — and within one cell's solve P, T and composition are
+   fixed. So the cell samples the table at its own 30 R nodes once and interpolates.
+       direct 3-D lookup                 42.83 s
+       proxy                             30.68 s            28 %
+       table calls per cell              ~800 -> 60
+   ! GATE: 65 of 66 output files BYTE-IDENTICAL. The one that differs is EW_parameters.dat, which
+     records the par file, and the par files differ by the toex_fO2_proxy line itself. Same
+     signature as GATE 3-0. Max |proxy - direct| over every call in a step: EXACTLY 0.0.
+   ! GETTING TO BIT-EXACT MATTERED. Caching the PRE-BLENDED slice gave max |dev| 1.42e-14 on a
+     value of 85.9 — ONE ULP, pure summation order — and that single bit, fed into a bisection,
+     amplified into 30 differing output files in ONE step. Caching per endmember and reproducing
+     the table's own summation loop gives exact zero.
+   ! No change to thermochem_int (41 call sites, shared with all of StagYY): the proxy uses the
+     existing hook plus a read-only view of the R axis. The cache lives in toex_ctx_t, the
+     PER-CELL context, so there is no shared mutable state and nothing to race.
+
+   THE DRY CELLS AND THE HYDROGEN RESIDUAL (implementation 3.M). The cells producing the 1e9-1e12
+   joint residual: H_in 3.34e-14 / 2.51e-16 / 1.39e-16, phi ~0.001, T ~1760 K — FOUR TO SIX ORDERS
+   BELOW water_dry_conc.
+   ! THE OBVIOUS FIX WAS WRONG AND THE RUN CAUGHT IT. Passing H = 0 for those cells makes
+     molH_total = 0, and fH = 1 then sends the cell's whole hydrogen to the FREE-FLUID slot rather
+     than the melt: wrong physics (a trace of water in a melt dissolves) and fatal — H2OPOS goes
+     negative and WaterRedistribution aborts at step 3. Reverted.
+   DONE INSTEAD — floor the DENOMINATOR, not the input:
+       rH = |molH_fl + 2nH2 + nHw - molH_tot| / max(molH_tot, MOLH_DRY)
+       worst joint residual   1e12  ->  3e6      run completes, NO physics changed
+   ! 3e6 IS STILL NOT NOISE: against a MOLH_DRY denominator that is an absolute ~0.04 mol H the
+     melt is asking for and the cell does not have, from the aC/H alternation. It feeds
+     meltH2ex, an OXYGEN share, so it can bias fO2 in those cells.
+
+   THE BUDGET CLAMP (implementation 3.M.4). On the CONVERGED state only — the melt cannot hold
+   more hydrogen than the cell contains; both species scale by one factor so the H2:H2O ratio
+   survives.
+       clamp fires / step     1324, 617, 331, 441 coh_state evaluations out of ~1.6e5  (<1 %)
+       cost                   31.1 -> 32.0 s
+       carbon conservation    2.1e-13      O_ex 1.3e-9      cell failures 0      |sum(fC)-1| 1e-12
+   ! IT MUST NOT GO INSIDE toex_melt_H, which is where it looks like it belongs: the inner solves
+     ITERATE on that routine, and clamping demand to availability forces their residuals <= 0 for
+     every trial, so the bracket never brackets and both solves are destroyed.
+   ! THE REPORTED RESIDUAL DOES NOT MOVE, and that is correct — rH is measured inside the loop,
+     before the clamp. It still says how far the alternation is from self-consistency; the clamp
+     says the answer cannot violate mass conservation regardless. Both are worth seeing.
+
+   CUMULATIVE, 4 steps, 16384 cells, carbon-seeded:
+       baseline                                   62.5 s
+       + aC ceiling fix (7.10)                    61.5 s
+       + thermochem call overhead (7.11)          57.5 s
+       + ideality convergence test                54.9 s
+       + invert_demand early exit                 42.8 s
+       + oxybarometer proxy                       30.7 s     2.04x overall
+   Throughout: max |sum(fC)-1| ~1e-12, carbon conserved to ~2e-13, ZERO cell failures.
+
+ 7.13 OUTPUT FIELDS: TWO "WOULD-HAVE" BUGS                            added 2026-09-05
+ -----------------------------------------------------------------------------------------------
+   The solver is an EQUILIBRIUM CALCULATOR: it answers the question it is asked in every cell,
+   whether or not the phase that answer belongs to exists there. Two exported fields shipped that
+   answer as if it were a measurement.
+
+   COH REDOX INDEX — ungated, read +1.0 in 16 186 of 16 384 cells in a run with NO FREE WATER
+   ANYWHERE. With no fluid hydrogen the index degenerates to (2XCO2+XCO)/(2XCO2+XCO) = 1, and the
+   domain mean reported 0.998. Gated on the fluid the writeback actually places: mean now 0.0.
+
+   MELT XCO2 — cs%XCO2_melt = softcap(aC*Bmelt, XCO2MAX) depends on P, T and fO2 ALONE. It painted
+   the whole lithosphere at the 0.3 softcap in cells with no melt, next to a melt-fraction field
+   that was black but for a few specks. Gated on nOxideTotal > 0, as melt XH2 always was.
+       cells with XCO2>0 and no melt      16 278  ->  0
+       non-zero cells                     16 384  ->  106, exactly the melt-bearing ones
+       values                             all at 0.3  ->  0.036 - 0.3
+       domain mean                        4.58e-2  ->  5.62e-4
+       rprof non-zero depth levels        most of the column  ->  3
+   ! Both fixes are REPORT-ONLY: nC_melt and carbonO are already zero without melt (nOxideTotal
+     and molMf are both 0), so dFMQ, Oex and carbon conservation are bit-unchanged.
+   ! THE RULE THIS ESTABLISHES: before exporting any intensive solver output, ask which phase it
+     lives in and gate on that phase existing.
+
+===============================================================================================
+ 7.14 SECOND OPTIMISATION PASS, AND TWO THINGS THAT DID NOT GO AS PREDICTED   added 2026-09-05
+===============================================================================================
+   HARNESS. Whole-run wall time on this machine has ~6% run-to-run spread, which is larger than
+   most of the fixes below. Everything here is therefore measured with:
+     - toex_wall     seconds inside toex_solve_cells only, via system_clock (repeats agree <0.5%)
+     - toex_n_eosit  toex_zd_EOS evaluations, deterministic
+     - toex_n_prx    toex_solid_fO2_proxy calls, deterministic
+   plus a byte-compare of all 72 output fields against the baseline. Test case: g3o par, 4 steps,
+   16384 cells, carbon on, water on.
+
+   RESULTS, cumulative, each row adding to the one above:
+     build                     EOS f-evals/cell   proxy calls/cell   toex_wall(s)   fields
+     baseline                        6135.5            686.5           10.941        --
+     + zd_bisect exit test           1973.5            686.5            8.535      72/72 same
+     + aC hoist (lam branch)         1973.5            686.5            8.463      72/72 same
+     + Illinois in invert_demand     1973.5            277.6            6.533      differ, see below
+     NET                             3.11x less        2.47x less       1.68x
+
+     whole run   31.18 -> 26.85..27.06 s   (1.16x; the solver is only 44% of runtime, so 1.79x
+     is the hard ceiling on any TOex work at all)
+
+   1. zd_bisect ran 200 FIXED halvings with no convergence test. A double bracket is exhausted
+      after <=60, so ~140 passes per call recomputed the same root. Exiting when the midpoint
+      stops moving is provably bit-identical. Biggest single win, and it had been sitting in the
+      hottest routine in the solver the whole time.
+
+   2. ! A CHANGE THAT MADE IT SLOWER. The proxy's bracket lookup is a linear scan over nR = 30
+      nodes with no early break. Replacing it with binary search is exact and cuts 30 compares to
+      5 - and cost 7.1%:
+            linear   8.535 8.547 8.562        binary   9.140 9.160 9.179
+      The scan is branch-free (a conditional move) and perfectly predicted; binary search adds 5
+      unpredictable branches at ~15-20 cycles each. REVERTED. At n = 30 the asymptotics are the
+      wrong model. This is why the harness exists.
+
+   3. ! FREEZING aC IN THE HYDROGEN SOLVE, the specific thing asked about. Two branches, two
+      different answers:
+        - undersaturated (iterate = lam): toex_melt_H is called with molH_fl = 0 every pass, so
+          aC is a LOOP INVARIANT. Hoisting is bit-identical and free. Worth 0.8%.
+        - saturated (iterate = molH): aC genuinely varies with the iterate. Measured over 7511
+          solves, |dlog10 aC| across the bracket: max 4.00, mean 1.94, >0.1 dec in 100% of them,
+          >1 dec in 71%. Freezing would misstate aC by ~2 orders of magnitude typically. NOT DONE.
+      The honest headline is that the redundancy is real but small HERE, because toex_solve_aC
+      short-circuits after one demand evaluation whenever carbon is saturated - which it is
+      nearly everywhere in this run (1.08 reaction_steps per aC call). In an undersaturated,
+      post-ingassing mantle each call becomes a 16-17 iteration solve and the hoist matters far
+      more. Re-measure at that point rather than assuming either way.
+
+   4. invert_demand bisection -> Illinois. The inverted reading is monotone and nearly piecewise
+      linear, which is the ideal case for false position; the Illinois halving keeps it bracketed
+      so it cannot stall. The exit test had to move from the bracket to the residual at the same
+      time - Illinois converges the iterate while an endpoint sits still, so a width test would
+      have negated the whole change.
+      ! THE ONLY NON-BIT-IDENTICAL CHANGE IN THIS PASS. Bounded over all 320 full-precision
+        values in EW_time.dat: 2 differ at all, max relative deviation 2.4E-13 (dIW_mean), i.e.
+        ~1000x machine epsilon. dFMQ min/mean/max agree to every printed digit and carbon is
+        conserved to all 13. Revert this one alone if byte-reproducibility with older runs is
+        ever required.
+
+   HEALTH, re-verified on the final build: 16384/16384 cells solved, 0 failed, 0 skipped,
+   |sum(fC)-1| = 1.37E-12, totCrb identical across all 4 steps to 13 digits.
+
+===============================================================================================
+ 7.15 3.E ON A WET RUN: THE FIRST TEST THAT WAS NOT DRY               added 2026-09-06
+===============================================================================================
+   Every carbon test before this one had free water at zero everywhere, so the whole transport
+   path executed with a parcel of exactly 0. "Carbon on, byte-identical" passed at every step of
+   3.E.1-3.E.5 and proved almost nothing about the code being added.
+   THE WET CASE: n_water_layers=1, water_layer_sat=1.6 (160% of storage capacity), carbon on.
+
+   WHAT IT FOUND, in order:
+   1. B.18 WINDOW VIOLATION AT shed, immediately. H=4.13e8 C=1.97e8 O_ex=-5.25e8 against a floor
+      of -3.67e8 - 43% more reduced than any COH fluid can be.
+      CAUSE: the absorption sites take hydrogen with no bound at all, so a carbon-bearing parcel
+      that is fully absorbed becomes C and O_ex with ZERO carrier. B.18 states the bound
+      (dn_H <= n_H + 2*n_Oex) and nothing implemented it. Fixed as 3.E.2b; excursions then fell
+      to 5.8e-10, i.e. roundoff.
+   2. THE SAME CASE ON THE PRE-3.E BINARY REPRODUCES EVERY NUMBER - 8.13E+07, 42 failed cells,
+      dFMQ max 39.926. So the wet+carbon solver failure is PRE-EXISTING and 3.E is faithful. That
+      A/B took one run and was worth more than any amount of reading.
+   3. |sum(fC)-1| = 8.13E+07 traced to cells with TC = 8.5e-18 kg - numerically zero carbon, with
+      a melt still demanding CO2, so fC_melt = nC_melt/nC_total explodes. Carbon MASS is saved by
+      the renormalisation; the partition in those cells is meaningless.
+   4. ! MY OWN CHECK WAS WRONG, twice. First the normalisation: dividing the excursion by the
+      LARGER bound let a parcel with O_ex 258x its carbon capacity read as 1.3%, because |lo| is
+      set by hydrogen and was enormous. Each bound must be measured against itself. Second the
+      severity: a single threshold cannot serve both a structural fault and 2e-4 of solver
+      tolerance, so it is now gross (fatal) vs counted (reported per step).
+   5. ! THE BLOCKER. With the correct test, the CELL writeback is inside the window 100% of the
+      time and the PARCEL built from those same tracers is 17.9x outside it. toex_cell_scatter
+      distributes F_H, F_C and F_O slot by slot with independent weights, independent floors
+      (F_H/F_C floored, F_O not) and independent headroom - so cell totals are exact while
+      per-tracer triples are not realisable fluids. 3.E.8 cannot be validated until the triple is
+      scattered congruently.
+
+   LESSON, and it is the same one as 7.13: a regression test that holds a quantity at zero tests
+   the branch that skips the code. Both the melt-XCO2 bug and this one hid behind a green test.
+
+ 7.15b  FOLLOW-UP: THE CARBON FLOOR, AND A CORRECTION TO 7.15's DIAGNOSIS  added 2026-09-06
+ -----------------------------------------------------------------------------------------------
+   CARBON FLOOR (toex_carbon_dry = 1e-14 mass fraction, applied to ctx%Mc in toex_build_ctx):
+       wet   |sum(fC)-1|   8.13E+07 -> 2.07E-12
+       dry   4 fields differ (oxCrb, reCrb, tC, tra); all 320 full-precision time-series values
+             BIT-IDENTICAL. Dust-level carbon moved from a meaningless partition into graphite
+             via the existing "no share at all -> park as graphite" branch. Nothing else moved.
+   ! CORRECTION TO 7.15 ITEM 5. I wrote that the scatter distributes the fluid triple "slot by
+     slot with independent weights". Reading toex_apply_slot properly: it applies ONE uniform
+     concentration increment per slot, dc = 1e2*(m_new-m_old)/Msub, and all three fluid slots use
+     phase = TOEX_PH_ALL so Msub is identical. The increments are CONGRUENT. The per-tracer
+     scatter is doing exactly what it was designed to do.
+     THE ACTUAL CAUSE IS THE FLOOR CLIP. F_H and F_C are floored at zero, F_O is not (correct -
+     it is signed), so a clipped tracer keeps excess oxygen its own H and C cannot carry.
+       step 2   10 477 fluid-bearing tracers, 1 506 out of window (14%)
+       step 3   12 390 fluid-bearing tracers, 6 000 out of window (48%), of which 2 178 have
+                EXACTLY zero carbon with positive O_ex - the clip signature
+     The proof that it had to be per-tracer: both window bounds are linear and homogeneous with
+     positive coefficients, so the window is closed under positive summation. A violating sum
+     therefore requires a violating term. That is what turned "the parcel is wrong" into "find
+     the tracer", and it is worth more than the instrumentation that followed.
+
+ 7.15c  THE TRIPLE-AWARE SCATTER (3.E.9) - MEASURED               added 2026-09-06
+ -----------------------------------------------------------------------------------------------
+   CHANGE: hom(TOEX_F_H/F_C/F_O) = .true. when carbon is on, so the three fluid slots share one
+   weight. Three lines. Carbon off is untouched.
+                                        before              after
+     wet run                            ABORTED (34.9x)     completes 4 steps
+     worst parcel window excursion      34.9  (gross)       7.0E-10 .. 2.4E-08 (roundoff)
+     fluid tracers outside the window   14% .. 48%          none gross
+     |sum(fC)-1|                        1.9E-12             1.9E-12   (unchanged)
+     totCrb across the run              exact               exact
+     unplaced mass                      0.235 kg            0.176 kg  (slightly better)
+     TOex solve wall                    6.584 s             6.483 s   (unchanged)
+   DRY REGRESSION: all 13 312 rprof values numerically identical, all 320 full-precision
+   time-series values bit-identical. 36 field files differ by ONE BYTE each at offset 1305 -
+   inside the header, since data begins at 3904 - i.e. one accumulated header scalar in its last
+   bit. The field data is unchanged.
+   ! THE DIAGNOSIS THAT MATTERED was not the instrumentation, it was noticing that both window
+     bounds are linear and homogeneous with positive coefficients, so the window is closed under
+     positive summation: a violating sum REQUIRES a violating term. That turned "the parcel is
+     wrong" into "find the tracer", and from there the floor clip was two greps away. The
+     instrumentation only confirmed it - 2 178 tracers with exactly zero carbon and positive
+     O_ex, which is the clip's signature and nothing else's.
+
+ 7.16  WHY THE WET-RUN CELLS WERE FAILING                          added 2026-09-06
+ -----------------------------------------------------------------------------------------------
+   METHOD. Dump the inputs of the first failures, then sweep the residual across the whole bracket
+   for one of them inside the model (the solid-fO2 table hooks make a standalone driver expensive,
+   and the sweep needs the real ctx anyway). The shape of the residual answered it immediately in
+   both cases - far faster than reading the solver.
+
+   DEFECT 1 - NEGATIVE OXYGEN BUDGET.  Every failing cell had TOex_in < 0, H_in = 0, phi = 0,
+   iters = 0. The sweep showed the residual FLAT at +193.11 across f = -120 .. +40, with sOex
+   pinned at +194.11 = -minsOex. Cause: shares are of a SIGNED TOex, so a reduced cell inverts
+   maxsOex/minsOex, invert_demand's `hi <= lo` branch (meant for an absent phase) returns lo
+   unchanged for every fO2, and every sink freezes.
+   FIX: normalise on |TOex|, carry the sign in the equation (sum(shares) = TOsgn).
+   failures 42 -> 8, 61 -> 13.
+
+   DEFECT 2 - NaN THROUGH THE CLAMP.  The remaining failures had a residual of -1.00 at f = -50
+   and +1008 at f = -40. Instrumenting the term: nfl = 0, molHfl = 0, fex before the clamp = NaN,
+   after = +1.0000E+03. 0 * Inf = NaN, and gfortran's min(1e3, NaN) is 1e3, so the clamp
+   manufactured a finite value that passed ieee_is_finite - the guard written to catch exactly
+   this. FIX: gate fex on n_fluid > 0, and propagate a non-finite fex instead of clamping it.
+   failures 8 -> 1, 13 -> 3.
+
+   ! A CORRECTION TO MY OWN REPORT. I had called dFMQ = +39.9 an "fO2 runaway". It is not. The
+     worst cell is fO2 = -41.6 at T = 305 K, and the FMQ buffer at 305 K is -80: the DIAGNOSTIC'S
+     REFERENCE is what is extrapolated, not the solution. One print of (dFMQ, fO2, T) settled it,
+     and I should have looked before naming it.
+
+   ! THE RECURRING SHAPE, now three for three (melt XCO2, the COH index, and fex): an expression
+     is evaluated for a phase that does not exist in the cell, and something downstream - a
+     softcap, a clamp - makes the nonsense look plausible. The rule that would have caught all
+     three: gate on the phase, and never let a clamp run before the validity check.
+
+ 7.16b  OPTION B FOR DEFECT 1: ABSOLUTE OXYGEN MASSES                 added 2026-09-06
+ -----------------------------------------------------------------------------------------------
+   Replaces the share formulation entirely: sink demands and bounds are grams of oxygen and the
+   one equation is sum(demands) = TOex. Compared against the intermediate |TOex| version (A):
+
+     wet, per step                A: 0/1/3      B: 0/1/3      identical
+     mean outer iters             A: 10.26/10.59/10.56        B: 10.26/10.59/10.55
+     |sum(fC)-1|                  A: 1.99/2.07/2.04 E-12      B: identical
+     parcel window worst          A: 7.0E-10 .. 2.6E-09       B: 2.4E-09 .. 2.5E-09
+     totCrb / total water drift   A: 0                        B: 0
+     dry, A vs B                  20 of 320 time-series values differ, max 1.9E-10 (roundoff)
+
+   So B is not better on any measurement - it is EQUAL. Its advantage is structural: the budget
+   never appears in a denominator, so the negative-budget and near-zero-budget pathologies cannot
+   recur, and shares can no longer inflate to 194x when |TOex| is small (which is the factor the
+   residual tolerance was being loosened by).
+
+   ! THE UNIT BUG THIS EXPOSED, and it is the interesting part. The solve runs on a 1 kg REFERENCE
+     CELL. While the outputs were shares, that reference cancelled on the way out - share x
+     TOex(kg) is kg whatever MREF was - so the writeback never had to mention it. Absolute grams
+     do not cancel. Getting it wrong produced NO error and NO warning: Oex_mean collapsed from
+     4.5E-02 to -4E-14, fO2_mean moved 1.8 log units, and every field file still looked plausible.
+     WHAT CAUGHT IT was insisting the dry case reproduce the previous version to roundoff before
+     comparing anything on the wet case. It read 1.3 relative; after the fix, 1.9E-10.
+     THE FIRST WET RUN OF THE BROKEN VERSION LOOKED FINE - 0/2/7 failures, sensible iteration
+     counts - and I nearly read its differences as a property of option B. Two of the numbers I
+     briefly attributed to B (iters 15.4, window excursions 1.9E-03) were the unit bug.
+   ! GENERAL: a change of units is not a change of formula, and the place it bites is wherever a
+     ratio used to make the units cancel. Look for the cancellation, not just for the arithmetic.
+
+ 7.17  ABSOLUTE MASSES IN BOTH SOLVERS, AND THE LAST CELL FAILURES   added 2026-09-06
+ -----------------------------------------------------------------------------------------------
+   FORTRAN, wet+carbon case, failures per step:   42 / 61 / 73  ->  0 / 0 / 0
+   |sum(fC)-1|:  2.0E-12 -> 1.1E-13 (dry), 1.3E-13 (wet).  Conservation exact in both regimes.
+
+   TWO FIXES, both in the same sweep:
+   1. THE BOOLEAN WAS REDUNDANT, NOT JUST DISCONTINUOUS. `aC >= aC_use*(1-1e-9)` gating
+      nC_solid: max(0, nC_total - nC_melt - nC_fluid) is ALREADY continuous across the
+      transition, because undersaturated the aC solve has just driven that bracket to zero.
+      Deleting the test removed the hole and improved carbon consistency 10x.
+   2. NaN FAILS EVERY COMPARISON. toex_coh_reaction_step guarded with `disc < 0 .or. c_q <= 0`,
+      which catches an Inf (it propagates into a comparison that fires) but NOT a NaN. A NaN
+      speciation was therefore returned as VALID, met 0*NaN downstream, and max(0,.) laundered it
+      into a clean zero. An explicit ieee_is_finite on all five mole fractions at the SOURCE fixes
+      nC_fluid, O_up and O_rel at the same time - the siblings I had missed when fixing fex alone.
+
+   CROSS-CHECK vs TOex.jl, 8 cases, both in grams so no conversion is applied:
+       carbonO, C_melt      identical to full precision
+       XH2O, XCO2           1E-08 .. 2.5E-04
+       sOex, FeR_solid      1.9E-05 .. 1.5E-02
+       fO2                  1.4E-04 .. 3.2E-01 log units
+   The spread tracks the SOLID OXYBAROMETER REPRESENTATION - Fortran interpolates a 2-endmember
+   table, Julia calls MAGEMin live - and the worst row is p_mix = 0.5, exactly where a
+   2-endmember blend is furthest from a real mixed composition. Not a disagreement in the physics.
+
+   ! THE JULIA HAD THE SAME BUGS, WORSE, AND THAT IS THE ARGUMENT FOR PORTING. Before:
+       negative budget  THREW  "knot-vectors must be unique and sorted in increasing order"
+                               - grid = sOwt .* (Ms/TOₑₓ) IS the knot vector, reversed by the sign
+       tiny budget      sOex = -960, resnorm 0.0199, no convergence
+     After the port: -1.0000008 g and -9.6e-7 g, resnorm 1.8E-09 and 7.8E-12.
+   ! HARNESS: toex_probe_file() reads toex_probe.in, writes toex_probe.out, runs once at the first
+     solve (the earliest point the oxybarometer table is bound, which is why a standalone driver
+     was not worth building). Inert when the file is absent.
+
+===============================================================================================
+ 8. THE TWO RUNTIME FLAGS, QUANTIFIED                                      added 2026-09-06
+===============================================================================================
+ Wet+carbon case (n_water_layers=1, water_layer_sat=1.6, initCarbon_conc=0.01), 4 steps,
+ 16384 cells. Reference is both flags OFF.
+
+ 8.1  COST
+-----------------------------------------------------------------------------------------------
+   rit  dirty | total s | TOex solve s | cells solved | skipped | re-equilibrated
+   off  off   |  62.19  |    7.680     |    16384     |     0   |      —
+   on   off   |  77.06  |    7.331     |    16384     |     0   |   15405
+   off  on    |  59.62  |    3.311     |     1314     | 15070   |      —
+   on   on    |  73.00  |    3.564     |     1923     | 14461   |   15394
+
+   dirty_skip  skips 92 % of cells and takes the SOLVE from 7.68 to 3.31 s (2.3x) - but only 4 %
+               off the whole run, because TOex is not the bottleneck in this configuration.
+   ! THE CELLS IT KEEPS ARE THE EXPENSIVE ONES: mean outer iterations rise 10.55 -> 12.05 and EOS
+     f-evals per solved cell 2180 -> 4749. The saving is real but less than 92 % suggests.
+   react_in_transit costs +24 % of TOTAL runtime and shows as ~0 in the solve timer, because its
+               solves happen inside the redistribution sweep, not inside toex_solve_cells.
+
+ 8.2  WHAT EACH FLAG DOES TO THE ANSWER  (relative change vs both-off, 4 steps)
+-----------------------------------------------------------------------------------------------
+                          react_in_transit   dirty_skip        both
+     fO2_mean                  2.2e-03         1.6e-02        1.4e-02
+     Oex_mean                  3.0e-03         8.5e-05        3.0e-03
+     cOxCrb_mean               4.2e-02         1.4e-03        4.2e-02
+     COHredox_mean             1.10            2.6e-01        1.09
+     meltXCO2_mean             8.9e-01         1.6e-01        8.3e-01
+     totCrb drift              8.8e-12         0              8.8e-12
+     water drift               0               0              0
+
+   ! THE FIELD EXTREMES SAY MUCH MORE THAN THE MEANS, and they disagree with them:
+     combination     dFMQ mean   roughness_z
+     off / off         -9.017      0.0475
+     on  / off         -9.031      0.0450     <- react_in_transit changes almost nothing
+     off / on          +2.905      0.3622     <- dirty_skip moves the mean 12 LOG UNITS
+     on  / on          +3.101      0.1581
+     A 7.6x jump in vertical roughness is the checkerboard GATE 3d was built to detect.
+
+ 8.3  RECOMMENDATION
+-----------------------------------------------------------------------------------------------
+   react_in_transit  ON is defensible. It leaves dFMQ and roughness essentially untouched, keeps
+                     conservation (8.8e-12 over 4 steps), and buys the physics B.18 argues for -
+                     redox freezing and redox melting along a flow path. Price: +24 % runtime.
+   dirty_skip        LEAVE OFF. 2.3x on the solve is not worth a 12-log-unit shift in domain-mean
+                     dFMQ and a 7.6x roughness increase, especially when it only buys 4 % of the
+                     whole run here. B.21's "revisit once fO2 is load-bearing" is now answered:
+                     it is not safe once fO2 is load-bearing.
+
+ 8.4  ! A BLOCKER THAT IS NOT ABOUT EITHER FLAG                            [open 2026-09-06]
+-----------------------------------------------------------------------------------------------
+   Over 12 steps the wet+carbon run is NOT STABLE, flags or no flags. The B.18 parcel window
+   excursion grows monotonically with dirty_skip OFF:
+       step   1      2      3      4      5      6        ... aborts ~step 8
+       worst  2.4e-9 2.5e-9 5.8e-3 1.4e-2 3.7e-2 1.1e-1        at 43 %
+   and dFMQ mean holds at -9.1 through step 8 then jumps to +0.3 with roughness 0.045 -> 0.146.
+   ! DIRTY_SKIP SUPPRESSES THIS rather than accelerating it - with it ON the excursion stays at
+     1e-9..1e-5 for all 11 steps and the run completes. That is not a point in its favour: it is
+     not re-solving the cells through which the error compounds, so it hides the symptom.
+   THE CAUSE IS ALMOST CERTAINLY G.6 - the aC/H alternation is not self-consistent, and the
+   solve -> transport -> solve loop compounds its residual. Any conclusion about either flag over
+   more than ~6 steps is measuring this, not the flag. FIX THIS FIRST.
+
+ 8.5  G.6 FIXED, AND aC-FREEZING MEASURED AND REJECTED             added 2026-09-06
+-----------------------------------------------------------------------------------------------
+   THE FIX (both solvers): toex_carbon_demand's `molH <= 0 -> return nC_melt` shortcut sat ABOVE
+   the speciation call, so the validity veto - and with it the decade ceiling-walk - fired at
+   molH = 1e-30 but not at molH = 0. Moving the shortcut BELOW the check makes aC continuous in
+   molH. The veto is legitimate either side; validity never depended on hydrogen.
+                                   BEFORE          AFTER
+       worst joint residual (dry)  1.93E+06        1.54E-12
+       melt-H clamps per step      4981            444
+       ideality passes, mean       2.22            6.73
+       TOex solve wall (dry)       6.747 s         14.388 s      2.14x SLOWER
+       carbon / water conservation exact           exact
+   ! THE SLOWDOWN IS THE PRICE OF CONVERGING. The loop previously exited after ~2 passes because
+     the residual it was testing had been made meaningless by the jump. It now iterates until the
+     joint residual is machine-level. The knob to trade this back is toex_ideality_tol.
+
+   aC FREEZING (toex_freeze_aC, default .false.):
+       dry   aC solves 189.4 -> 189.4, EOS identical, 0 of 320 values changed - the saturated
+             hydrogen branch is never taken in a dry run
+       wet   aC solves 191.6 -> 191.4 (0.1 %), wall 14.80 -> 14.84 s (noise), 47 of 320 values
+             move, worst 2.4E-01 on Vmin
+   NO RUNTIME GAIN, MEASURABLE DEVIATION. 189 aC solves against 807 reaction steps, and most of
+   those aC calls return after ONE demand evaluation via 3.J's saturated short-circuit - there was
+   never much there to remove. Flag retained so the measurement is reproducible, default OFF.

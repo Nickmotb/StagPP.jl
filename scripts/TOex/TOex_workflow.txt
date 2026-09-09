@@ -11,7 +11,8 @@
 
  THE ONE-SENTENCE VERSION
    Everything reduces to: find the single oxygen fugacity at which the total oxygen demanded by
-   all five sinks equals the budget available. Every other quantity is read off from that fO2.
+   all six sinks equals the budget available. Every other quantity is read off from that fO2.
+   (Six with `melt_H2` on; five otherwise — melt H₂ is opt-in, see PART D.)
 
 
 ===============================================================================================
@@ -42,10 +43,15 @@
        monotone. Far enough reduced it falls below the budget; far enough oxidised every sink
        saturates. A monotone function crossing a constant has exactly one root.
 
-    3. THE SOLVER CAN BE TRIVIAL. Because the residual is 1-D, monotone and bracketed, plain
-       bisection suffices: no Jacobian, no initial guess, no divergence. This matters because
-       the residual is often near-vertical where sinks saturate, which is the worst case for
-       derivative-based methods.
+    3. THE OUTER SOLVER CAN BE TRIVIAL. The residual is 1-D, monotone and bracketed, so plain
+       bisection suffices: no Jacobian, no initial guess, no divergence. That matters because
+       the residual is often near-vertical where sinks saturate, and because the solid branch is
+       a TABLE — piecewise linear in u, so its derivative is a step function and a bare Newton
+       can cycle across a node boundary.
+       ! THE INNER SOLVES ARE DIFFERENT and are NOT bisections. aC and the hydrogen split have
+         smooth analytic residuals with no table in them, so both use a bracketed Illinois
+         (regula-falsi) root find: superlinear, and it still cannot leave the bracket. Measured
+         16-17 carbon-demand evaluations against the old fixed 120. See C.6.
 
   ! ASSUMPTION THAT MAKES (2) AND (3) WORK: monotonicity. It is enforced, not assumed — see B3.
 
@@ -146,6 +152,12 @@
      ? NO SIGN CHANGE ANYWHERE -> `capacity_exceeded`: even with every sink full the assemblage
        cannot hold the budget. Returns the closer endpoint, unconverged.                [:762-764]
 
+     ? WHY THE OUTER STAYS BISECTION while the inner solves became Newton: the solid sink is a
+       bilinear TABLE, so d(demand)/df is piecewise constant and discontinuous at every node.
+       A secant step across a node can stall or cycle. `safe_root` would still be safe there
+       (it falls back to bisection), but the gain is small and the change would make any
+       Fortran-vs-Julia comparison harder to attribute. Left deliberately.
+
 -----------------------------------------------------------------------------------------------
  B6. THE RESIDUAL — what happens at every trial fO2          [_coh_derive:689, unified_residual:712]
 -----------------------------------------------------------------------------------------------
@@ -194,6 +206,24 @@
         ? WHY NESTED THIS WAY: the aC solve is pure arithmetic, but each φ refresh costs an
           equation-of-state root-find. Freezing φ during the aC bisection keeps the expensive
           EOS at one evaluation per outer pass instead of one per aC trial (~3 ms/case total).
+
+     c2) SOLVE THE HYDROGEN SPLIT, when melt_H2 or melt_H2O is on   [_solve_hydrogen]
+        Runs FIRST inside each phi pass, because it moves molH_fl and the carbon balance reads it.
+        TWO BRANCHES, and which applies is decided by a test rather than assumed:
+            SATURATED       (m + meltH(m, lam=1))/molH_tot - 1 = 0     bracket [0, molH_tot]
+            UNDERSATURATED  meltH(0, lam)/molH_tot - 1 = 0             bracket lam in (0, 1]
+        ? THE TEST is meltH(0, lam=1) >= molH_tot - the melt's SATURATED demand already exceeds the
+          whole inventory, so no free fluid can exist and the fugacities must fall instead.
+        ? lam SCALES BOTH FUGACITIES TOGETHER so f_H2O/f_H2 = K3*sqrt(fO2) is untouched: it is the
+          fluid that has vanished, not the equilibrium.
+        ? THE COUPLING RUNS BOTH WAYS in the saturated branch, which is why it needs a solve at all:
+          the melt takes what the fugacities dictate, while the fluid's own hydrogen sets how much
+          carbon it holds, hence aC, hence the speciation, hence f_H2 and P_H2O.
+        ! MELT H2O IS IN THE HYDROGEN BALANCE ONLY. It carries zero excess oxygen by the reference
+          state, so it never appears in the oxygen residual - that is what lets it be an amount
+          rather than a sixth sink. Melt H2 is the opposite and IS a sink.
+        ! The two inner solves are ALTERNATED, not nested: each is a 1-D bracketed root find and
+          the existing phi loop couples them. No third nesting level was added.
 
      d) SOLVE aC FOR CARBON MASS BALANCE                      [_solve_aC:525]
         (SUMMARY ONLY — the full account of this solve is PART C)
@@ -470,10 +500,17 @@
  -----------------------------------------------------------------------------------------------
        nC_total <= 0  ->  return 0.0        no carbon at all, no carbon species        [:526]
        lo, hi = -300.0, log10(aC_cap)       bracket in LOG10 aC
-       120 iterations of plain bisection on  demand(10^mid) < nC_total
+       safe_root on  g(u) = log10( demand(10^u) / nC_total )
 
-   ? WHY LOG SPACE: demand spans hundreds of decades in aC. Linear bisection would spend every
-     iteration in the top decade and never resolve the rest.
+   ? WHY LOG SPACE IN aC: demand spans hundreds of decades in aC. Linear bisection would spend
+     every iteration in the top decade and never resolve the rest.
+   ? WHY LOG SPACE IN THE RESIDUAL TOO — this is what makes Newton pay. At small aC the demand is
+     PROPORTIONAL to aC, so log-log is a straight line and the secant lands on the root almost
+     immediately. On the raw residual demand/nC_total - 1 the same bracket is exponential over 300
+     decades, regula falsi crawls in from the bottom, and the measured cost was 59-94 evaluations
+     - barely better than the 120 it replaced. In log space it is 16-17, with |F| ~ 1e-16.
+   ? WHY ILLINOIS AND NOT PLAIN NEWTON: the demand has two kinks in it, the melt XCO2 softcap and
+     the aC_cap clamp. A bracketed method cannot be thrown by either; an unbracketed Newton can.
 
    ! WHY THE FLOOR IS -300 AND NOT -40: at high fO2 the melt's buffer coefficient Bmelt can exceed
      1e40, so a shallower floor leaves carbon still over-committed AT THE BRACKET EDGE. This was a
@@ -484,8 +521,9 @@
      downstream by the carbon-closure check, not here. Worst observed across the sweep: 4.6e-15,
      so the floor has never been reached in practice.
 
-   ! 120 iterations on a 300-decade bracket is 300/2^120 — far past double precision. It is cheap
-     enough not to be worth tuning.
+   ! MEASURED, 48-case sweep, melt_H2 off: fO2 BIT-IDENTICAL to the old 120-step bisection, aC to
+     7e-13, and the whole driver 31 % faster (2.66 -> 1.83 ms/case). The remaining cost is the
+     Zhang & Duan EOS, not the root finds.
 
 
  C.7  WHAT THE ANSWER MEANS DOWNSTREAM                                              [:582]
@@ -628,6 +666,32 @@
      6 passes of successive substitution with NO convergence test and no diagnostic if it stalls.
      See C.3.
   6. The C-O-H fluid excludes C₂H₆ by design; that carbon reappears as CH₄.
+  7. MELT H2O USES Sun & Yao (2026), WHOSE H2O HALF STOPS AT 2 GPa. Their 1 bar-6 GPa headline is
+     the CO2 half; the H2O experiments reach only 2 GPa, and the a2*P^2/T term diverges above it -
+     142 wt% at 3 GPa, 4.99e4 wt% at 6 GPa on TOex's own basaltic melt. P is clamped to 2 GPa at
+     fixed X_H2O, so above that depth the melt's water capacity STOPS RISING WITH PRESSURE, which
+     is known to be wrong in direction. Same posture as the ZD09 clamp; it bounds the error rather
+     than pretending to model it.
+     ? Chosen over Moore et al. (1998) regardless: Moore stops at 3 kbar, i.e. 0.3 GPa, so it is
+       out of range for essentially the whole mantle. Sun & Yao also resolves molecular vs OH,
+       which is what makes the lam branch meaningful.
+  8. THE FUGACITY-COEFFICIENT LOOP IS THE ACCURACY FLOOR, not the root finds. Measured at f = -8,
+     T = 1600 K: 1 pass (ideal, phi = 1) against convergence gives X_CO2 0.182 -> 1.5e-4 at 5 GPa,
+     a factor of 1200, with X_CH4 0.019 -> 0.294 and aC 0.016 -> 0.407. At 0.1 GPa the same
+     comparison moves X_H2O by 2 %. So a solution IS reached without the loop, but at mantle
+     pressure it is a different fluid entirely. Convergence is geometric at ~1e-2 per pass, so the
+     default 6 passes leave ~2e-4 in the mole fractions - above the outer solve's 1e-8 tolerance.
+  9. MELT H₂ IS THE FIRST TERM SENSITIVE TO THE *ABSOLUTE* fO2 SCALE, and this is the largest
+     caveat on it. Every earlier sink is relative — offsets within sb24 cancel — but melt H₂ takes
+     f_H2, which is set by the absolute fO2 through H₂ + ½O₂ = H₂O. TOex's internal IW sits
+     +1.49 log units above the literature IW at 1 bar / 1673 K (measured), which understates f_H2
+     by ~10^0.75 ≈ 5.6x and so understates dissolved H₂ by about the same factor.
+     ! THE SPECIATION ITSELF IS NOT AT FAULT. Evaluated AT the literature IW the O-H fluid gives
+       X_H2 = 52.6 / 77.9 / 91.8 % at IW / IW-1 / IW-2, against Hirschmann's 48 / 74 / 90 %. The
+       whole discrepancy is the buffer position, i.e. the known absolute offset.
+     ! And the H₂ LAW is independently confirmed: basalt with pure H₂ at 1 GPa gives 0.603 wt% H₂
+       against the paper's ~0.57, a 6 % miss inside their own ±50 % FTIR calibration uncertainty.
+     ⇒ This raises the priority of the absolute-offset problem from cosmetic to quantitative.
 
 ===============================================================================================
  PART G — DEGENERATE INPUTS: ϕ = 0 AND ϕ = 1

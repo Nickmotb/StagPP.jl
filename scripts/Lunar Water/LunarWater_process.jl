@@ -56,9 +56,9 @@ if load_sims
     # high water inner-outer
     # is001os0001 = load_sim("/Volumes/Sinergia2/MoonWater/is001_os0001_T1625_tc025_nt1w50_mid/+op/moon", "is001_os0001_T1625_tc025_nt1w50_mid", plates=false);
     # is001os01 = load_sim("/Volumes/Sinergia2/MoonWater/is001_os01_T1625_tc025_nt1w50_mid/+op/moon", "is001_os01_T1625_tc025_nt1w50_mid", plates=false);
-    # is001os001 = load_sim("/Volumes/Sinergia2/MoonWater/is001_os001_T1625_tc025_nt1w50_mid/+op/moon", "is001_os001_T1625_tc025_nt1w50_mid", plates=false);
+    # is001os001 = load_sim("/Volumes/Sinergia2/MoonWater/old/is001_os001_T1625_tc025_nt2w20_mid/+op/moon", "is001_os001_T1625_tc025_nt2w20_mid", plates=false);
     # is0001os001 = load_sim("/Volumes/Sinergia2/MoonWater/is0001_os001_T1625_tc025_nt1w50_mid/+op/moon", "is0001_os001_T1625_tc025_nt1w50_mid", plates=false);
-    # is01os001 = load_sim("/Volumes/Sinergia2/MoonWater/is01_os001_T1625_tc025_nt1w50_mid/+op/moon", "is01_os001_T1625_tc025_nt1w50_mid", plates=false);
+    # is01os001 = load_sim("/Volumes/Sinergia2/MoonWater/old/is01_os001_T1625_tc025_nt2w20_mid/+op/moon", "is01_os001_T1625_tc025_nt1w50_mid", plates=false);
 
     # inner-water less range nt1w50
     # is001os001 = load_sim("/Volumes/Sinergia2/MoonWater/is001_os001_T1625_tc025_nt1w50_mid/+op/moon", "is001_os001_T1625_tc025_nt1w50_mid", plates=false);
@@ -72,31 +72,68 @@ if load_sims
     # is0015os003 = load_sim("/Volumes/Sinergia2/MoonWater/is0015_os003_T1625_tc025_nt1w50_mid/+op/moon", "is0015_os003_T1625_tc025_nt1w50_mid", plates=false);
 
     # similar with erupt threshold
-    is0015os003_ef002_eth000 = load_sim("/Volumes/Sinergia2/MoonWater/is0015_os003_T1625_tc025_nt1w50_mid_ef002_eth000/+op/moon", "is0015_os003_T1625_tc025_nt1w50_mid_ef002_eth000", plates=false);
-    is0015os003_ef002_eth0015 = load_sim("/Volumes/Sinergia2/MoonWater/is0015_os003_T1625_tc025_nt1w50_mid_ef002_eth0015/+op/moon", "is0015_os003_T1625_tc025_nt1w50_mid_ef002_eth0015", plates=false);
-    is0015os003_ef005_eth000 = load_sim("/Volumes/Sinergia2/MoonWater/is0015_os003_T1625_tc025_nt1w50_mid_ef005_eth000/+op/moon", "is0015_os003_T1625_tc025_nt1w50_mid_ef005_eth000", plates=false);
-    is0015os003_ef005_eth0015 = load_sim("/Volumes/Sinergia2/MoonWater/is0015_os003_T1625_tc025_nt1w50_mid_ef005_eth0015/+op/moon", "is0015_os003_T1625_tc025_nt1w50_mid_ef005_eth0015", plates=false);
+    # is0015os003_ef002_eth000 = load_sim("/Volumes/Sinergia2/MoonWater/is0015_os003_T1625_tc025_nt1w50_mid_ef002_eth000/+op/moon", "is0015_os003_T1625_tc025_nt1w50_mid_ef002_eth000", plates=false);
+    # is0015os003_ef002_eth0005 = load_sim("/Volumes/Sinergia2/MoonWater/is0015_os003_T1625_tc025_nt1w50_mid_ef002_eth0005/+op/moon", "is0015_os003_T1625_tc025_nt1w50_mid_ef002_eth0005", plates=false);
+    # is0015os003_ef005_eth000 = load_sim("/Volumes/Sinergia2/MoonWater/is0015_os003_T1625_tc025_nt1w50_mid_ef005_eth000/+op/moon", "is0015_os003_T1625_tc025_nt1w50_mid_ef005_eth000", plates=false);
+    # is0015os003_ef005_eth0005 = load_sim("/Volumes/Sinergia2/MoonWater/is0015_os003_T1625_tc025_nt1w50_mid_ef005_eth0005/+op/moon", "is0015_os003_T1625_tc025_nt1w50_mid_ef005_eth0005", plates=false);
+
+    # od - Default is0015_T1625_os0020_od300_tc025_nt1w50_mid_ef005
+    od150 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1625/is0015_os0020_od150_tc025_nt1w50_mid_ef005/+op/moon", "od150", plates=false);
+    od200 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1625/is0015_os0020_od200_tc025_nt1w50_mid_ef005/+op/moon", "od200", plates=false);
+    # def = load_sim("/Volumes/Sinergia2/MoonWater/old/T1625/is0015_os0020_od300_tc025_nt1w50_mid_ef005/+op/moon", "od300", plates=false);
+    od150_T1610 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1610/is0015_os0020_od150_tc025_nt1w50_mid_ef005/+op/moon", "od150_T1610", plates=false);
+    od200_T1610 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1610/is0015_os0020_od200_tc025_nt1w50_mid_ef005/+op/moon", "od200_T1610", plates=false);
+    od300_T1610 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1610/is0015_os0020_od300_tc025_nt1w50_mid_ef005/+op/moon", "od300_T1610", plates=false);
+    
+    # tc
+    tc010 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1625/is0015_os0020_od300_tc010_nt1w50_mid_ef005/+op/moon", "tc010", plates=false);
+    tc015 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1625/is0015_os0020_od300_tc015_nt1w50_mid_ef005/+op/moon", "tc015", plates=false);
+    tc010_T1610 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1610/is0015_os0020_od300_tc010_nt1w50_mid_ef005/+op/moon", "tc010_T1610", plates=false);
+    tc015_T1610 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1610/is0015_os0020_od300_tc015_nt1w50_mid_ef005/+op/moon", "tc015_T1610", plates=false);
+    # def
+    # os
+    os0015 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1625/is0015_os0015_od300_tc025_nt1w50_mid_ef005/+op/moon", "os0015", plates=false);
+    os0020 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1625/is0015_os0020_od300_tc025_nt1w50_mid_ef005/+op/moon", "os0020", plates=false);
+    os0020_T1610 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1610/is0015_os0020_od300_tc025_nt1w50_mid_ef005/+op/moon", "os0020_T1610", plates=false);
+    os0020_T1610 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1610/is0015_os0020_od300_tc025_nt1w50_mid_ef005/+op/moon", "os0020_T1610", plates=false);
+    # ef
+    # def
+    ef010 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1625/is0015_os0020_od300_tc025_nt1w50_mid_ef010/+op/moon", "ef010", plates=false);
+    ef020 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1625/is0015_os0020_od300_tc025_nt1w50_mid_ef020/+op/moon", "ef020", plates=false);
+    ef010_T1610 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1610/is0015_os0020_od300_tc025_nt1w50_mid_ef010/+op/moon", "ef010_T1610", plates=false);
+    ef020_T1610 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1610/is0015_os0020_od300_tc025_nt1w50_mid_ef020/+op/moon", "ef020_T1610", plates=false);
+    # Combo
+    os0015_od200_tc015_ef010 = load_sim("/Volumes/Sinergia2/MoonWater/old/T1610/is0015_os0015_od200_tc015_nt1w50_mid_ef010/+op/moon", "os0015_od200_tc015_ef010", plates=false);
 
 end
 
-sim  = [is0015os003_ef002_eth000, is0015os003_ef002_eth0015, is0015os003_ef005_eth000, is0015os003_ef005_eth0015] # 
-simR = is0015os003_ef002_eth000
+sim  = [od150, tc010, os0015, ef010] # 
+simR = od150
+
+# Thickness [m] of the initially water-enriched outer layer, read per simulation from the
+# parameters StagYY wrote out (water_layer_depth). The layer occupies the top od metres of the
+# 1340 km lunar mantle, so it starts at r = rkm - od measured from the CMB.
+function outer_layer_depth(db::DataBlock)
+    pf = joinpath(db.metadata.outdir, db.metadata.sroot * "_parameters.dat")
+    m = match(r"WATER_LAYER_DEPTH\s*=\s*([0-9.eE+-]+)", read(pf, String))
+    return parse(Float64, m.captures[1])
+end
 # figure selection
 fig_select = 1
 
 # plots
 fig = Figure(size=(1400, 900))
-tstart = 0.0
+tstart = 0.6
 if fig_select==1
     time_vs_field(sim, "cH2O_mean", yrange=(0.1, 1e2), color=:black, logy=true, fig=fig, fpos=(1,1), tstart=tstart, xlabelsize=xlabsz, ylabelsize=ylabsz, xticklabelsize=xtklabsz, yticklabelsize=ytklabsz, yconv=(1e4, "μg/g"), linewidth=lw, error_bar_leg=true, error_bar_legpos=:rb,
                    error_bars=vcat(tmat[1:2,:], tmat[5:6,:]), leg=false, scatter=false, cmap=cmap)
-    time_vs_field(sim, "Wsol", yrange=(-1, -1), color=:black, logy=false, fig=fig, fpos=(2,1), tstart=tstart, xlabelsize=xlabsz, ylabelsize=ylabsz, xticklabelsize=xtklabsz, yticklabelsize=ytklabsz, yconv=(1e4, "μg/g"), linewidth=lw, cmap=cmap,
+    time_vs_field(sim, "Water", rprof_top=outer_layer_depth.(sim), ylabel=L"Outer\;layer\;c^{H_2O}", yrange=(0.1, 1e2), color=:black, logy=true, fig=fig, fpos=(2,1), tstart=tstart, xlabelsize=xlabsz, ylabelsize=ylabsz, xticklabelsize=xtklabsz, yticklabelsize=ytklabsz, yconv=(1e4, "μg/g"), linewidth=lw,
+                    error_bars=vcat(tmat[1:2,:], tmat[5:6,:]), leg=false, scatter=false, cmap=cmap)
+    time_vs_field(sim, "Wsol", yrange=(-1, -1), color=:black, logy=false, fig=fig, fpos=(2,2), tstart=tstart, xlabelsize=xlabsz, ylabelsize=ylabsz, xticklabelsize=xtklabsz, yticklabelsize=ytklabsz, yconv=(1e4, "μg/g"), linewidth=lw, cmap=cmap,
                     leg=true, scatter=false)
     time_vs_field(sim, "erupta", yrange=(-1, -1), color=:black, zero_at_tstart=true, logy=true, line=true, fig=fig, fpos=(1,2), tstart=tstart, xlabelsize=xlabsz, ylabelsize=ylabsz, xticklabelsize=xtklabsz, yticklabelsize=ytklabsz, yconv=(3.3e-12, "km³"), linewidth=lw, cmap=cmap,
                     leg=false, scatter=false)
     time_vs_field(sim, "∂erupta", yrange=(-1, -1), mavg_excl_floor=true, mavg_intensity=0.05, mov_avg=true, color=:black, logy=true, line=false, fig=fig, fpos=(1,3), tstart=tstart, xlabelsize=xlabsz, ylabelsize=ylabsz, xticklabelsize=xtklabsz, yticklabelsize=ytklabsz, yconv=(3.3e-12, "km³"), linewidth=lw, cmap=cmap, leg=false, mavg_contrast=0.1)
-    time_vs_field(sim, "Tmean", color=:black, logy=false, line=true, fig=fig, fpos=(2,2), tstart=tstart, xlabelsize=xlabsz, ylabelsize=ylabsz, xticklabelsize=xtklabsz, yticklabelsize=ytklabsz, linewidth=lw, cmap=cmap,
-                    leg=false, scatter=false)
     time_vs_field(sim, "cH2Oerupt", mov_avg=true, yrange=(1., 1e4), color=:firebrick, logy=true, line=false, fig=fig, fpos=(2,3), tstart=tstart, xlabelsize=xlabsz, ylabelsize=ylabsz, xticklabelsize=xtklabsz, yticklabelsize=ytklabsz, linewidth=lw, cmap=cmap,
                     savein="test", yconv=(1e4, "μg/g"), mavg_excl_floor=true, mavg_intensity=0.05,
                     error_bars=tmat[1:4,:], leg=false, mavg_contrast=0.15)
