@@ -49,11 +49,13 @@
                             #  Tables written before 2026-09-03 were generated on the "mol" branch
                             #  and must be regenerated.
                             test_path=false, sys_in="wt", unoxidized=false, densities=true,
-                            Rv=0.01, nR=1, Rrange=(0.001, 0.185), Rlog=true, R0=2e-3, pyr=false, exprt=true, solve_um=true, solve_tz_lm=true, Xmid=0.3
+                            Rv=0.01, nR=1, Rrange=(-1.96, 0.95), Rlog=true, R0=2e-3, Rknee=0.4, nRhi=6, pyr=false, exprt=true, solve_um=true, solve_tz_lm=true, Xmid=0.3, fO2_step=true, step_grid=(40, 16),
+                            step_R=[-1.0, -0.2, 0.0, 0.01, 0.03, 0.08, 0.15, 0.3, 0.5, 0.8], fO2_Xmix=[0.05, 0.1, 0.2, 0.5, 0.65, 0.75, 0.85, 0.95],
+                            Hmax_wt=8.0, melt_H2O_model=:JK, melt_floor=true   # density tables, see PT_H2O_ρ (math PART 15)
                             )
 
         # Checks
-        if (!s && !fO2 && !densities)
+        if (!s && !fO2 && !densities && !fO2_step)
             verbose && println("Nothing to compute. Exiting...")
             return
         end
@@ -79,7 +81,7 @@
                 if !cflag
                     Xv[i+cap]  = ox(Xv[i+cap],  Rv[i])
                     Xv[i+2cap] = ox(Xv[i+2cap], Rv[i])
-                    Xv2[i+cap] = ox(Xv2[i+cap], Rv[i])
+                    for k in 1:(length(Xv2) ÷ cap - 1); Xv2[i+k*cap] = ox(Xv2[i+k*cap], Rv[i]); end
                 end
             end
         end
@@ -91,7 +93,9 @@
 
         # Vetorization size
         nPnT, nPnTnR = nP*nT, nP*nT*nR
-        eff_nPnTnR = cflag ? nPnTnR : 3*nPnTnR
+        nEMf = 2 + length(fO2_Xmix)                # fO2/metal compositions per sector
+        eff_nPnTnR = cflag ? nPnTnR : max(3, nEMf)*nPnTnR
+        (s && fO2 && !cflag) && error("solve_sH2O_fO2: run the solubility and fO2 passes separately (their third compositions differ)")
 
         # Change in oxide list to Stx24
             Xox24 = ["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "O"]
@@ -114,16 +118,23 @@
             #                    two at R = 0 by ~9x at equal node count, and leaves no seam where
             #                    the curvature is highest.
             #  Rlog=false restores the old uniform behaviour.
+            #  The signed axis ends at 0.95 (was 0.4): sb24 converges to R ≈ 0.995, and above Rknee
+            #   nRhi logit nodes cut the log fO₂ error there from ~1.5-2.5 to 0.10 (audit REQ 14b).
             Rdom = nR>1 ? (Rlog ? (Rrange[1] > 0 ? Rlogspace(Rrange[1], Rrange[2], nR)
-                                                 : Rasinhspace(Rrange[1], Rrange[2], nR; R0=R0))
+                                                 : Rhybridspace(Rrange[1], Rrange[2], nR; R0=R0, Rknee=Rknee, nhi=nRhi))
                                 : collect(LinRange(Rrange[1], Rrange[2], nR))) : Rv
             Pv, Tv, Rvec = zeros(Float64, eff_nPnTnR), zeros(Float64, eff_nPnTnR), (nR>1) ? zeros(Float64, eff_nPnTnR) : Rv.*ones(Float64, eff_nPnTnR);
         # --- Composition
             Xv = Vector{Vector{Float64}}(undef, eff_nPnTnR)
-            Xv2 = Vector{Vector{Float64}}(undef, 2nPnTnR)
+            # Xv2: the fO2/metal compositions - XH, XB, then one mix per entry of fO2_Xmix
+            Xv2 = Vector{Vector{Float64}}(undef, cflag ? nPnTnR : nEMf*nPnTnR)
             for i in 1:nPnTnR
                 cflag ? Xv[i] = cc : (Xv[i] = XH; Xv[i+nPnTnR] = XB; Xv[i+2nPnTnR] = Xmid.*XB .+ (1.0-Xmid).*XH)
-                cflag ? Xv2[i] = cc : (Xv2[i] = XH; Xv2[i+nPnTnR] = XB)
+                if cflag; Xv2[i] = cc
+                else
+                    Xv2[i] = XH; Xv2[i+nPnTnR] = XB
+                    for (j, x) in enumerate(fO2_Xmix); Xv2[i+(1+j)*nPnTnR] = x.*XB .+ (1.0-x).*XH; end
+                end
             end
             Xdummy = (X=Vector{Float64}(zeros(length(Xox24))), Xox=Vector{String}(Xox24), mm=get_Xoxmm(Xox24)) # Dummy for Stx24 oxidizing calls
             Xox24f = oxidized_Xox(Xox24, "Fe_O")   # labels MAGEMin is actually handed, see assignR_to_Xv!
@@ -131,15 +142,15 @@
         # --- Window variables
         #  LAYOUT. Pv/Tv/Rvec are 3 stacked blocks of nPnTnR, one per composition (XH, XB, Xmid);
         #   inside a block the index runs P fastest, then T, then R (mesh_vectorization!).
-        #   Xv is 3*nPnTnR (XH, XB, Xmid) and Xv2 is 2*nPnTnR (XH, XB), BOTH over all (P,T,R).
+        #   Xv is 3*nPnTnR (XH, XB, Xmid) and Xv2 is nEMf*nPnTnR (XH, XB, mixes), BOTH over all (P,T,R).
         #   Any multi_point_minimization must therefore be handed exactly as many (P,T) points as
         #   there are composition entries - counts that scale with nR, not with nPnT.
             Pv_nPnT = @view Pv[1:nPnT]
             Tv_nPnT = @view Tv[1:nPnT]
             if !cflag
-                # fO2 over both endmembers at every (P,T,R)
-                Pv_2nPnTnR = @view Pv[1:2nPnTnR]
-                Tv_2nPnTnR = @view Tv[1:2nPnTnR]
+                # fO2 over all nEMf compositions at every (P,T,R)
+                Pv_fnPnTnR = @view Pv[1:nEMf*nPnTnR]
+                Tv_fnPnTnR = @view Tv[1:nEMf*nPnTnR]
                 # Solubility is R-INDEPENDENT: it is solved once on the (P,T) grid for each of the
                 #  three compositions and replicated across R afterwards, so it needs 3*nPnT points
                 #  holding the (P,T) grid three times over. Block 1 of Pv is the (P,T) grid repeated
@@ -155,10 +166,10 @@
                 um, tz, lm = nothing, nothing, nothing
             end
             if fO2
-                fum, ftz, flm = zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2)
+                fum, ftz, flm = zeros(Float64, nPnTnR, cflag ? 1 : nEMf), zeros(Float64, nPnTnR, cflag ? 1 : nEMf), zeros(Float64, nPnTnR, cflag ? 1 : nEMf)
                 # Native-iron wt% maps, same shape as the fO2 ones and filled off the same
                 #  minimisations. They ride along with fO2 because they come free with it.
-                mum, mtz, mlm = zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2), zeros(Float64, nPnTnR, cflag ? 1 : 2)
+                mum, mtz, mlm = zeros(Float64, nPnTnR, cflag ? 1 : nEMf), zeros(Float64, nPnTnR, cflag ? 1 : nEMf), zeros(Float64, nPnTnR, cflag ? 1 : nEMf)
             else
                 fum, ftz, flm = nothing, nothing, nothing
                 mum, mtz, mlm = nothing, nothing, nothing
@@ -185,6 +196,45 @@
                         outHB = cflag ? repeat(outHB, nR) : vcat(repeat(outHB[1:nPnT], nR), repeat(outHB[nPnT+1:2nPnT], nR), repeat(outHB[2nPnT+1:3nPnT], nR))
                     else; outHB = 0.0; end
             end
+            # Silica-saturation step of the fO2 in basalt fraction p (StagfO2step.dat): pa = last p with an olivine-family phase
+            #  or ferropericlase, pb = first p with free silica, bisected on a coarse (P,T,R) grid. s=fO2=densities=false: this alone.
+            if fO2_step && !cflag && !s && (fO2 || !densities)     # with the fO2 pass, or alone
+                dstep = Initialize_MAGEMin("sb24", verbose=false)
+                verbose && println("Locating the silica-saturation step...")
+                sect = ((Prange[1], DBswitchP, Trange[1], 2000.0), (DBswitchP, 25.0, 700.0, Trange[2]), (25.0, Prange[2], 700.0, Trange[2]))
+                nPc, nTc = step_grid
+                pts = [(q, i, j, k) for q in 1:3 for k in eachindex(step_R) for i in 1:nPc for j in 1:nTc]
+                Pq = [10*max(sect[q][1] + (sect[q][2]-sect[q][1])*(i-1)/(nPc-1), 1e-4) for (q,i,j,k) in pts]
+                Tq = [sect[q][3] + (sect[q][4]-sect[q][3])*(j-1)/(nTc-1) - 273.15 for (q,i,j,k) in pts]
+                Xds = (X=Vector{Float64}(zeros(length(Xox24))), Xox=Vector{String}(Xox24), mm=get_Xoxmm(Xox24))
+                mini(pv) = multi_point_minimization(Pq, Tq, dstep, X=[oxidize_bulk(pv[n].*XB .+ (1-pv[n]).*XH, step_R[pts[n][4]], Xds; wt_in=(sys_in=="wt"), wt_out=(sys_in=="wt"), FeFormat="Fe_O", vector=true, oldXox=Xox) for n in eachindex(pts)],
+                                                    Xoxides=oxidized_Xox(Xox24, "Fe_O"), sys_in=sys_in, name_solvus=true, progressbar=false)
+                stepab = Vector{Vector{Float64}}()
+                for (names, grow) in ((("ol","wa","ri","wad","ring","mw"), true), (("coe","st","qtz","seif","apbo"), false))
+                    has(o) = any(x -> lowercase(x) in names, o.ph)
+                    lo = fill(0.3, length(pts)); hi = fill(1.0, length(pts)); olo = mini(lo); ohi = mini(hi)
+                    ok = [grow ? (has(olo[n]) && !has(ohi[n])) : (!has(olo[n]) && has(ohi[n])) for n in eachindex(pts)]
+                    for _ in 1:10
+                        mid = 0.5 .* (lo .+ hi); o = mini(mid)
+                        for n in eachindex(pts); (has(o[n]) == grow) ? (lo[n] = mid[n]) : (hi[n] = mid[n]); end
+                    end
+                    push!(stepab, [ok[n] ? 0.5*(lo[n]+hi[n]) : NaN for n in eachindex(pts)])
+                end
+                if exprt
+                    open(joinpath(savedir, "StagfO2step.dat"), "w") do io
+                        println(io, nPc, " ", nTc, " ", length(step_R), "\n")
+                        for q in sect; println(io, join(q, " ")); end
+                        println(io, join(step_R, " "), "\n")
+                        for v in stepab, k in eachindex(step_R), q in 1:3
+                            for i in 1:nPc; println(io, join([@sprintf("%.4f", v[findfirst(==((q,i,j,k)), pts)]) for j in 1:nTc], " ")); end
+                            println(io)
+                        end
+                    end
+                end
+                Finalize_MAGEMin(dstep)
+                fO2 || return
+            end
+
             # Initialize sb24 MAGEMin environment
                 # Gated on solve_um TOO: the upper-mantle fO₂ call below needs this handle, so
                 #  solve_tz_lm=false with fO2=true used to die on an undefined `data`.
@@ -197,11 +247,10 @@
                 # Call UM through SB24 to get fO₂
                     if fO2
                         verbose && println("Calculating upper mantle fO₂...")
-                        # X must cover every (P,T,R) point of both endmembers - Xv2 is 2*nPnTnR
-                        #  long, so the P/T windows have to be too. These used to be 2*nPnT, which
-                        #  only matched when nR == 1.
+                        # X must cover every (P,T,R) point of all nEMf compositions, so the P/T
+                        #  windows are nEMf*nPnTnR long as well.
                         Xf = cflag ? Xv : Xv2
-                        out_fO2   = multi_point_minimization(10*(cflag ? Pv[1:nPnTnR] : Pv_2nPnTnR), (cflag ? Tv[1:nPnTnR] : Tv_2nPnTnR).-273.15, data, X=Xf, Xoxides=Xox24f, name_solvus=true, progressbar=verbose, sys_in=sys_in)
+                        out_fO2   = multi_point_minimization(10*(cflag ? Pv[1:nPnTnR] : Pv_fnPnTnR), (cflag ? Tv[1:nPnTnR] : Tv_fnPnTnR).-273.15, data, X=Xf, Xoxides=Xox24f, name_solvus=true, progressbar=verbose, sys_in=sys_in)
                     else; out_fO2 = 0.0; end
                 # Assemble
                     sᴴ²ᴼ_fO₂_assembler!(um, fum, outHB, out_fO2, nPnTnR, nR, cflag, min_s, s=s, fO2=fO2, mmap=mum)
@@ -210,14 +259,14 @@
                         verbose && println("Calculating Mineral-bound sᴴ²ᴼ curves...")
                     end
                     if fO2
-                        fum = cflag ? reshape(fum, nP, nT, nR) : cat(reshape(fum[:,1], nP, nT, nR), reshape(fum[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
-                        mum = cflag ? reshape(mum, nP, nT, nR) : cat(reshape(mum[:,1], nP, nT, nR), reshape(mum[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                        fum = cflag ? reshape(fum, nP, nT, nR) : cat([reshape(fum[:,k], nP, nT, nR) for k in 1:size(fum,2)]..., dims = (nR>1) ? 4 : 3)
+                        mum = cflag ? reshape(mum, nP, nT, nR) : cat([reshape(mum[:,k], nP, nT, nR) for k in 1:size(mum,2)]..., dims = (nR>1) ? 4 : 3)
                     end
             else
                 s && (um = cflag ? reshape(um, nP, nT, nR) : cat(reshape(um[:,1], nP, nT, nR), reshape(um[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3))
                 if fO2
-                    fum = cflag ? reshape(fum, nP, nT, nR) : cat(reshape(fum[:,1], nP, nT, nR), reshape(fum[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
-                    mum = cflag ? reshape(mum, nP, nT, nR) : cat(reshape(mum[:,1], nP, nT, nR), reshape(mum[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                    fum = cflag ? reshape(fum, nP, nT, nR) : cat([reshape(fum[:,k], nP, nT, nR) for k in 1:size(fum,2)]..., dims = (nR>1) ? 4 : 3)
+                    mum = cflag ? reshape(mum, nP, nT, nR) : cat([reshape(mum[:,k], nP, nT, nR) for k in 1:size(mum,2)]..., dims = (nR>1) ? 4 : 3)
                 end
             end
 
@@ -230,10 +279,8 @@
                 # Minimizer call + assembly
                     if s || fO2
                         verbose && println("Calculating transition zone fO₂ | sᴴ²ᴼ...")
-                        # Composition set for this sector. Solubility needs all three blocks of
-                        #  Xv (XH, XB, Xmid); fO2 only reads blocks 1 and 2 (see
-                        #  sᴴ²ᴼ_fO₂_assembler!), so an fO2-only run passes Xv2 and skips a third of
-                        #  the minimizations - 490k of them per sector at nP=nT=100, nR=49.
+                        # Composition set for this sector: Xv (XH, XB, Xmid) for solubility, Xv2 (XH, XB,
+                        #  mixes) for fO2/metal. They differ, so the two passes are run separately.
                         Xsel = (cflag || s) ? Xv : Xv2
                         nsel = length(Xsel)
                         out_fO2   = multi_point_minimization(10*(@view Pv[1:nsel]), (@view Tv[1:nsel]).-273.15, data, X=Xsel, Xoxides=Xox24f, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
@@ -250,8 +297,8 @@
                     if fO2 
                         verbose && println("Extracting transition zone fO₂...")
                         sᴴ²ᴼ_fO₂_assembler!(tz, ftz, 0.0, out_fO2, nPnTnR, nR, cflag, min_s, s=false, mmap=mtz)
-                        ftz = cflag ? reshape(ftz, nP, nT, nR) : cat(reshape(ftz[:,1], nP, nT, nR), reshape(ftz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
-                        mtz = cflag ? reshape(mtz, nP, nT, nR) : cat(reshape(mtz[:,1], nP, nT, nR), reshape(mtz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                        ftz = cflag ? reshape(ftz, nP, nT, nR) : cat([reshape(ftz[:,k], nP, nT, nR) for k in 1:size(ftz,2)]..., dims = (nR>1) ? 4 : 3)
+                        mtz = cflag ? reshape(mtz, nP, nT, nR) : cat([reshape(mtz[:,k], nP, nT, nR) for k in 1:size(mtz,2)]..., dims = (nR>1) ? 4 : 3)
                     end
                 
 
@@ -266,10 +313,8 @@
                 # Minimizer call + assembly
                     if s || fO2
                         verbose && println("Calculating lower mantle sᴴ²ᴼ...")
-                        # Composition set for this sector. Solubility needs all three blocks of
-                        #  Xv (XH, XB, Xmid); fO2 only reads blocks 1 and 2 (see
-                        #  sᴴ²ᴼ_fO₂_assembler!), so an fO2-only run passes Xv2 and skips a third of
-                        #  the minimizations - 490k of them per sector at nP=nT=100, nR=49.
+                        # Composition set for this sector: Xv (XH, XB, Xmid) for solubility, Xv2 (XH, XB,
+                        #  mixes) for fO2/metal. They differ, so the two passes are run separately.
                         Xsel = (cflag || s) ? Xv : Xv2
                         nsel = length(Xsel)
                         out_fO2   = multi_point_minimization(10*(@view Pv[1:nsel]), (@view Tv[1:nsel]).-273.15, data, X=Xsel, Xoxides=Xox24f, name_solvus=true, progressbar=verbose, sys_in=sys_in) # kbar and K
@@ -281,8 +326,8 @@
                     if fO2 
                         verbose && println("Extracting lower mantle fO₂...")
                         sᴴ²ᴼ_fO₂_assembler!(lm, flm, 0.0, out_fO2, nPnTnR, nR, cflag, min_s, s=false, mmap=mlm)
-                        flm = cflag ? reshape(flm, nP, nT, nR) : cat(reshape(flm[:,1], nP, nT, nR), reshape(flm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
-                        mlm = cflag ? reshape(mlm, nP, nT, nR) : cat(reshape(mlm[:,1], nP, nT, nR), reshape(mlm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                        flm = cflag ? reshape(flm, nP, nT, nR) : cat([reshape(flm[:,k], nP, nT, nR) for k in 1:size(flm,2)]..., dims = (nR>1) ? 4 : 3)
+                        mlm = cflag ? reshape(mlm, nP, nT, nR) : cat([reshape(mlm[:,k], nP, nT, nR) for k in 1:size(mlm,2)]..., dims = (nR>1) ? 4 : 3)
                     end
             else
                 if s
@@ -290,10 +335,10 @@
                     lm = cflag ? reshape(lm, nP, nT, nR) : cat(reshape(lm[:,1], nP, nT, nR), reshape(lm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
                 end
                 if fO2
-                    ftz = cflag ? reshape(ftz, nP, nT, nR) : cat(reshape(ftz[:,1], nP, nT, nR), reshape(ftz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
-                    flm = cflag ? reshape(flm, nP, nT, nR) : cat(reshape(flm[:,1], nP, nT, nR), reshape(flm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
-                    mtz = cflag ? reshape(mtz, nP, nT, nR) : cat(reshape(mtz[:,1], nP, nT, nR), reshape(mtz[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
-                    mlm = cflag ? reshape(mlm, nP, nT, nR) : cat(reshape(mlm[:,1], nP, nT, nR), reshape(mlm[:,2], nP, nT, nR), dims = (nR>1) ? 4 : 3)
+                    ftz = cflag ? reshape(ftz, nP, nT, nR) : cat([reshape(ftz[:,k], nP, nT, nR) for k in 1:size(ftz,2)]..., dims = (nR>1) ? 4 : 3)
+                    flm = cflag ? reshape(flm, nP, nT, nR) : cat([reshape(flm[:,k], nP, nT, nR) for k in 1:size(flm,2)]..., dims = (nR>1) ? 4 : 3)
+                    mtz = cflag ? reshape(mtz, nP, nT, nR) : cat([reshape(mtz[:,k], nP, nT, nR) for k in 1:size(mtz,2)]..., dims = (nR>1) ? 4 : 3)
+                    mlm = cflag ? reshape(mlm, nP, nT, nR) : cat([reshape(mlm[:,k], nP, nT, nR) for k in 1:size(mlm,2)]..., dims = (nR>1) ? 4 : 3)
                 end
             end
         
@@ -324,7 +369,7 @@
                                               bad[r], "/", npr, " non-finite (",
                                               round(100bad[r]/npr, digits=1), "%)")
                     end
-                    println("     -> lower Rrange[2] until these clear; the useful ceiling is ~0.185.")
+                    println("     -> lower Rrange[2] until these clear; the corrected sb24 converges to R ≈ 0.995.")
                 end
             end
         end
@@ -342,7 +387,8 @@
         # Compute solid and silicate melt H₂O density corrections
         if densities
             verbose && println("Quantifying solid | melt density deviations...")
-            SΔρ, MΔρ, ρP, ρT, ρH = PT_H2O_ρ(Prange[1],50.,Trange[1],3000.,[0.0],["H2O"], nP=50, nT=50, nH=50, default=true, verbose=false)
+            SΔρ, MΔρ, ρP, ρT, ρH = PT_H2O_ρ(Prange[1],50.,Trange[1],3000.,[0.0],["H2O"], nP=50, nT=50, nH=50, default=true, verbose=false,
+                                            Hmax_wt=Hmax_wt, melt_H2O_model=melt_H2O_model, melt_floor=melt_floor)
         else
             SΔρ, MΔρ, ρP, ρT, ρH = nothing, nothing, nothing, nothing, nothing
         end
@@ -365,7 +411,7 @@
         
         # Export
         verbose && println("Exporting...")
-        (exprt && (s || fO2 || densities)) && write_output(sfmap, cflag, s=s, fO2=fO2, densities=densities)
+        (exprt && (s || fO2 || densities)) && write_output(sfmap, cflag, s=s, fO2=fO2, densities=densities, fO2_Xmix=fO2_Xmix)
 
         # Plot
         (plt && verbose) && println("Plotting...")
@@ -1153,13 +1199,14 @@
             if fO2
                 fmap[i, 1]=out_fO2[i].fO2 # Depleted (Harzburgite)
                 if !cflag
-                    fmap[i, 2] = out_fO2[i+n].fO2 # Enriched (Basalt)
+                    fmap[i, 2] = out_fO2[i+n].fO2  # Enriched (Basalt)
+                    for k in 3:size(fmap, 2); fmap[i, k] = out_fO2[i+(k-1)n].fO2; end   # mixes
                 end
                 # Native iron off the SAME minimisation - no extra MAGEMin call, just a second
                 #  quantity read out of a result already in hand.
                 if !isnothing(mmap)
                     mmap[i, 1] = metal_wt_frac(out_fO2[i])
-                    !cflag && (mmap[i, 2] = metal_wt_frac(out_fO2[i+n]))
+                    !cflag && for k in 2:size(mmap, 2); mmap[i, k] = metal_wt_frac(out_fO2[i+(k-1)n]); end
                 end
             end
         end
@@ -2040,6 +2087,18 @@
         return [R0*sinh(ui) for ui in u]
     end
 
+    """
+        Rhybridspace(Rlo, Rhi, n; R0=2e-3, Rknee=0.4, nhi=6)
+
+    `n - nhi` asinh nodes from `Rlo` to `Rknee` (`Rasinhspace`), then `nhi` nodes uniform in
+    log(R/(1-R)) above it up to `Rhi`. Above ~0.4 fO₂ follows the logit, which asinh spaces poorly.
+    """
+    function Rhybridspace(Rlo::Real, Rhi::Real, n::Integer; R0::Real=2e-3, Rknee::Real=0.4, nhi::Integer=6)
+        Rhi > Rknee || return Rasinhspace(Rlo, Rhi, n; R0=R0)
+        n - nhi >= 2 || error("Rhybridspace: need n - nhi >= 2; got n=$n, nhi=$nhi")
+        return vcat(Rasinhspace(Rlo, Rknee, n - nhi; R0=R0), Rlogspace(Rknee, Rhi, nhi + 1)[2:end])
+    end
+
     # Forces fO₂ non-decreasing along the R axis (dim 3) of an assembled (nP, nT, nR[, nc]) map, so
     # the table StagYY reads is invertible as written. MAGEMin breaks monotonicity wherever the
     # assemblage changes — native iron coming in at R = 0 especially — and a flat or dipping segment
@@ -2063,10 +2122,10 @@
     function mesh_vectorization!(P, T, Rdom, nP, nT, nR, Pv, Tv, Rvec; single=false)
         if nR>1
             vP, vT, vR = repeat(repeat(P, outer=nT), nR), repeat(repeat(T, inner=nP), nR), repeat(Rdom, inner=nP*nT)
-            Pv .= single ? vP : vcat(vP, vP, vP); Tv .= single ? vT : vcat(vT, vT, vT); Rvec .= single ? vR : vcat(vR, vR, vR);
+            nb = length(Pv) ÷ length(vP); Pv .= repeat(vP, nb); Tv .= repeat(vT, nb); Rvec .= repeat(vR, nb);
         else
             vP, vT = repeat(P, outer=nT), repeat(T, inner=nP)
-            Pv .= single ? vP : vcat(vP, vP, vP); Tv .= single ? vT : vcat(vT, vT, vT);
+            nb = length(Pv) ÷ length(vP); Pv .= repeat(vP, nb); Tv .= repeat(vT, nb);
         end
     end
 
@@ -2159,13 +2218,15 @@
 # ======= Export =======
 # ======================
 # Export 30% as well!
-    function write_output(sfmap, cflag; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", fname_metal="StagMetal.dat", fname_Mdens="StagMdens.dat", fname_Sdens="StagSdens.dat", s=true, fO2=true, densities=true)
+    function write_output(sfmap, cflag; fname_s ="StagH2O.dat", fname_fO2="StagfO2.dat", fname_metal="StagMetal.dat", fname_Mdens="StagMdens.dat", fname_Sdens="StagSdens.dat", s=true, fO2=true, densities=true, fO2_Xmix=[0.05, 0.1, 0.2, 0.5, 0.65, 0.75, 0.85, 0.95])
         # Array dimensions
         nP, nT, nR = length(sfmap.Pum), length(sfmap.Tum), length(sfmap.FeR)
         nH = 1; H = 1
         pmap = zeros(Float64, nP, nT)
         ivec1 = cflag ? [1, 1, 1] : [2, 3, 1, 2, 3, 1, 2, 3, 1]
-        ivec = cflag ? [1, 1, 1] : [2, 1, 2, 1, 2, 1]
+        # fO2/metal file order per sector: basalt, harzburgite, then the mixes in fO2_Xmix order; 3 sectors
+        nEM  = cflag ? 1 : 2 + length(fO2_Xmix)
+        ivec = cflag ? [1, 1, 1] : repeat(vcat([2, 1], collect(3:nEM)), 3)
         if s
             open(joinpath(savedir, fname_s), "w") do io
                 # Header
@@ -2179,7 +2240,7 @@
                     pmap .= n>6 ? sfmap.slm[:,:,slot] : n>3 ? sfmap.stz[:,:,slot] : sfmap.sum[:,:,slot]
                     for i in 1:nP
                         for j in 1:nT
-                            print(io, pmap[i,j], " ")
+                            print(io, isfinite(pmap[i,j]) ? round(pmap[i,j], digits=4) : pmap[i,j], " ")
                         end; println(io, "")
                     end; println(io, "")
                 end
@@ -2188,8 +2249,9 @@
 
         if fO2
             open(joinpath(savedir, fname_fO2), "w") do io
-                # Header
-                println(io, nP, " ", nT, " ", nR, "\n");
+                # Header: nP nT nR nEM x3 x4 ... (basalt fractions of the mixes); a 3-token line is
+                #  the old 2-endmember layout and still loads.
+                println(io, nP, " ", nT, " ", nR, " ", nEM, " ", join(fO2_Xmix, " "), "\n");
                 println(io, sfmap.Pum[1], " ", sfmap.Pum[end], " ", sfmap.Tum[1], " ", sfmap.Tum[end])
                 println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
                 println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end])
@@ -2202,18 +2264,16 @@
                 for r in 1:nR
                     for (n, slot) in enumerate(ivec)
                         if nR==1
-                            pmap .= n>4 ? sfmap.flm[:,:,slot] : n>2 ? sfmap.ftz[:,:,slot] : sfmap.fum[:,:,slot]
+                            pmap .= n>2nEM ? sfmap.flm[:,:,slot] : n>nEM ? sfmap.ftz[:,:,slot] : sfmap.fum[:,:,slot]
                         else
-                            pmap .= n>4 ? sfmap.flm[:,:,r,slot] : n>2 ? sfmap.ftz[:,:,r,slot] : sfmap.fum[:,:,r,slot]
+                            pmap .= n>2nEM ? sfmap.flm[:,:,r,slot] : n>nEM ? sfmap.ftz[:,:,r,slot] : sfmap.fum[:,:,r,slot]
                         end
                         for i in 1:nP
                             for j in 1:nT
-                                # 6 decimals = 1e-6 log units, still 1e4 finer than the 0.01 the
-                                #  solver is required to match, at roughly half the bytes of the
-                                #  full 17-digit repr. NaN/Inf are written as-is so a bad node
-                                #  stays visibly bad rather than being rounded into silence.
+                                # 4 decimals: 1e-4 log units against a table read error of ~0.03, and a file GitHub
+                                #  accepts. NaN/Inf are written as-is so a bad node stays visibly bad.
                                 v = pmap[i,j]
-                                print(io, isfinite(v) ? round(v, digits=6) : v, " ")
+                                print(io, isfinite(v) ? round(v, digits=4) : v, " ")
                             end; println(io, "")
                         end; println(io, "")
                     end
@@ -2221,11 +2281,11 @@
             end
 
             # Native iron, byte-for-byte the same file LAYOUT as the fO₂ table above (same header,
-            #  same R axis, same 6-maps-per-R-node order), so StagYY reads it with the same code
+            #  same R axis, same maps-per-R-node order), so StagYY reads it with the same code
             #  path. Written as a WEIGHT FRACTION of the solid, not a percentage.
             if !isnothing(sfmap.mum)
                 open(joinpath(savedir, fname_metal), "w") do io
-                    println(io, nP, " ", nT, " ", nR, "\n");
+                    println(io, nP, " ", nT, " ", nR, " ", nEM, " ", join(fO2_Xmix, " "), "\n");
                     println(io, sfmap.Pum[1], " ", sfmap.Pum[end], " ", sfmap.Tum[1], " ", sfmap.Tum[end])
                     println(io, sfmap.Ptz[1], " ", sfmap.Ptz[end], " ", sfmap.Ttz[1], " ", sfmap.Ttz[end])
                     println(io, sfmap.Plm[1], " ", sfmap.Plm[end], " ", sfmap.Tlm[1], " ", sfmap.Tlm[end])
@@ -2233,16 +2293,16 @@
                     for r in 1:nR
                         for (n, slot) in enumerate(ivec)
                             if nR==1
-                                pmap .= n>4 ? sfmap.mlm[:,:,slot] : n>2 ? sfmap.mtz[:,:,slot] : sfmap.mum[:,:,slot]
+                                pmap .= n>2nEM ? sfmap.mlm[:,:,slot] : n>nEM ? sfmap.mtz[:,:,slot] : sfmap.mum[:,:,slot]
                             else
-                                pmap .= n>4 ? sfmap.mlm[:,:,r,slot] : n>2 ? sfmap.mtz[:,:,r,slot] : sfmap.mum[:,:,r,slot]
+                                pmap .= n>2nEM ? sfmap.mlm[:,:,r,slot] : n>nEM ? sfmap.mtz[:,:,r,slot] : sfmap.mum[:,:,r,slot]
                             end
                             for i in 1:nP
                                 for j in 1:nT
                                     # 8 decimals: metal fractions run down to ~1e-5 and the
                                     #  interesting onset is smaller still, so 6 would quantise it.
                                     v = pmap[i,j]
-                                    print(io, isfinite(v) ? round(v, digits=8) : v, " ")
+                                    print(io, isfinite(v) ? round(v, digits=6) : v, " ")   # weight fraction: 4 decimals of a wt%
                                 end; println(io, "")
                             end; println(io, "")
                         end
@@ -2255,7 +2315,10 @@
         if densities
             nP = length(sfmap.ρP); nT = length(sfmap.ρT); nH = length(sfmap.ρH)
             pmap = zeros(Float64, nP, nT)
-            ivec = [2, 1]
+            # File block 1 = basalt, block 2 = harzburgite: thermochem_int weights block i by xfrac(i) with
+            #  xfrac = (basalt, harz). PT_H2O_ρ puts basalt in slot 1, so the slots go out in order (the old
+            #  [2, 1] wrote harzburgite first and was read swapped - harmless only while both slots were equal).
+            ivec = size(sfmap.SΔρ, 4) == 2 ? [1, 2] : [1, 1]
             # Solid densities
             open(joinpath(savedir, fname_Sdens), "w") do io
                 # Header
@@ -2267,7 +2330,7 @@
                         pmap .= sfmap.SΔρ[:,:,h,slot]
                         for i in 1:nP
                             for j in 1:nT
-                                print(io, pmap[i,j], " ")
+                                print(io, isfinite(pmap[i,j]) ? round(pmap[i,j], digits=4) : pmap[i,j], " ")
                             end; println(io, "")
                         end; println(io, "")
                     end
@@ -2284,7 +2347,7 @@
                         pmap .= sfmap.MΔρ[:,:,h,slot]
                         for i in 1:nP
                             for j in 1:nT
-                                print(io, pmap[i,j], " ")
+                                print(io, isfinite(pmap[i,j]) ? round(pmap[i,j], digits=4) : pmap[i,j], " ")
                             end; println(io, "")
                         end; println(io, "")
                     end
@@ -2448,77 +2511,113 @@
         return mmarray
     end
 
-    # Solves the ∫(ΔV/RT)dP part of the Sun and Yao (2024) fO₂ model -> using Deng et al (2020) from ab-initio molecular dynamic fits
-    function solve_∫ΔVdP(P, T)
+    # ∫ΔV dP for Hirschmann (2022) GCA 328:221 eq. 21, with ΔV = V(FeO1.5) - V(FeO) per mole of Fe
+    # from the Deng et al. (2020) ab-initio 4th-order Birch-Murnaghan fits. Returns kJ/mol.
 
-        # Resolution
-        nP, nT = length(P), length(T)
+    # Ferric + ferrous 4th order BM fit parameters
+    const _IDV_pars = Dict{String, Dict{String, Float64}}(
+        #                      [A³]           [GPa]          [-]          [GPa⁻¹]
+        "RH" => Dict("V0" => 1180.10, "K0" => 26.76, "Kp" => 2.80, "Kpp" => 0.01 , "a" => 35.70, "b" => 71.10, "c" => 36.60),
+        "OH" => Dict("V0" => 1204.69, "K0" => 23.18, "Kp" => 3.22, "Kpp" => 0.01 , "a" => 34.53, "b" => 68.64, "c" => 35.27),
+        "RB" => Dict("V0" => 1192.01, "K0" => 23.95, "Kp" => 3.32, "Kpp" => -0.01, "a" => 31.35, "b" => 62.49, "c" => 32.47),
+        "OB" => Dict("V0" => 1256.73, "K0" => 16.13, "Kp" => 4.58, "Kpp" => -0.18, "a" => 30.38, "b" => 59.11, "c" => 29.65),
+    )
+    const _IDV_FAC = 1e-24 * 6.022e23 * 0.5 # cm³/Å³ * mol⁻¹ * nFe
 
-        # Map must match resolution
-        ∫ΔVdP = zeros(nP, nT, 2)
-
-        # Ferric + ferrous 4th order BM fit parameters
-        pars = Dict{String, Dict{String, Float64}}(
-            #                      [A³]           [GPa]          [-]          [GPa⁻¹]
-            "RH" => Dict("V0" => 1180.10, "K0" => 26.76, "Kp" => 2.80, "Kpp" => 0.01 , "a" => 35.70, "b" => 71.10, "c" => 36.60),
-            "OH" => Dict("V0" => 1204.69, "K0" => 23.18, "Kp" => 3.22, "Kpp" => 0.01 , "a" => 34.53, "b" => 68.64, "c" => 35.27),
-            "RB" => Dict("V0" => 1192.01, "K0" => 23.95, "Kp" => 3.32, "Kpp" => -0.01, "a" => 31.35, "b" => 62.49, "c" => 32.47),
-            "OB" => Dict("V0" => 1256.73, "K0" => 16.13, "Kp" => 4.58, "Kpp" => -0.18, "a" => 30.38, "b" => 59.11, "c" => 29.65),
-        )
-
-        # 4th order BM EoS
-        f(V, p) = 0.5((p["V0"]/V)^(2/3) - 1)
-        BM4th(V, p, fv) = 3p["K0"] * fv * (1+2fv)^2.5 * (1 + 1.5(p["Kp"]-4)*fv + 1.5(p["K0"]*p["Kpp"] + (p["Kp"]-4)*(p["Kp"]-3) + (35/9))*fv^2)
-        Bth(V, p) = 1e-3(p["a"] - p["b"]*(V/p["V0"]) + p["c"]*(V/p["V0"])^2)
-        function SunYao(V,T,p)
-            fv = f(V,p)
-            BM4th(V,p,fv) + Bth(V,p)*(T-3000) # T₀ = 3000 K
+    # Bisection solver for V (A³): fixed 60 halvings of [400,1400] Å³, bit-identical to sy_PVT.
+    function _idv_PVT(P::Real, T::Real, C::String)
+        p = _IDV_pars[C]
+        Ubound = 1400.0; Lbound = 400.0
+        v = 0.5(Ubound+Lbound)
+        for _ in 1:60
+            fv = 0.5((p["V0"]/v)^(2/3) - 1)
+            P_guess = 3p["K0"]*fv*(1+2fv)^2.5*(1 + 1.5(p["Kp"]-4)*fv + 1.5(p["K0"]*p["Kpp"] + (p["Kp"]-4)*(p["Kp"]-3) + (35/9))*fv^2) +
+                      1e-3(p["a"] - p["b"]*(v/p["V0"]) + p["c"]*(v/p["V0"])^2)*(T-3000) # T₀ = 3000 K
+            (P_guess > P) ? (Lbound = v) : (Ubound = v)
+            v = 0.5(Lbound+Ubound)
         end
+        return v
+    end
 
-        # Delta V function
-        ΔV(P, T, C) = PVT.(P, T, "O"*C) - PVT.(P, T, "R"*C)
+    # fac*ΔV(P,T) per mole of Fe, cm³/mol (== toex_idv_integrand).
+    _idv_integrand(P::Real, T::Real, C::String="H") = _IDV_FAC*(_idv_PVT(P,T,"O"*C) - _idv_PVT(P,T,"R"*C))
 
-        # Bisection solver for V
-        function PVT(P, T, C)
-            # Initial guess
-            Ubound = 1400; Lbound = 400
-            v = 0.5(Ubound+Lbound) # A³
-            # Iterative solve
-            P_guess = 0.0
-            error = 1e-1
-            for n in 1:70
-                P_guess = SunYao(v, T, pars[C]) # GPa
-                # Update guess
-                (P_guess > P) ? (Lbound = v) : (Ubound = v)
-                v = 0.5(Lbound+Ubound)
-                # Convergence check
-                error = abs(P_guess - P)
-                (error < 0.01) && break
+    # Direct 200-point trapezoid from 1e-4 GPa to P. Kept for accuracy checks only - the table
+    # read below (solve_∫ΔVdP) is what production code calls.
+    function solve_∫ΔVdP_direct(P::Real, T::Real; C="H", n=200)
+        Pa, Pb = 1e-4, max(P, 1e-4)
+        h = (Pb - Pa)/n
+        acc = 0.5*(_idv_integrand(Pa, T, C) + _idv_integrand(Pb, T, C))
+        for k in 1:n-1
+            acc += _idv_integrand(Pa + k*h, T, C)
+        end
+        return acc*h   # cm³·GPa/mol = kJ/mol
+    end
+
+    # IDV(P,T) table grid, mirroring toex_build_IDV/toex_solve_IDV exactly: 281x41 nodes on
+    # P=0:0.5:140 GPa, T=500:100:4500 K, 4 sub-steps/interval, cumulative trapezoid from 1e-4 GPa.
+    const _IDV_NP, _IDV_NT   = 281, 41
+    const _IDV_P0, _IDV_P1   = 0.0, 140.0
+    const _IDV_T0, _IDV_T1   = 500.0, 4500.0
+    const _IDV_SUB           = 4
+    const _idv_cache = Ref{Dict{String,NamedTuple{(:tbl,:dtbl),Tuple{Matrix{Float64},Matrix{Float64}}}}}(Dict{String,NamedTuple{(:tbl,:dtbl),Tuple{Matrix{Float64},Matrix{Float64}}}}())
+
+    function _idv_build_table(C::String)
+        NP, NT = _IDV_NP, _IDV_NT
+        tbl  = zeros(NP, NT)   # cumulative integral (kJ/mol)
+        dtbl = zeros(NP, NT)   # node derivative = the integrand itself
+        dP = (_IDV_P1 - _IDV_P0)/(NP-1)
+        for it in 1:NT
+            T = _IDV_T0 + (_IDV_T1-_IDV_T0)*(it-1)/(NT-1)
+            acc = 0.0
+            tbl[1,it]  = 0.0
+            dtbl[1,it] = _idv_integrand(1e-4, T, C)
+            for ip in 2:NP
+                Pa = _IDV_P0 + dP*(ip-2)
+                ip == 2 && (Pa = 1e-4)
+                Pb = _IDV_P0 + dP*(ip-1)
+                y0 = _idv_integrand(Pa, T, C)
+                for k in 1:_IDV_SUB
+                    y1 = _idv_integrand(Pa + (Pb-Pa)*k/_IDV_SUB, T, C)
+                    acc += 0.5*(y0+y1)*(Pb-Pa)/_IDV_SUB
+                    y0 = y1
+                end
+                tbl[ip,it]  = acc
+                dtbl[ip,it] = y0
             end
-            return v # Convert A³ to cm³/mol
         end
+        return (tbl=tbl, dtbl=dtbl)
+    end
 
-        # A³ to cm³/mol conversion
-        fac = 1e-24 * 6.022e23 * 0.5 # cm³/A³ * mol⁻¹ * nFe
+    # Build once per C, lazily, on first call - mirrors the Fortran rank-local lazy build.
+    function _idv_get_table(C::String)
+        cache = _idv_cache[]
+        haskey(cache, C) && return cache[C]
+        t = _idv_build_table(C)
+        cache[C] = t
+        return t
+    end
 
-        # Compute ΔV/RT for each P-T point
-        ΔV_RT_H, ΔV_RT_B = zeros(nP, nT), zeros(nP, nT)
-        for it in eachindex(T)
-            for ip in eachindex(P)
-                # Compute Integral
-                ΔV_RT_H[ip,it] = fac*ΔV(P[ip], T[it], "H")/(1e-3R)/T[it]
-                ΔV_RT_B[ip,it] = fac*ΔV(P[ip], T[it], "B")/(1e-3R)/T[it]
-            end
-        end
-
-        # Integrate numerically
-        for it in eachindex(T)
-            ∫ΔV_H = cumul_integrate(P, ΔV_RT_H[:,it]); ∫ΔVdP[:,it,1] = ∫ΔV_H
-            ∫ΔV_B = cumul_integrate(P, ΔV_RT_B[:,it]); ∫ΔVdP[:,it,2] = ∫ΔV_B
-        end
-
-        return ∫ΔVdP
-
+    # int(fac*dV)dP from 1e-4 GPa to P, kJ/mol. Cubic Hermite in P (node derivative = integrand,
+    # so curvature error vanishes), linear in T, clamped to the table box - mirrors toex_solve_IDV.
+    function solve_∫ΔVdP(P::Real, T::Real; C="H", n=200)
+        NP, NT = _IDV_NP, _IDV_NT
+        t = _idv_get_table(C)
+        tbl, dtbl = t.tbl, t.dtbl
+        Pc = min(max(P, _IDV_P0), _IDV_P1)
+        Tc = min(max(T, _IDV_T0), _IDV_T1)
+        fp = (Pc - _IDV_P0)/(_IDV_P1 - _IDV_P0)*(NP-1)
+        ft = (Tc - _IDV_T0)/(_IDV_T1 - _IDV_T0)*(NT-1)
+        ip = min(floor(Int, fp) + 1, NP-1); wp = fp - (ip-1)
+        it = min(floor(Int, ft) + 1, NT-1); wt = ft - (it-1)
+        h = (_IDV_P1 - _IDV_P0)/(NP-1)
+        h00 =  2wp^3 - 3wp^2 + 1
+        h10 =    wp^3 - 2wp^2 + wp
+        h01 = -2wp^3 + 3wp^2
+        h11 =    wp^3 -   wp^2
+        v0 = h00*tbl[ip,it]   + h10*h*dtbl[ip,it]   + h01*tbl[ip+1,it]   + h11*h*dtbl[ip+1,it]
+        v1 = h00*tbl[ip,it+1] + h10*h*dtbl[ip,it+1] + h01*tbl[ip+1,it+1] + h11*h*dtbl[ip+1,it+1]
+        return (1-wt)*v0 + wt*v1
     end
 
     function filter_ox_list(Xin, Xox, newXox; wt_in=false, wt_out=false)
@@ -2554,11 +2653,18 @@
             newX[idxF2] = 3X[idxF1] - 2X[idxO1]
 
         elseif (FeFormat1=="FeO_O" && FeFormat2=="FeO_Fe2O3")
+            # Fe2O3 = 2 FeO + O: one Fe2O3 per excess O, and two FeO consumed by each
             idxF1 = findfirst(Xox.=="FeO"); idxO1 = findfirst(Xox.=="O")
             idxF2 = findfirst(newXox.=="FeO"); idxO2 = findfirst(newXox.=="Fe2O3")
-            newX[idxO] = X[idxO] # only O because FeO taken care of
+            newX[idxO2] = X[idxO1]; newX[idxF2] = X[idxF1] - 2X[idxO1]
 
-        elseif (FeFormat1=="FeO_Fe2O3"||FeFormat1=="FeO_O") && FeFormat2=="Fe_O"
+        elseif FeFormat1=="FeO_O" && FeFormat2=="Fe_O"
+            # Fe = FeO, O = FeO + excess O
+            idxF1 = findfirst(Xox.=="FeO"); idxO1 = findfirst(Xox.=="O")
+            idxF2 = findfirst(newXox.=="Fe"); idxO2 = findfirst(newXox.=="O")
+            newX[idxF2] = X[idxF1]; newX[idxO2] = X[idxF1] + X[idxO1]
+
+        elseif FeFormat1=="FeO_Fe2O3" && FeFormat2=="Fe_O"
             idxF1 = findfirst(Xox.=="FeO"); idxO1 = findfirst(Xox.=="Fe2O3")
             idxF2 = findfirst(newXox.=="Fe"); idxO2 = findfirst(newXox.=="O")
             newX[idxF2] = X[idxF1] + 2X[idxO1]; newX[idxO2] = X[idxF1] + 3X[idxO1]

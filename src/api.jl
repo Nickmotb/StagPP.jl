@@ -34,6 +34,52 @@ function windowed_extrema(vec::AbstractVector, window, floor_mask::AbstractVecto
     return minimum(@view vec[idxs]), maximum(@view vec[idxs])
 end
 
+# Weighted quantile: smallest value whose cumulative weight reaches p. With equal weights this
+# is the ordinary quantile; with erupted volume as the weight the distribution is taken over
+# erupted material rather than over timesteps, so a composition produced by a negligible
+# eruption does not count the same as one produced by a large one.
+function wquantile(v::AbstractVector, w::AbstractVector, p::Real)
+    keep = findall(>(0), w)                 # zero-weight samples carry none of the distribution
+    isempty(keep) && return quantile(v, p)  # nothing erupted across this window
+    ord = sort(keep, by = k -> v[k])
+    tot = sum(@view w[ord])
+    # Each sample sits at the midpoint of its own weight block and the result is interpolated
+    # linearly between neighbours. Snapping to the sample that first crosses p instead would
+    # restrict the result to observed values, which makes a sliding-window quantile staircase.
+    acc, ppos, pval = 0.0, 0.0, float(v[first(ord)])
+    @inbounds for k in ord
+        pos, val = (acc + w[k]/2)/tot, float(v[k])
+        if p <= pos
+            return pos > ppos ? pval + (p - ppos)/(pos - ppos)*(val - pval) : val
+        end
+        acc += w[k]; ppos, pval = pos, val
+    end
+    return pval
+end
+
+# Running weighted quantile / mean over the same centred window the moving average uses, so the
+# trend can be shown against the spread of the samples it was computed from.
+function rolling_wquantile(v::AbstractVector, w::AbstractVector, window::Integer, p::Real)
+    n, half = length(v), window ÷ 2
+    out = similar(v, float(eltype(v)))
+    @inbounds for i in 1:n
+        a, b = max(1, i-half), min(n, i+half)
+        out[i] = wquantile(view(v, a:b), view(w, a:b), p)
+    end
+    return out
+end
+
+function rolling_wmean(v::AbstractVector, w::AbstractVector, window::Integer)
+    n, half = length(v), window ÷ 2
+    out = similar(v, float(eltype(v)))
+    @inbounds for i in 1:n
+        a, b = max(1, i-half), min(n, i+half)
+        sw = sum(view(w, a:b))
+        out[i] = sw > 0 ? sum(view(v, a:b) .* view(w, a:b))/sw : mean(view(v, a:b))
+    end
+    return out
+end
+
 # Fixed, highly-saturated categorical colors for error-bar groups.
 const ERRORBAR_COLORS = [:red, :black, :green, :blue, :orange, :magenta, :brown, :cyan]
 
@@ -214,9 +260,11 @@ function time_vs_field(Dblock::Vector{DataBlock}, field::String; logy=logy, yran
                                 markersize=markersize, strokewidth=strokewidth, strokecolor=strokecolor, line=line, linewidth=linewidth, linestyle=linestyle,
                                 cmap_reverse=cmap_reverse, subsample=subsample, color=color, cmap=cmap, mov_avg_window=mov_avg_window, yconv=yconv, mavg_excl_floor=mavg_excl_floor, mavg_intensity=mavg_intensity, zero_at_tstart=zero_at_tstart,
                                 error_bars=error_bars, error_bar_capwidth=error_bar_capwidth, error_bar_leg=error_bar_leg, error_bar_legpos=error_bar_legpos,
-                                rprof_top=nothing, ylabel=nothing)
+                                rprof_top=nothing, ylabel=nothing, mavg_band=false, band_quantiles=(0.05, 0.15, 0.25),
+                                volume_weighted=false)
 
     @assert 0<=mavg_intensity<=1 "mavg_intensity must be between 0 and 1"
+    @assert all(0 .< band_quantiles .< 0.5) "band_quantiles must lie in (0, 0.5); each q draws the [q, 1-q] band"
     # field to use
     field2use = replace(field, "_lm"=>"", "_tz"=>"", "_um"=>"", "_crust"=>"", "∂"=>"")
     
@@ -287,8 +335,17 @@ function time_vs_field(Dblock::Vector{DataBlock}, field::String; logy=logy, yran
                 ok = .!isnan.(v)
                 vec(sum(ifelse.(ok, v .* w, 0.0), dims=1) ./ sum(ifelse.(ok, w, 0.0), dims=1))
             end
+        # Erupted volume accumulated since the previous sample, used as the weight when
+        # volume_weighted: a magma composition then counts in proportion to how much of it erupted.
+        wvec = if volume_weighted
+                @assert in_time "volume_weighted needs a time.dat field, and erupta to weight it by"
+                er = blck.timedata[1:subsample:end, idxT["erupta"]]
+                diff(vcat(first(er), er))
+            else
+                ones(length(yvec))
+            end
         # Partials if reuested
-        contains(field, "∂")   && (yvec = diff(yvec); xvec = 0.5(xvec[1:end-1].+xvec[2:end]))
+        contains(field, "∂")   && (yvec = diff(yvec); xvec = 0.5(xvec[1:end-1].+xvec[2:end]); wvec = wvec[2:end])
         # Time axis cuts
         (tstart==-1) && (ts    = min(first(xvec), ts); idxt1 = findfirst(xvec .>= ts))
         (tend==-1)   && (te    = max(last(xvec), te) ; idxt2 = findlast(xvec .<= te))
@@ -314,12 +371,26 @@ function time_vs_field(Dblock::Vector{DataBlock}, field::String; logy=logy, yran
         scatter && scatter!(ax, xvec, yvec, color=clrs[cmap_reverse ? lb-b+1 : b], markersize=markersize, marker=marker, alpha = mov_avg ? mavg_contrast : 1.0)
         line && lines!(ax, xvec, yvec, color=clrs[cmap_reverse ? lb-b+1 : b], linewidth=linewidth, linestyle=linestyle, alpha = mov_avg ? mavg_contrast : 1.0)
         if mov_avg
-            if mavg_excl_floor && any(floor_mask)
-                valid = .!floor_mask
-                lines!(ax, xvec[valid], EasyFit.movavg(yvec[valid], mov_avg_window).x, color=clrs[cmap_reverse ? lb-b+1 : b], linewidth=linewidth, linestyle=:solid)
-            else
-                lines!(ax, xvec, EasyFit.movavg(yvec, mov_avg_window).x, color=clrs[cmap_reverse ? lb-b+1 : b], linewidth=linewidth, linestyle=:solid)
+            xv, yv, wv = if mavg_excl_floor && any(floor_mask)
+                    valid = .!floor_mask
+                    xvec[valid], yvec[valid], wvec[valid]
+                else
+                    xvec, yvec, wvec
+                end
+            clr = clrs[cmap_reverse ? lb-b+1 : b]
+            # Spread of the samples the trend was averaged over. Bands are nested and drawn
+            # outermost first, so their alphas accumulate inward and the plot fades progressively
+            # away from the trend. Drawn before the trend line and before the error bars, so the
+            # observational constraints are never sitting underneath them.
+            if mavg_band
+                for q in sort(collect(band_quantiles))
+                    lo = rolling_wquantile(yv, wv, mov_avg_window, q)
+                    hi = rolling_wquantile(yv, wv, mov_avg_window, 1-q)
+                    band!(ax, xv, lo, hi, color=(clr, mavg_contrast))
+                end
             end
+            trend = volume_weighted ? rolling_wmean(yv, wv, mov_avg_window) : EasyFit.movavg(yv, mov_avg_window).x
+            lines!(ax, xv, trend, color=clr, linewidth=linewidth, linestyle=:solid)
         end
         # Ensure label
         scatter!(ax, xvec[1], yvec[1], color=clrs[cmap_reverse ? lb-b+1 : b], markersize=markersize, marker=marker, label=blck.metadata.name)

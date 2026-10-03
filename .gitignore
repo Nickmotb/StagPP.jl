@@ -3,5 +3,8 @@
 *.png
 StagfO2.dat
 StagH2O.dat
+StagMetal.dat
 /+*
 temp.jl
+/workstation
+scripts/TOex/md_figs/scripts

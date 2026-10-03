@@ -1,0 +1,69 @@
+[ Info: Revise successfully loaded
+┌ Warning: 10 non-finite fO2 node(s) in the transition zone maps at R = [0.4]
+└ @ Main ~/Desktop/StagPP.jl/scripts/sH2O/sfO2.jl:154
+Using libMAGEMin.dylib from MAGEMin_jll
+NAM fits + DHMS setup: 3.4 s (phase H: ΔfH -1721.19 kJ, S 71.57 J/K, V0 3.2293 J/bar, K' 8.04)
+sH2O UM   block 1 ume: 10000 points in 25.6 s, 0 not converged
+sH2O UM   block 2 mbe: 10000 points in 26.0 s, 0 not converged
+sH2O UM   block 3 ume: 10000 points in 24.0 s, 0 not converged
+sH2O UM   hand-over: 5800 sb24 + DHMS points above 5.00 GPa
+sH2O TZ+LM: 60000 points in 115.0 s, 0 not converged
+sH2O TZ   basalt: 1700 mbe points below 10.00 GPa
+fO2: 200000 / 10800000 points, 194 s
+fO2: 400000 / 10800000 points, 408 s
+fO2: 600000 / 10800000 points, 663 s
+fO2: 800000 / 10800000 points, 912 s
+fO2: 1000000 / 10800000 points, 1111 s
+fO2: 1200000 / 10800000 points, 1274 s
+fO2: 1400000 / 10800000 points, 1457 s
+fO2: 1600000 / 10800000 points, 1617 s
+fO2: 1800000 / 10800000 points, 1804 s
+fO2: 2000000 / 10800000 points, 1978 s
+fO2: 2200000 / 10800000 points, 2174 s
+fO2: 2400000 / 10800000 points, 2367 s
+fO2: 2600000 / 10800000 points, 2574 s
+fO2: 2800000 / 10800000 points, 2796 s
+fO2: 3000000 / 10800000 points, 3016 s
+fO2: 3200000 / 10800000 points, 3269 s
+fO2: 3400000 / 10800000 points, 3481 s
+fO2: 3600000 / 10800000 points, 3723 s
+fO2: 3800000 / 10800000 points, 3959 s
+fO2: 4000000 / 10800000 points, 4239 s
+fO2: 4200000 / 10800000 points, 4596 s
+fO2: 4400000 / 10800000 points, 4957 s
+fO2: 4600000 / 10800000 points, 5235 s
+fO2: 4800000 / 10800000 points, 5476 s
+fO2: 5000000 / 10800000 points, 5764 s
+fO2: 5200000 / 10800000 points, 5999 s
+fO2: 5400000 / 10800000 points, 6285 s
+fO2: 5600000 / 10800000 points, 6528 s
+fO2: 5800000 / 10800000 points, 6846 s
+fO2: 6000000 / 10800000 points, 7104 s
+fO2: 6200000 / 10800000 points, 7490 s
+fO2: 6400000 / 10800000 points, 7803 s
+fO2: 6600000 / 10800000 points, 8192 s
+fO2: 6800000 / 10800000 points, 8579 s
+fO2: 7000000 / 10800000 points, 8939 s
+fO2: 7200000 / 10800000 points, 9308 s
+fO2: 7400000 / 10800000 points, 9495 s
+fO2: 7600000 / 10800000 points, 9722 s
+fO2: 7800000 / 10800000 points, 9896 s
+fO2: 8000000 / 10800000 points, 10095 s
+fO2: 8200000 / 10800000 points, 10323 s
+fO2: 8400000 / 10800000 points, 10546 s
+fO2: 8600000 / 10800000 points, 10776 s
+fO2: 8800000 / 10800000 points, 10979 s
+fO2: 9000000 / 10800000 points, 11220 s
+fO2: 9200000 / 10800000 points, 11405 s
+fO2: 9400000 / 10800000 points, 11625 s
+fO2: 9600000 / 10800000 points, 11824 s
+fO2: 9800000 / 10800000 points, 12049 s
+fO2: 10000000 / 10800000 points, 12257 s
+fO2: 10200000 / 10800000 points, 12472 s
+fO2: 10400000 / 10800000 points, 12678 s
+fO2: 10600000 / 10800000 points, 12875 s
+fO2: 10800000 / 10800000 points, 13079 s
+Repaired 180932 non-monotonic fO2 column(s) along R (isotonic).
+Step table: 704 s
+Density tables: 10 s
+~/.juliaup/bin/julia -t 16 --project=$HOME/Desktop/StagPP.jl sfO2.jl  177216.02s user 13499.76s system 1354% cpu 3:54:38.02 total

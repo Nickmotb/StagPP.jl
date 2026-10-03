@@ -641,6 +641,9 @@
 # ==============================================================
 # ===== Silicate melt density (Jing and Karato 2011, 2012) =====
 # ==============================================================
+#  Audited 2026-09-10 against sources: TOex_math.txt PART 15 has the equations, the numbers and
+#  what was wrong. The hard-sphere law is kept as calibrated; the anhydrous SOLID below now comes
+#  from MAGEMin's rho with the full sb24 oxide list, and the tables are written basalt-first.
     function ev_P(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀, X)
         σᵢ      = @. σᵢ₀ * (T/Tᵣ)^(ηᵢ) * exp( ξᵢ/3 * α₀ * (T - Tᵣ) ) * (V/V₀)^(ξᵢ/3) # cm (Hard-sphere diameter)
         Vₘᵢ     = Nₐ * π / 6 * σᵢ.^3 .* X    # cm³ (Component monatomic volume)
@@ -657,10 +660,11 @@
     end
     ev_∂P∂V(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀, X) = ForwardDiff.derivative(V -> ev_P(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀, X), V)
 
-    # Xin   = 1e-2SA[49.40, 1.43, 9.03, 8.50, 10.86, 0.0]
+    # α₀ is the law's OWN 1-bar expansivity parameter: 2.5e-4 gives α(1 bar) = 9.2e-5/K against Lange &
+    #  Carmichael's 10.2e-5/K for a peridotitic melt; handing it the solid's α (~3e-5) turns α NEGATIVE.
     function Jing_Karato_silicate_melt_density(P, T, Xin, Xoxin; reg=1, niter=50, α₀ = 2.5e-4, verbose=false)
 
-        # Force Xox list
+        # Force Xox list (Na2O, K2O, TiO2 have no hard-sphere parameters here and are renormalised away)
         Xox = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "H2O"]
         X   = zeros(length(Xox))
         MM  = get_Xoxmm(Xox)
@@ -675,7 +679,7 @@
 
         # Regression parameters [SiO2, Al2O3, FeO, MgO, CaO, H2O]
         if reg==1
-            σᵢ₀ = 1e-7SA[0.369, 0.326, 0.286, 0.272, 0.315, 0.172] # cm (Reference hard-sphere diameters)
+            σᵢ₀ = 1e-7SA[0.369, 0.326, 0.286, 0.272, 0.315, 0.172] # cm (Reference hard-sphere diameters)
             ηᵢ  = SA[-0.04, -0.03,  0.01,  0.03, -0.07,  0.06]
             ξᵢ  = SA[ 0.70,  0.58,  0.17,  0.12,  0.09, -0.35]
         elseif reg==2
@@ -684,26 +688,55 @@
             ξᵢ  = SA[ 0.69,  0.58,  0.15,  0.14,  0.07,   0.0]
         end
 
-        for it in 1:niter
-            # Compute P
-            P_calc = ev_P(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀, X) # Pa
-            ρ      = mma/V                                  # g/cm³ (Density)
-            # Status
-            verbose && (@printf "Iteration %d: V = %.4f cm³/mol, ρ = %.4f g/cm³, P_calc = %.4f GPa, P_target = %.4f GPa\n" it V ρ P_calc P)
-            # Newton-Rhapson step
-            dP = P_calc - P
-            (abs(dP) < 1e-3) && (return ρ)
-            ∂P∂V = ev_∂P∂V(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀, X)
-            V -= dP/∂P∂V
+        # P(V) falls monotonically with V and diverges at the packing wall, so a root always exists:
+        #  bracket it walking down from 1.5 V₀ in 1 % steps, bisect, then polish with Newton. A bare
+        #  Newton from V = 10 cm³/mol failed at cold, water-rich, high-P corners (50 GPa, 500 K, 8 wt%).
+        Pf(V) = ev_P(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀, X)
+        hi = 1.5V₀; lo = hi; plast = -Inf
+        while true
+            lo = 0.99lo
+            p  = Pf(lo)
+            (isfinite(p) && p >= P) && break
+            # P(V) has a tension minimum above the 1-bar volume; only once positive must it keep rising
+            (!isfinite(p) || (plast > 0 && p < plast) || lo < 1e-2V₀) && error("Jing_Karato_silicate_melt_density: no bracket at P=$P GPa, T=$T K")
+            plast = p
         end
+        hi = lo/0.99
+        for _ in 1:80
+            m = 0.5(lo+hi); (Pf(m) > P) ? (lo = m) : (hi = m)
+            (hi - lo) < 1e-9hi && break
+        end
+        V = 0.5(lo+hi)
+        for it in 1:niter
+            dP = Pf(V) - P
+            verbose && (@printf "Iteration %d: V = %.4f cm³/mol, ρ = %.4f g/cm³, P_calc = %.4f GPa, P_target = %.4f GPa\n" it V mma/V P+dP P)
+            (abs(dP) < 1e-4) && break
+            Vn = V - dP/ev_∂P∂V(σᵢ₀, T, Tᵣ, ηᵢ, ξᵢ, α₀, V, V₀, X)
+            (isfinite(Vn) && lo < Vn < hi) || break   # keep the bracketed bisection answer
+            V = Vn
+        end
+        return mma/V
     end
+
+    # Inverse 3rd-order Birch-Murnaghan: the V at which P(V) = P, by bisection.
+    function bm3_volume(P, V₀, K₀, K′; P₀=0.0)
+        f(V) = 1.5K₀*((V₀/V)^(7/3) - (V₀/V)^(5/3))*(1 + 0.75(K′-4)*((V₀/V)^(2/3) - 1)) - (P - P₀)
+        lo, hi = 0.05V₀, 1.5V₀
+        for _ in 1:200; m = 0.5(lo+hi); (f(m)*f(lo) < 0) ? (hi = m) : (lo = m); end
+        return 0.5(lo+hi)
+    end
+    # Partial molar volume of H₂O in the melt for melt_H2O_model=:ideal (math 15.4): the FPMD compression of
+    #  Karki, Ghosh & Karato (2021; V₀ 25.0 cm³/mol, K₀ 1.91 GPa, K′ 5.80 at 2000 K) scaled to the law's own
+    #  1-bar value V₁, so the two melt laws agree where the hard-sphere fit is calibrated and part above it.
+    melt_H2O_partial_volume(P, V₁) = V₁*bm3_volume(P, 25.0, 1.91, 5.80)/25.0
 
 # ======================================================
 # ===== Solid H₂O density correction (Gerya, 2004) =====
 # ======================================================
+    xlogx(x) = x > 0 ? x*log(x) : zero(x)   # 0·log 0 = 0, so Xliq = 1 is a finite point of Gₛ
     function Gₛ(P, T, Xliq)
-        # Gₛ Parameters
-            H298             = -286831.56               # J
+        # Gₛ Parameters (Gerya, Podlesskii, Perchuk & Maresch 2004, H₂O fluid; P in bar, T in K)
+            H298             = -286831.56               # J
             S298             = 65.188                   # J K⁻¹
             Vₛ               = 1.71382                  # J bar⁻¹
             ϕ                = 6209                     # bar
@@ -732,41 +765,50 @@
         # Gibbs free energy (J/mol)
             G   = H298 - T*S298 + Vₛ*Ψ + R*T*(c₁*log(1-e₁)+c₂*log(1-e₂)) -
                     (c₁ + c₂)*(ΔHₛ₁*(1-T/T₀)*e₀/(1-e₀) + R*T*log(1-e₀)) +
-                    R*T*((1-Xliq)*log(1-Xliq)+Xliq*log(Xliq)) +
+                    R*T*(xlogx(1-Xliq)+xlogx(Xliq)) +
                     (1-Xliq)*R*T*log(ϕ*(Xliq^2)+P) -
                     (1-Xliq)*(ΔH⁰ₒᵣ - T*ΔS⁰ₒᵣ + ΔCₚ⁰ₒᵣ*(T - T₀ - T*log(T/T₀))) +
                     (Wh₁ - T*Ws₁ + Wcp₁*(T - T₀ - T*log(T/T₀)))*Xliq*(1-Xliq)
             return G
     end
 
-    function Gₛ_minXliq(P,T)
-        Xliq = LinRange(1e-5, 0.999, 200)
-        v = Gₛ.(P, T, Xliq)
-        return Xliq[argmin(v)]
-    end
-
     ∂Gₛ∂P(P,T,Xliq)     = ForwardDiff.derivative(P -> Gₛ(P, T, Xliq), P)
     ∂Gₛ∂Xliq(P,T,Xliq)  = ForwardDiff.derivative(Xliq -> Gₛ(P, T, Xliq), Xliq)
 
-    # Xin   = 1e-2SA[49.40, 1.43, 9.03, 8.50, 10.86, 0.0, 6.0]
-    # Xox     = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "O", "H2O"]
+    # Ordering parameter that minimises Gₛ: coarse scan, then bisection on ∂G/∂Xliq.
+    function Gₛ_minXliq(P, T)
+        xs = LinRange(1e-4, 1-1e-4, 200); i = argmin(Gₛ.(P, T, xs))
+        lo, hi = xs[max(i-1,1)], xs[min(i+1,length(xs))]
+        for _ in 1:50; m = 0.5(lo+hi); (∂Gₛ∂Xliq(P, T, m) > 0) ? (hi = m) : (lo = m); end
+        return 0.5(lo+hi)
+    end
 
-    function Gerya_solid_H2O_density_correction_interpolator(Xin,Xox; nP=100, nT=100, out=nothing, verbose=false)
+    # Molar volume of H₂O, cm³/mol, from V = ∂G/∂P. :condensed is the liquid-like branch (Xliq = 1) used for
+    #  water BOUND in minerals - it cannot boil off at low P; :equilibrium minimises G and reproduces Zhang &
+    #  Duan (2009) to 0.6 % mean over 0.2-10 GPa (math 15.3), but that is the volume of a FREE fluid.
+    function Gerya_H2O_volume(P_GPa, T; branch=:condensed)
+        Pbar = 1e4P_GPa
+        Xl   = branch == :condensed ? 1.0 : Gₛ_minXliq(Pbar, T)
+        return 10∂Gₛ∂P(Pbar, T, Xl)   # 10 J bar⁻¹ mol⁻¹ = cm³ mol⁻¹
+    end
 
-        # I believe what he is doing is:
-        # 1. Compute the anhydrous volume of the solid through MAGEMin
-        # 2. Compute the Gibbs field of water using the provided equation (30, with parameters on table 2)
-        # 3. Compute the molar volume of water as a Gibbs field derivative -> V_H2O = ∂G/∂P
-        # 4. Recompute the solid molar volume by renormalizing -> V_corr = XH₂O*V_H₂O + (1-XH₂O)*V_anhydrous
-        # 5. Retrieve corrected density -> ρ_corr = mma/V_corr
+    # Xin   = mole fractions on Xox, LAST entry H2O (0 for the anhydrous solid)
+    # Xox   = ["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "O", "H2O"]
+    function Gerya_solid_H2O_density_correction_interpolator(Xin,Xox; nP=100, nT=100, out=nothing, verbose=false,
+                                                             Prange=(0.1, 75.), Trange=(500., 3000.), H2O_branch=:condensed)
+        # 1. Anhydrous DENSITY of the solid from MAGEMin sb24 (out.rho - out.V is on another mole basis).
+        # 2. Molar volume of H₂O from the Gibbs energy of Gerya et al. (2004): V_H2O = ∂G/∂P.
+        # 3. Hydrated volume by ideal mixing, V = (1-x)·M_anh/ρ_anh + x·V_H2O  (math 15.2).
             @assert Xox[end]=="H2O" "Last oxide entry must be H2O"
+            @assert ("Na2O" in Xox) && ("Cr2O3" in Xox) "sb24 needs Na2O and Cr2O3 in the list (absent, MAGEMin returns 99% akimotoite at 5.2 g/cm³)"
             X = sum(Xin)>1.0 ? 1e-2Xin : Xin
             X = X./sum(X)
-            noWX    = @view X[1:end-1]
+            noWX    = X[1:end-1]
+            @assert noWX[findfirst(Xox.=="Na2O")] > 0 && noWX[findfirst(Xox.=="Cr2O3")] > 0 "sb24 needs Na2O and Cr2O3 > 0 (a trace is enough)"
         # Vectors
             nPnT    = nP*nT
-            P       = LinRange(0.1, 75., nP)
-            T       = LinRange(1000, 3000, nT)
+            P       = LinRange(Prange[1], Prange[2], nP)
+            T       = LinRange(Trange[1], Trange[2], nT)
         # Vectorize arguments
             Xv = Vector{Vector{Float64}}(undef, nPnT)
             for i in 1:nPnT
@@ -774,31 +816,33 @@
             end
             vP, vT = repeat(P, outer=nT), repeat(T, inner=nP)
         # Map
-            Vh2o, Vanh, α = zeros(nP, nT), zeros(nPnT), zeros(nPnT)
-        # Compute H₂O molar volume
+            Vh2o, ρanh, α = zeros(nP, nT), zeros(nPnT), zeros(nPnT)
+        # Compute H₂O molar volume
             for (ip, p) in enumerate(P)
                 for (it, t) in enumerate(T)
-                    Xliq = 1.0#Gₛ_minXliq(p,t)
-                    Vh2o[ip, it] = 10∂Gₛ∂P(1e4p, t, Xliq) # 10 J bar⁻¹ mol⁻¹ = cm³ mol⁻¹
+                    Vh2o[ip, it] = Gerya_H2O_volume(p, t; branch=H2O_branch)
                 end 
             end
-        # Retrieve anhydrous solid Volume
+        # Retrieve anhydrous solid density
             if isnothing(out)
                 data   = Initialize_MAGEMin("sb24", verbose=false);
-                out    = multi_point_minimization(10vP, vT.-273.15, data, X=Xv, Xoxides=Xox[1:end-1], name_solvus=true, progressbar=verbose) # kbar and K
+                out    = multi_point_minimization(10vP, vT.-273.15, data, X=Xv, Xoxides=Xox[1:end-1], sys_in="mol", name_solvus=true, progressbar=verbose) # kbar and K
                 Finalize_MAGEMin(data)
             end
             # Extract information
+            nbad = 0
             for i in 1:nPnT
-                Vanh[i] = out[i].V # cm³/mol
-                α[i]    = out[i].alpha[1] # 1/K
+                ρanh[i] = out[i].rho/1e3    # g/cm³
+                α[i]    = out[i].alpha[1]   # 1/K
+                (ρanh[i] < 2.4 || ρanh[i] > 6.0) && (nbad += 1)
             end
+            nbad > 0 && @warn "Gerya_solid_H2O_density_correction_interpolator: $nbad of $nPnT MAGEMin points have rho outside 2.4-6.0 g/cm³ - check the oxide list"
         # Reshape
-            Vanh = reshape(Vanh, nP, nT)
+            ρanh = reshape(ρanh, nP, nT)
             α = reshape(α, nP, nT)
 
-        # Construct bulk anhydrous V | H₂O V interpolator opbject
-            VVρ = [ Interpolations.extrapolate(Interpolations.interpolate((P,T),Vanh,Gridded(Linear())), Flat()), 
+        # Construct anhydrous ρ | H₂O V | α interpolator objects
+            VVρ = [ Interpolations.extrapolate(Interpolations.interpolate((P,T),ρanh,Gridded(Linear())), Flat()), 
                     Interpolations.extrapolate(Interpolations.interpolate((P,T),Vh2o,Gridded(Linear())), Flat()), 
                     Interpolations.extrapolate(Interpolations.interpolate((P,T),α,Gridded(Linear())), Flat())]
             return VVρ
@@ -808,131 +852,100 @@
     function Gerya_solid_H2O_density_correction(P::Float64,T::Float64,Xin::Vector{Float64},Xox::Vector{String}; nP=50, nT=30, VVρ=nothing, MM=nothing, verbose=false)
         # Construct interpolator if not passed in
             isnothing(VVρ) && (VVρ = Gerya_solid_H2O_density_correction_interpolator(Xin,Xox; nP=nP, nT=nT, verbose=verbose))
-            Vanh = VVρ[1]; Vh2o = VVρ[2];
-        # Recompute molar density
+            isnothing(MM)  && (MM = get_Xoxmm(Xox))
+            ρA = VVρ[1](P,T)     # g/cm³, anhydrous solid
+            VH = VVρ[2](P,T)     # cm³/mol, H₂O
+        # Mole fractions with and without water
             X       = sum(Xin)>1.0 ? 1e-2Xin : Xin
             XH      = X./sum(X)
             XA      = @views X[1:end-1]./sum(X[1:end-1])
-            VA      = Vanh(P,T)
-            VH      = Vh2o(P,T)
+            massA   = sum(XA.*(@view MM[1:end-1]))
+            massH   = sum(XH.*MM)
+        # Ideal mixing of the anhydrous molar volume and the H₂O molar volume
+            VA      = massA/ρA
             rV      = (1-XH[end])*VA + XH[end]*VH
-        # Retrieve density correction
-            massA, massH    = 0.0, 0.0
-            MMA     = @view MM[1:end-1]
-            if isnothing(MM)
-                for i in eachindex(Xox)
-                    i<length(Xox) && (massA += XA[i]*getfield(mm, Symbol(Xox[i])))
-                    massH += XH[i]*getfield(mm, Symbol(Xox[i]))
-                end
-            else
-                massA = sum(XA.*MMA)
-                massH = sum(XH.*MM)
-            end
-        # Absolute ρ
-            ρH       = massH/rV
-            ρA       = massA/VA
         # ρ decrease in %
-            return Δρ       = 1e2(1 - ρH/ρA)
+            return 1e2(1 - (massH/rV)/ρA)
     end
 
 # =============================
 # ===== Table constructor =====
 # =============================
-    # Xin   = 1e-2SA[49.40, 1.43, 9.03, 8.50, 10.86, 0.0, 0.0]
-    # Xox = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "O", "H2O"]
-    function PT_H2O_ρ(Pi,Pf,Ti,Tf,Xin,Xox; nH=50, nP=50, nT=50, default=false, verbose=true)
+    # Xin   = mole fractions on Xox, last entry H2O = 0;  Xox = [..., "H2O"]
+    # Returns SΔρ, MΔρ [nP × nT × nH × slot] as % density DECREASE relative to dry, P (GPa), T (K), Hwt (wt% H₂O).
+    #  slot 1 = basalt, slot 2 = harzburgite (default=true) - the order thermochem_int weights by (basalt, harz).
+    #  Hwt is UNIFORM in wt%: StagYY rebuilds the axis from (min, max, n) alone.
+    #  melt_H2O_model = :JK (hard-sphere H₂O sphere, floored at 0 when melt_floor) | :ideal (math 15.4).
+    function PT_H2O_ρ(Pi,Pf,Ti,Tf,Xin,Xox; nH=50, nP=50, nT=50, default=false, verbose=true,
+                      Hmin_wt=0.0, Hmax_wt=8.0, melt_H2O_model=:JK, melt_floor=true, reg=1, H2O_branch=:condensed)
 
-        # Default --> computes with predefined compositions (MORB + HARZ)
+        # Default --> the sf_H2O compositions (Stixrude & Lithgow-Bertelloni 2024 basalt | harzburgite), wt%
             if default
-                XoxRaw=["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "H2O"]
-                # XH=[43.43, 45.93, 8.34, 0.9, 1.0, 0.01, 0.3, 10.0] # From stxirtude & Bertelloni 2024
-                # XB=[50.42, 9.77, 7.1, 12.54, 16.8, 2.23, 0.07, 10.0] # From stxirtude & Bertelloni 2024
-                Xox = ["SiO2", "Al2O3", "FeO", "MgO", "CaO", "O", "H2O"]
-                # Xin  = 1e-2.*filter_ox_list(XB, XoxRaw, Xox)
-                # XinH = 1e-2.*filter_ox_list(XH, XoxRaw, Xox) # Harz
-                XH=filter_ox_list([36.8, 3.4, 16.0, 30.0, 13.8, 0.0, 0.0], Xox, Xox, wt_in=true, wt_out=false) # Jing and karato 2012
-                XB=copy(XH)
-                Xin  = 1e-2.*XB
-                XinH = 1e-2.*XH # Harz
+                Xox  = ["SiO2", "MgO", "FeO", "CaO", "Al2O3", "Na2O", "Cr2O3", "O", "H2O"]
+                XB   = [50.42, 9.77, 7.1, 12.54, 16.8, 2.23, 0.07, 0.0, 0.0]   # basalt
+                XH   = [43.43, 45.93, 8.34, 0.9, 1.0, 0.01, 0.3, 0.0, 0.0]     # harzburgite
+                Xin  = filter_ox_list(XB, Xox, Xox, wt_in=true, wt_out=false)  # mole fractions
+                XinH = filter_ox_list(XH, Xox, Xox, wt_in=true, wt_out=false)
             else
                 # Start Anhydrous
                 @assert Xox[end]=="H2O" "Last oxide entry must be H2O"
-                @assert Xin[end]==0.0 "Last oxide entry must be 0.0 (wt% H₂O)"
+                @assert Xin[end]==0.0 "Last oxide entry must be 0.0 (H₂O)"
             end
+            melt_H2O_model in (:JK, :ideal) || error("PT_H2O_ρ: melt_H2O_model must be :JK or :ideal")
         # Grid
-            P  = LinRange(Pi, Pf, nP)
-            T  = LinRange(Ti, Tf, nT)
-        # Water vector
-            H   = LinRange(1e-4, 0.25, nH)
-        # Result matrix
-            SΔρ = default ? zeros(nP, nT, nH, 2) : zeros(nP, nT, nH);
-            MΔρ = default ? zeros(nP, nT, nH, 2) : zeros(nP, nT, nH);
-            anhM = default ? zeros(nP, nT, 2) : zeros(nP, nT)
+            P   = LinRange(Pi, Pf, nP)
+            T   = LinRange(Ti, Tf, nT)
+            Hwt = collect(LinRange(Hmin_wt, Hmax_wt, nH))
+        # Result matrices
+            comps = default ? (Xin, XinH) : (Xin,)
+            nslot = length(comps)
+            SΔρ  = zeros(nP, nT, nH, nslot)
+            MΔρ  = zeros(nP, nT, nH, nslot)
+            anhM = zeros(nP, nT, nslot)
         # Ordered MM vector
             MM = get_Xoxmm(Xox)
-        # wt% H₂O vector
-            Hwt = zeros(nH)
-        # VVρ pre-computation
-            VVρ = Gerya_solid_H2O_density_correction_interpolator(Xin,Xox; nP=nP, nT=nT, verbose=verbose)
-            α₀ = VVρ[3]
-        # Normalize composition
-            Xl = copy(Xin)
-            Xl = sum(Xl)>1.0 ? 1e-2Xl : Xl
-            Xl = Xl./sum(Xl)
-            X  = copy(Xl)
-            if default
-                VVρH = Gerya_solid_H2O_density_correction_interpolator(XinH,Xox; nP=nP, nT=nT, verbose=verbose)
-                α₀H = VVρH[3]
-                XlH = copy(Xin)
-                XlH = sum(XlH)>1.0 ? 1e-2XlH : XlH
-                XlH = XlH./sum(XlH)
-                XH  = copy(XlH)
-            end
-        # Initiate costructor
-            for iH in 1:nH
-                verbose && (@printf "Currently running iH = %d/%d...\n" iH nH)
-                X   .= Xl;       X[end] = H[iH];     X .= X./sum(X)
-                if default
-                    XH   .= XlH;     XH[end] = H[iH];    XH .= XH./sum(XH)
+        # Initiate constructor
+            for (is, Xc) in enumerate(comps)
+                Xl = sum(Xc)>1.0 ? 1e-2Xc : copy(Xc)
+                Xl = Xl./sum(Xl)
+                MA = sum(Xl.*MM)                         # g per mole of oxides, anhydrous
+                verbose && (@printf "Slot %d: anhydrous solid (MAGEMin sb24) and H₂O volumes...\n" is)
+                VVρ = Gerya_solid_H2O_density_correction_interpolator(Xl, Xox; nP=nP, nT=nT, verbose=verbose,
+                                                                      Prange=(max(Pi,1e-3), Pf), Trange=(Ti, Tf), H2O_branch=H2O_branch)
+                # Anhydrous melt
+                for it in 1:nT, ip in 1:nP
+                    anhM[ip, it, is] = Jing_Karato_silicate_melt_density(P[ip], T[it], Xl, Xox; reg=reg)
                 end
-                Xw  = X.*MM;   Xw .= Xw./sum(Xw)
-                Hwt[iH] = 1e2Xw[end]
-                for ip in 1:nP
-                    for it in 1:nT
-                        if default
-                            # Retrieve thermal expansivity
-                                α = α₀(P[ip], T[it])
-                                αH = α₀H(P[ip], T[it])
-                            # Compute solid H₂O density correction (% decrease)
-                                SΔρ[ip, it, iH, 1] = Gerya_solid_H2O_density_correction(P[ip], T[it], X, Xox; VVρ=VVρ, MM=MM)
-                                SΔρ[ip, it, iH, 2] = Gerya_solid_H2O_density_correction(P[ip], T[it], XH, Xox; VVρ=VVρH, MM=MM)
-                            # Compute Hydrous Melt density (g/cm³)
-                                MΔρ[ip, it, iH, 1] = Jing_Karato_silicate_melt_density(P[ip], T[it], X, Xox; reg=1, niter=50, α₀=α, verbose=false)
-                                MΔρ[ip, it, iH, 2] = Jing_Karato_silicate_melt_density(P[ip], T[it], XH, Xox; reg=1, niter=50, α₀=αH, verbose=false)
-                            # Compute Anhydrous Melt density
-                                (iH==1) && (anhM[ip, it, 1] = Jing_Karato_silicate_melt_density(P[ip], T[it], Xl, Xox; reg=1, niter=50, α₀=α, verbose=false))
-                                (iH==1) && (anhM[ip, it, 2] = Jing_Karato_silicate_melt_density(P[ip], T[it], XlH, Xox; reg=1, niter=50, α₀=αH, verbose=false))
-                        else
-                            # Retrieve thermal expansivity
-                                α = α₀(P[ip], T[it])
-                            # Compute solid H₂O density correction (% decrease)
-                                SΔρ[ip, it, iH] = Gerya_solid_H2O_density_correction(P[ip], T[it], X, Xox; VVρ=VVρ, MM=MM)
-                            # Compute Hydrous Melt density (g/cm³)
-                                MΔρ[ip, it, iH] = Jing_Karato_silicate_melt_density(P[ip], T[it], X, Xox; reg=2, niter=50, α₀=α, verbose=false)
-                            # Compute Anhydrous Melt density
-                                (iH==1) && (anhM[ip, it] = Jing_Karato_silicate_melt_density(P[ip], T[it], Xl, Xox; reg=1, niter=50, α₀=α, verbose=false))
+                for iH in 1:nH
+                    verbose && (@printf "Slot %d: iH = %d/%d...\n" is iH nH)
+                    w  = Hwt[iH]
+                    x  = (w/MM[end])/((w/MM[end]) + (100-w)/MA)   # mole fraction H₂O
+                    X  = (1-x).*Xl;  X[end] = x
+                    MH = (1-x)*MA + x*MM[end]
+                    # 1-bar partial molar volume of H₂O from the law itself, per T (used by :ideal)
+                    V₁ = zeros(nT)
+                    if melt_H2O_model == :ideal && x > 0.0
+                        for it in 1:nT
+                            ρd1 = Jing_Karato_silicate_melt_density(1e-4, T[it], Xl, Xox; reg=reg)
+                            ρh1 = Jing_Karato_silicate_melt_density(1e-4, T[it], X,  Xox; reg=reg)
+                            V₁[it] = (MH/ρh1 - (1-x)*MA/ρd1)/x
                         end
+                    end
+                    x == 0.0 && continue      # dry node: both corrections are exactly zero
+                    for it in 1:nT, ip in 1:nP
+                        # Solid H₂O density correction (% decrease)
+                        SΔρ[ip, it, iH, is] = Gerya_solid_H2O_density_correction(P[ip], T[it], X, Xox; VVρ=VVρ, MM=MM)
+                        # Hydrous melt density
+                        ρd = anhM[ip, it, is]
+                        if melt_H2O_model == :JK
+                            ρh = Jing_Karato_silicate_melt_density(P[ip], T[it], X, Xox; reg=reg)
+                        else
+                            ρh = MH/((1-x)*MA/ρd + x*melt_H2O_partial_volume(P[ip], V₁[it]))
+                        end
+                        d = 1e2*(1 - ρh/ρd)
+                        MΔρ[ip, it, iH, is] = melt_floor ? max(d, 0.0) : d
                     end
                 end
             end
-            # Retrieve silicate melt density decrease (% decrease)
-            for iH in 1:nH
-                if default
-                    @. MΔρ[:,:,iH,1] = 1e2*(1 - MΔρ[:,:,iH,1]/anhM[:,:,1])
-                    @. MΔρ[:,:,iH,2] = 1e2*(1 - MΔρ[:,:,iH,2]/anhM[:,:,2])
-                else
-                    @. MΔρ[:,:,iH] = 1e2*(1 - MΔρ[:,:,iH]/anhM)
-                end
-            end
-            return SΔρ, MΔρ, P, T, Hwt
+            return SΔρ, MΔρ, collect(P), collect(T), Hwt
     end

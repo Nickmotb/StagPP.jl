@@ -67,7 +67,7 @@ struct sfstruct
     mtz      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Transition zone Fe⁰ wt fraction
     mlm      :: Union{Array{Float64,2}, Array{Float64,3}, Array{Float64,4}, Nothing}    # Lower mantle Fe⁰ wt fraction
     # Silicate melt H₂O density correction
-    MΔρ      :: Union{Array{Float64,4}, Nothing}    # Solid H₂O correction as %-decrease ↔ H₂O wt% map (nP × nT × wt%H₂O × endmember)
+    MΔρ      :: Union{Array{Float64,4}, Nothing}    # Melt H₂O correction as %-decrease ↔ H₂O wt% map (nP × nT × wt%H₂O × endmember: 1 basalt, 2 harz)
     # Solid H₂O density correction
     SΔρ      :: Union{Array{Float64,4}, Nothing}    # Solid H₂O correction as %-decrease ↔ H₂O wt% map (nP × nT × wt%H₂O × endmember)
     # Vectors

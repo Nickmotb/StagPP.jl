@@ -1,33 +1,7 @@
-# =============================================================================================
-# TOex.jl — excess oxygen (Oₑₓ) partitioned between solid, melt and C-O-H fluid at fixed P, T.
-#           Entry point `partition_Oₑₓ`. Numbers, benchmarks, open issues: TOex_bench.txt.
-# =============================================================================================
-    # SIX SINKS, ONE SHARED fO2. Each holds more oxygen as fO2 rises, so every demand is monotone.
-    #   solid Fe₂O₃   Fe³⁺ in the residue      MAGEMin sb24 (Stixrude & Lithgow-Bertelloni 2024)
-    #   melt  Fe₂O₃   Fe³⁺ in the melt         Hirschmann (2022) oxybarometer
-    #   melt  CO₂     C dissolved in the melt  EMOG(D), Stagno & Frost (2010)-style
-    #   solid carb.   carbonate, 2 O per C     EMOG(D) from Holland & Powell (1998)
-    #   C-O-H fluid   H₂O/CO₂/CH₄/CO/H₂       HP98 Kᵢ(T) + Zhang & Duan (2009) fugacities
-    #   melt  H₂      molecular H₂ in melt     Hirschmann et al. (2012); OPT-IN, `melt_H2`
-    # METHOD. fO2 is the one unknown, mass balance (Σ demands = 1) the one equation.
-    #   Outer bisection on fO2. Inside it two bracketed Newton (Illinois) solves — carbon activity
-    #   aC and, with melt_H2 on, the fluid/melt hydrogen split — coupled by the φ loop; φ is frozen
-    #   inside them and refreshed once per outer step, so the EOS runs once per step.
-    # fO2 equality is exact BY CONSTRUCTION: an unsaturated sink IS the loading reading that fO2.
-    # Monotone demands ⇒ unique root ⇒ plain bisection. `classify_regime` only labels the answer.
-    # SIGN. Oₑₓ counted against a REDUCED reference (Fe as FeO, C as graphite, H as H₂O).
-    #   Negative share = SOURCE: the fluid when H₂O → CH₄/H₂, the solid below IW when Fe²⁺ → Fe⁰.
-    # UNITS. P GPa (bar internally); T K; TOex/TC/H mass fractions 0-1; shares are fractions of
-    #   TOₑₓ; every fO2 is log₁₀.
-    # LIMITS (evidence in TOex_bench.txt): ~1.9 log unit absolute fO2 offset, largely MAGEMin never
-    #   applying sb24's Landau term (Section 4c); no precipitating Fe³⁺ phase, so an over-large
-    #   budget reports `capacity_exceeded`; melt CO₂ capped at `XCO2max`; carbonate is pure MgCO₃;
-    #   C₂H₆ excluded; ΔFMQ/ΔIW are offsets WITHIN sb24; Zhang & Duan valid 673-2573 K, ≤10 GPa.
-# =============================================================================================
+# TOex.jl — excess oxygen (Oₑₓ) shared between solid, melt and C-O-H fluid at fixed P, T; entry
+# point `partition_Oₑₓ`. Sinks, method, sign and units: TOex_overview.md 5.2, TOex_math.md; numbers: TOex_bench.md.
 
-# ------------------------------------------------------------
-# Section 1 — bulk composition & mass bookkeeping
-# ------------------------------------------------------------
+# ---- Section 1 — bulk composition & mass bookkeeping ----
 
 # Mantle end-members ("H"arzburgitic, "B"asaltic) mixed by fraction p of B.
 function endmember_composition(p::Real)
@@ -62,9 +36,7 @@ function mass_budget(Mt, ϕ, TC, TOex, H, XB, mmXox)
     return (; Mf, Ms, Mc, Mh, TOₑₓ, molfracXB, nB_per_mass, molMf, maxXCO₂_raw, Φ)
 end
 
-# ------------------------------------------------------------
-# Section 2 — solid branch: MAGEMin (Stixrude & Lithgow-Bertelloni 2024)
-# ------------------------------------------------------------
+# ---- Section 2 — solid branch: MAGEMin (Stixrude & Lithgow-Bertelloni 2024) ----
 
 # Isotonic regression by pool-adjacent-violators: the closest non-decreasing sequence in least
 # squares. Used to repair a solid oxybarometer that MAGEMin returns non-monotonic.
@@ -121,10 +93,9 @@ function solid_fO2_interpolant(P, T, X, Xox, Ms, TOₑₓ, s_stoich; nr=25, Rmax
     out  = multi_point_minimization(10P*ones(ntot), k2c(T)*ones(ntot), data, X=Xlist, Xoxides=Xred, name_solvus=true, sys_in="wt", progressbar=false)
     flag && Finalize_MAGEMin(data)
 
-    # THE KNOT VECTOR. Dividing by a SIGNED TOₑₓ reversed it for a reduced cell and the
-    # interpolant threw "knot-vectors must be unique and sorted"; a near-zero TOₑₓ inflated it
-    # until the solve could not converge. In grams neither can happen.
-    grid = sOwt .* Ms          # x-axis in GRAMS of excess oxygen held by the solid
+    # Knot vector in GRAMS of excess oxygen: dividing by a signed or near-zero TOₑₓ reversed the
+    # knots for a reduced cell or inflated them past convergence.
+    grid = sOwt .* Ms
     fO2  = [out[i].fO2 for i in eachindex(out)]
 
     # Native iron off the assemblage — the only honest source: disproportionation moves no oxygen
@@ -187,37 +158,40 @@ function solid_fO2_interpolant(P, T, X, Xox, Ms, TOₑₓ, s_stoich; nr=25, Rmax
            s -> max(0.0, mitp(clamp(s, grid[1], grid[end])))
 end
 
-# ------------------------------------------------------------
-# Section 3 — melt branch: Hirschmann (2022) oxybarometer
-# ------------------------------------------------------------
+# ---- Section 3 — melt branch: Hirschmann (2022) oxybarometer ----
 
 # log₁₀ fO2 of a melt holding a fraction mOₑₓ of the TOₑₓ budget as Fe³⁺.
 function melt_fO2(mOₑₓ, T, TOₑₓ, Mf, molfracXB, nB_per_mass, IDV)
     a=0.1917; b=-1.961; c=4158.1; ΔCₚ=33.25; T₀=1673.15                             # Hirschmann (2022)
     y1=-520.46; y3=494.39; y4=1838.34; y5=2888.48; y8=-1245.09; y9=-1156.86         # regression terms
 
+    cat = (1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 0.0)   # cations per mole of oxide, Xox order
+
     nOxideTotal = Mf*nB_per_mass           # moles of the melt's own unoxidized oxides
     nOₑₓ_added  = mOₑₓ/mm.O                # moles of excess O added to the melt (mOₑₓ in grams)
-    θ           = nOxideTotal + nOₑₓ_added # renormalization after adding that oxygen
+    nFeO        = molfracXB[3]*nOxideTotal # moles of Fe, however it is oxidized
 
-    XO     = nOₑₓ_added/θ
-    XSiO2  = molfracXB[1]*nOxideTotal/θ
-    XMgO   = molfracXB[2]*nOxideTotal/θ
-    XFeO   = molfracXB[3]*nOxideTotal/θ
-    XCaO   = molfracXB[4]*nOxideTotal/θ
-    XAl2O3 = molfracXB[5]*nOxideTotal/θ
-    XNa2O  = molfracXB[6]*nOxideTotal/θ
+    nOxideTotal <= 0 && return oftype(mOₑₓ, 14.0)
+    (2nOₑₓ_added >= nFeO) && return oftype(mOₑₓ, 14.0)  # more O than there is Fe to host as Fe₂O₃
 
-    (XO >= 0.5XFeO) && return oftype(mOₑₓ, 14.0)   # more O than there is Fe to host it as Fe₂O₃
+    # Single-cation basis: N counts cations, so Fe counts once per Fe whether it sits as FeO or
+    # FeO₁.₅ and N does not move as the melt oxidizes. The excess O is NOT in the denominator.
+    N      = nOxideTotal*sum(cat[i]*molfracXB[i] for i in eachindex(molfracXB))
+    XSiO2  =  molfracXB[1]*nOxideTotal/N
+    XMgO   =  molfracXB[2]*nOxideTotal/N
+    XCaO   =  molfracXB[4]*nOxideTotal/N
+    XAlO15 = 2molfracXB[5]*nOxideTotal/N
+    XNaO05 = 2molfracXB[6]*nOxideTotal/N
 
+    ratio = 2nOₑₓ_added/(nFeO - 2nOₑₓ_added)   # 2 FeO + O -> 2 FeO₁.₅, so Fe³⁺/Fe²⁺ = 2nO/(nFeO-2nO)
+
+    # IDV arrives as kJ/mol; the RT ln10 division is done here and nowhere else.
     _T, _ln10 = 1/T, 1/log(10)
-    return (log10(XO/(XFeO - 2XO)) - b - c*_T + (ΔCₚ*_ln10/R)*(1 - T₀*_T - log(T/T₀)) + (IDV/(1e-3R))*_T*_ln10
-              - _T*(y1*XSiO2 + y3*XMgO + y4*XCaO + y5*XNa2O + y8*XSiO2*XAl2O3 + y9*XSiO2*XMgO)) / a
+    return (log10(ratio) - b - c*_T + (ΔCₚ*_ln10/R)*(1 - T₀*_T - log(T/T₀)) + (IDV/(1e-3R))*_T*_ln10
+              - _T*(y1*XSiO2 + y3*XMgO + y4*XCaO + y5*XNaO05 + y8*XSiO2*XAlO15 + y9*XSiO2*XMgO)) / a
 end
 
-# ------------------------------------------------------------
-# Section 4 — melt CO₂ branch: EMOG(D) buffer (Stagno & Frost, 2010-style)
-# ------------------------------------------------------------
+# ---- Section 4 — melt CO₂ branch: EMOG(D) buffer (Stagno & Frost, 2010-style) ----
 
 # log₁₀ fO2 at which graphite/diamond coexists with a melt of the given XCO₂.
 function carbon_buffer_fO2(XCO₂, P, T)
@@ -228,9 +202,7 @@ end
 invert_carbon_buffer_fO2(f, P, T) = 10.0^(f - 5.44 + 21380/T - 0.078*(1e4P - 1)/T)
 
 
-# ------------------------------------------------------------
-# Section 4b — C-O-H fluid: Holland & Powell (1998) Kᵢ(T), Zhang & Duan (2009) fugacities
-# ------------------------------------------------------------
+# ---- Section 4b — C-O-H fluid: Holland & Powell (1998) Kᵢ(T), Zhang & Duan (2009) fugacities ----
 
 # Holland & Powell (1998): G0/H [J/mol] at 298.15 K, S [J/mol/K], Cp = c1 + c2·T + c3·T⁻² + c5·T⁻⁰·⁵.
 # Carbon polymorphs add Murnaghan volume terms (V0, b1, b5, b6=K₀, b7=dK/dT, b8=K′) for their μ°(P).
@@ -311,21 +283,34 @@ function zd_EOS(V, Tm, targetPm)
     return ZD_Rgas*Tm*Z/V - targetPm
 end
 
-function zd_bisect(f, lo, hi; iters=200)
-    flo, fhi = f(lo), f(hi)
-    flo*fhi > 0 && return NaN
-    for _ in 1:iters
-        mid = 0.5*(lo+hi); fm = f(mid)
-        sign(fm)==sign(flo) ? (lo=mid; flo=fm) : (hi=mid)
-    end
-    return 0.5*(lo+hi)
-end
+# Root acceptance is RELATIVE to the residual's own scale Pm (F has units of Pm, ~1e5 here):
+# an absolute 1e-6 test rejected converged roots on round-off alone.
+const ZD_FTOL = 1e-10
 
-# The EOS has several real roots; try brackets widest-first to land on the physical fluid-like one.
-function zd_findroot(f)
-    for (lo,hi) in ((1.0,1000.0), (0.01,10.0), (0.001,1.0))
-        r = zd_bisect(f, lo, hi)
-        (isfinite(r) && abs(f(r)) < 1e-6) && return r
+# The EOS has several real roots; brackets are tried widest-first for the fluid-like one. Inside a bracket:
+# Newton in density d = 1/V with the analytic dP/dd, halving the bracket when a step leaves it (TOex_numerics.md 2.2).
+function zd_findroot(Tm, Pm)
+    T2, T3 = Tm^2, Tm^3; c = ZD_c
+    g1 = c[1] + c[2]/T2 + c[3]/T3; g2 = c[4] + c[5]/T2 + c[6]/T3; g3 = c[7] + c[8]/T2 + c[9]/T3; g4 = c[10] + c[11]/T2 + c[12]/T3; g5 = c[13]/T3
+    function FdF(d)
+        d2 = d*d; e = exp(-c[15]*d2); q = c[14] + c[15]*d2
+        F  = ZD_Rgas*Tm*d*(1 + g1*d + g2*d2 + g3*d2*d2 + g4*d2*d2*d + g5*d2*q*e) - Pm
+        dF = ZD_Rgas*Tm*(1 + 2g1*d + 3g2*d2 + 5g3*d2*d2 + 6g4*d2*d2*d + g5*e*d2*(3q + 2c[15]*d2*(1 - q)))
+        return F, dF
+    end
+    for (lo, hi) in ((1.0,1000.0), (0.01,10.0), (0.001,1.0))
+        dl, dh = 1/hi, 1/lo; Fl = FdF(dl)[1]
+        Fl*FdF(dh)[1] > 0 && continue
+        d = sqrt(dl*dh)
+        for _ in 1:200
+            F, dF = FdF(d)
+            sign(F) == sign(Fl) ? (dl = d; Fl = F) : (dh = d)
+            dn = d - F/dF
+            (isfinite(dn) && dl < dn < dh) || (dn = 0.5*(dl + dh))
+            conv = abs(dn - d) <= 1e-13*dn; d = dn
+            conv && break
+        end
+        abs(zd_EOS(1/d, Tm, Pm)) <= ZD_FTOL*max(abs(Pm), 1.0) && return 1/d
     end
     return NaN
 end
@@ -340,7 +325,7 @@ function zd_volume(vx, Pbar, TK)
     (ε <= 0 || σ <= 0) && return NaN
     Pm = 3.06258806161*σ^3*Pbar/ε   # ε(CH4)/σ(CH4)³ at full precision, not the paper's rounded 3.0636
     Tm = 154.0*TK/ε
-    Vm = zd_findroot(V -> zd_EOS(V, Tm, Pm))
+    Vm = zd_findroot(Tm, Pm)
     isnan(Vm) && return NaN
     return 1000.0*Vm*(σ/3.691)^3
 end
@@ -379,11 +364,7 @@ function zd_fugacity(vx, Pbar, TK)
     return vol*1000.0, fug
 end
 
-# One speciation step at fixed φᵢ and carbon activity aC: a quadratic in XH2.
-# `valid=false` ⇒ the carbon species alone would exceed the fluid; `_solve_aC` fixes that by lowering aC.
-# ------------------------------------------------------------
-# Section 3b — molecular H₂ dissolved in the melt (Hirschmann et al. 2012)
-# ------------------------------------------------------------
+# ---- Section 3b — molecular H₂ dissolved in the melt (Hirschmann et al. 2012) ----
 
 # ln K = ln(X_H2/f_H2) at T₀ = 1400 °C, P₀ = 1 bar. Their T range is too narrow to calibrate ΔH, so
 # it defaults to 0 and lnK carries no explicit T dependence — only the ΔV(P-P₀)/RT term.
@@ -403,24 +384,17 @@ end
 const SY_H2O = (0.807805, -0.700336, 2.949559e-6, -74.546597, 7146.275452,
                 0.449387, -0.360194, -0.308259,   2.984703,  -1.693710)
 
-# ! PARTIAL PRESSURE, NOT FUGACITY — they calibrated on P deliberately, to keep an EOS choice out
-#   of the fit. So this takes PH2O = X_H2O·Pbar and must NOT be handed a ZD09 fugacity.
-# ! THE H₂O HALF IS CALIBRATED ONLY TO 2 GPa. The paper's 6 GPa envelope is its CO₂ half; the H₂O
-#   experiments stop at 2 GPa, and the a₃·P²/T term diverges above it — 142 wt% at 3 GPa, 5e4 wt%
-#   at 6 GPa. So P is CLAMPED to the calibration ceiling, at fixed X_H2O, exactly as ZD09 is.
+# Takes the PARTIAL PRESSURE X_H2O·P as calibrated, never a ZD09 fugacity. The H₂O half is fitted
+# only to 2 GPa and its a₃P²/T term diverges above, so P is clamped there at fixed X_H2O (math S.10).
 const SY_PMAX = 2.0e4    # bar
 
-# ONE melt-water law for the whole model (B.20). The solver calls it with a_H2O from its own
-# speciation; everything else calls it with 1, which is the pure-water saturation the old melt
-# parameterisation represented. `law` selects which; :katz is the legacy 12·P^0.6 + P.
-# ! WITH :sunyao B.16's a_H2O^n EXPONENT IS NOT NEEDED FOR THE MELT. Activity enters through
-#   P_H2O = a_H2O·P, and the law's own exponents (0.808 molecular, 0.449 OH) ARE the species-
-#   resolved activity dependence. B.16's ad-hoc n survives for the SOLID only.
+# The one melt-water law: the solver passes its own a_H2O, everyone else 1 (pure-water saturation).
+# :katz is the legacy 12·P^0.6 + P; with :sunyao activity enters via P_H2O, so `n` survives for the solid only.
 function melt_h2o_wt(P, T, aH2O; law=:sunyao, clamp_P=true, n_katz=1.0)
     a = clamp(aH2O, 0.0, 1.0)
     if law === :katz
         # Katz (2003) with the Rozel (2018) cutoff. No speciation, no T dependence, so the
-        # activity has to be applied as B.16's post-multiply rather than through P_H2O.
+        # activity has to be applied as the a_H2O^n post-multiply rather than through P_H2O.
         S = min(12*P^0.6 + P, 12*10.0^0.6 + 10.0)*a^n_katz
         return (S, 0.0)          # reported wholly as "molecular"; the split is not resolved
     end
@@ -428,7 +402,7 @@ function melt_h2o_wt(P, T, aH2O; law=:sunyao, clamp_P=true, n_katz=1.0)
     return h2o_melt_wt(a*Pbar, Pbar, T, MELT_XNA2O, MELT_XAL2O3; clamp_P=clamp_P)
 end
 
-# The melt is held at a fixed basaltic XB (F.5), so its Na2O and Al2O3 are constants.
+# The melt is held at a fixed basaltic XB, so its Na2O and Al2O3 are constants.
 const MELT_XNA2O, MELT_XAL2O3 = let (; XB, mmXox) = endmember_composition(1.0)
     m = (XB./mmXox)./sum(XB./mmXox); (m[6], m[5])
 end
@@ -460,48 +434,43 @@ function h2_melt_moles(fH2, nOxideTotal, T, Pbar; comp=:basalt, XH2max=0.3, ΔH=
     return X*nOxideTotal/(1 - X)
 end
 
+# One speciation step at fixed φᵢ and carbon activity aC: a quadratic in XH2 (TOex_math.md S.9).
+# `ok=false` ⇒ the carbon species alone overfill the fluid; `_solve_aC` answers by lowering aC.
 function _coh_reaction_step(fO₂, Pbar, K1, K2, K3, K4, φCH4, φH2O, φCO2, φH2, φCO, aC)
-    # Rewrite species fugacity in terms of ideality coefficient, mol fraction and pressure. Isoalte then fractions:
+    # Species fugacity = φ·X·P, so the two carbon species follow from aC and fO₂ alone.
     XCO2 = aC*K1*fO₂/(φCO2*Pbar)
     XCO  = aC*K2*√fO₂/(φCO*Pbar)
-    # molar proportions within the fluid mass sum up to 1. Here we express the available room for H-bearing
-    # species by subtracting XCO2 and XCO from 1.
+    # The H-bearing species share the room left by closure: aq2·XH2² + aq1·XH2 - c_q = 0.
     aq2  = aC*K4*φH2^2*Pbar/φCH4
     aq1  = K3*φH2*√fO₂/φH2O + 1
     c_q  = 1 - XCO2 - XCO
-
-    # XH2O and XCH4 reduce to functions of XH2 alone (the pressure terms cancel), leaving
-    #       aq2·XH2² + aq1·XH2 - c_q = 0
-
-    # Equation descriminant
     disc = aq1^2 + 4aq2*c_q
-    # Return sentinel composition if impossible or no space left for H-bearing species
+    # Sentinel composition when no room is left for hydrogen species.
     if disc < 0 || c_q <= 0
         return false, 0.5, 0.5, 0.0, 0.0, 0.0
     end
-    # Equation real root.
     XH2 = 2c_q/(aq1 + √disc)
-    # Again, return dummy if non-sensical
     (XH2 < 0) && return false, 0.5, 0.5, 0.0, 0.0, 0.0
-    # Retrieve XH2O and XCH4 fractions based off root-found XH2
     XH2O = K3*φH2*√fO₂/φH2O * XH2
     XCH4 = aq2*XH2^2
+    # Every relational test against NaN is false, so the guards above catch Inf but not NaN, and a
+    # downstream max(0, NaN) would launder it into a zero. Finiteness is therefore checked here.
+    (isfinite(XH2O) && isfinite(XCO2) && isfinite(XCH4) && isfinite(XCO) && isfinite(XH2)) ||
+        return false, 0.5, 0.5, 0.0, 0.0, 0.0
     return true, XH2O, XCO2, XCH4, XCO, XH2
 end
 
 # Moles of carbon that melt + fluid together demand at a given carbon activity.
-function _carbon_demand(aC, fO₂, Pbar, K1, K2, K3, K4, φ, molH, nOxideTotal, Bmelt, XCO2max)
+function _carbon_demand(aC, fO₂, Pbar, K1, K2, K3, K4, φ, molH, nOxideTotal, Bmelt, XCO2max;
+                       melt_only=false)
     Xm = softcap(aC*Bmelt, XCO2max)
     nC_melt = Xm*nOxideTotal/(1 - Xm)
+    # Restricted cells have no C-O-H fluid, so the speciation is neither needed nor admissible;
+    # evaluating it there returns Inf and walks aC down two dozen decades for nothing.
+    melt_only && return nC_melt
 
-    # ! THE SPECIATION IS EVALUATED WHETHER OR NOT THERE IS WATER. A `molH <= 0 && return` here was
-    # G.6: _coh_reaction_step TAKES NO HYDROGEN ARGUMENT — validity is a property of
-    # (fO₂, P, T, φ, aC) alone — so returning first made the `Inf` veto, and with it the
-    # decade-by-decade ceiling walk in _solve_aC, fire at molH = 1e-30 and NOT at molH = 0. aC
-    # jumped by up to 5 decades across molH = 0; the hydrogen branch test sat on one side of that
-    # jump and its solve on the other, and the hydrogen balance came out wrong by up to 1.6e3 in
-    # 1.4–10.6 % of wet evaluations. Measured in the Fortran port: worst joint residual
-    # 1.93e+06 -> 1.54e-12 once the shortcut moved below the check.
+    # Speciation is evaluated even without water: validity depends on (fO₂, P, T, φ, aC) only, and
+    # an early return at molH = 0 made the Inf veto fire at 1e-30 but not at 0 (math S.7).
     ok, XH2O, XCO2, XCH4, XCO, XH2 = _coh_reaction_step(fO₂, Pbar, K1, K2, K3, K4, φ[1], φ[2], φ[3], φ[4], φ[5], aC)
     ok || return Inf
     # Only the fluid TERM is skipped without water; it vanishes smoothly as molH -> 0 anyway.
@@ -511,41 +480,53 @@ function _carbon_demand(aC, fO₂, Pbar, K1, K2, K3, K4, φ, molH, nOxideTotal, 
     return nC_melt + nC_fluid
 end
 
-# Carbon activity satisfying carbon mass balance, solved in log₁₀ aC and capped by whichever solid
-# host is stable: pinned at the cap ⇒ that solid is present; below it ⇒ no solid carbon at all.
-# Demand is monotone in aC, so the bracket is safe; `safe_root` gets there in ~8 evaluations where
-# the old fixed 120-step bisection spent all 120 regardless.
+# Carbon activity from carbon mass balance in log₁₀ aC, capped by the stable solid host: pinned at
+# the cap ⇒ that solid is present. Returns (aC, aC_eff), aC_eff the highest VALID activity ≤ aC_cap (S.7).
 function _solve_aC(fO₂, Pbar, K1, K2, K3, K4, φ, molH, nC_total, nOxideTotal, Bmelt, aC_cap, XCO2max;
-                   atol=1e-12, maxiter=100)
-    nC_total <= 0 && return 0.0                        # no carbon at all ⇒ no carbon species
-    d1 = _carbon_demand(aC_cap, fO₂, Pbar, K1, K2, K3, K4, φ, molH, nOxideTotal, Bmelt, XCO2max)
-    (isfinite(d1) && d1 <= nC_total) && return aC_cap   # a solid carbon phase is present
-    # Residual in LOG demand, not demand: at small aC the demand is proportional to aC, so log-log
-    # makes it a straight line and the secant lands on the root in a few steps. On the raw residual
-    # the same bracket is exponential over 300 decades and regula falsi crawls in from the bottom.
-    # A non-finite or zero demand means the speciation failed or died: push the search upward.
+                   atol=1e-12, maxiter=100, melt_only=false)
+    nC_total <= 0 && return (0.0, aC_cap)              # no carbon at all ⇒ no carbon species
+    dem(u) = _carbon_demand(10.0^u, fO₂, Pbar, K1, K2, K3, K4, φ, molH, nOxideTotal, Bmelt, XCO2max;
+                            melt_only=melt_only)
+    # The EMOG cap bounds aC but does not guarantee a fluid exists there, and an invalid endpoint
+    # returns Inf, which cannot be bracketed. Walk the ceiling down by decades until it is finite.
+    hi = log10(aC_cap)
+    d1 = dem(hi)
+    nwalk = 0
+    while !isfinite(d1) && nwalk < 320
+        hi -= 1.0
+        d1 = dem(hi)
+        nwalk += 1
+    end
+    isfinite(d1) || return (0.0, 0.0)                  # no valid speciation at ANY activity
+    aC_eff = 10.0^hi
+    # Enough carbon to meet the demand at the highest VALID activity: sit there and let the caller
+    # precipitate the remainder as a solid phase.
+    d1 <= nC_total && return (aC_eff, aC_eff)
+    # Residual in LOG demand: demand ∝ aC at small aC, so log-log is near-straight and the secant
+    # lands fast; interior failures return a signed sentinel so the bracket survives.
     function g(u)
-        d = _carbon_demand(10.0^u, fO₂, Pbar, K1, K2, K3, K4, φ, molH, nOxideTotal, Bmelt, XCO2max)
+        d = dem(u)
         !isfinite(d) && return 1e3
         d <= 0 && return -1e3
         return log10(d/nC_total)
     end
-    r = safe_root(g, -300.0, log10(aC_cap); atol=atol, maxiter=maxiter)
-    return 10.0^r.x
+    r = safe_root(g, hi - 300.0, hi; atol=atol, maxiter=maxiter)
+    return (10.0^r.x, aC_eff)
 end
 
-# ------------------------------------------------------------
-# Section 4b — hydrogen mass balance between fluid and melt
-# ------------------------------------------------------------
+# ---- Section 4b — hydrogen mass balance between fluid and melt ----
 
-# The melt's hydrogen at one trial fluid loading. `lam` scales BOTH fugacities together, which
-# leaves f_H2O/f_H2 = K3·√fO2 untouched — it is the undersaturated branch, where no fluid exists
-# and the melt alone must hold the whole inventory. lam = 1 is the fluid-saturated case.
+# Melt hydrogen at one trial fluid loading. `lam` scales both fugacities, keeping f_H2O/f_H2 = K3√fO2:
+# the undersaturated (no-fluid) branch. `frozen` = precomputed (aC, speciation), invariant when molH_fl = 0.
 function _melt_H_state(molH_fl, lam, fO₂, Pbar, K1, K2, K3, K4, φ, nC_total, nOxideTotal, Bmelt,
                        aC_cap, XCO2max, T, Mf, molfracXB; h2_comp=:basalt, XH2max=0.3,
-                       melt_H2=false, melt_H2O=false, h2o_law=:sunyao)
-    aC = _solve_aC(fO₂, Pbar, K1, K2, K3, K4, φ, molH_fl, nC_total, nOxideTotal, Bmelt, aC_cap, XCO2max)
-    ok, XH2O, XCO2, XCH4, XCO, XH2 = _coh_reaction_step(fO₂, Pbar, K1, K2, K3, K4, φ[1], φ[2], φ[3], φ[4], φ[5], aC)
+                       melt_H2=false, melt_H2O=false, h2o_law=:sunyao, frozen=nothing)
+    if frozen === nothing
+        aC, _ = _solve_aC(fO₂, Pbar, K1, K2, K3, K4, φ, molH_fl, nC_total, nOxideTotal, Bmelt, aC_cap, XCO2max)
+        ok, XH2O, XCO2, XCH4, XCO, XH2 = _coh_reaction_step(fO₂, Pbar, K1, K2, K3, K4, φ[1], φ[2], φ[3], φ[4], φ[5], aC)
+    else
+        aC, ok, XH2O, XCO2, XCH4, XCO, XH2 = frozen
+    end
     ok || return (nH2 = 0.0, nHw = 0.0, aC = aC, fH2 = 0.0, PH2O = 0.0, ok = false)
     fH2  = lam*XH2 *φ[4]*Pbar
     PH2O = lam*XH2O*Pbar                       # PARTIAL PRESSURE for Sun & Yao, not a fugacity
@@ -554,36 +535,54 @@ function _melt_H_state(molH_fl, lam, fO₂, Pbar, K1, K2, K3, K4, φ, nC_total, 
             aC = aC, fH2 = fH2, PH2O = PH2O, ok = true)
 end
 
-# Split the hydrogen between fluid and melt. Two branches, and which one applies is itself decided
-# by a test, not assumed: if the melt's SATURATED demand already exceeds the whole inventory there
-# is no free fluid, and the fugacities must fall instead.
+# Split the hydrogen between fluid and melt (math S.10). Branch chosen by test: if the melt's saturated
+# demand exceeds the inventory there is no fluid and the fugacities fall (lam < 1) instead.
 function _solve_hydrogen(molH_tot, fO₂, Pbar, K1, K2, K3, K4, φ, nC_total, nOxideTotal, Bmelt,
                          aC_cap, XCO2max, T, Mf, molfracXB; h2_comp=:basalt, XH2max=0.3,
-                         melt_H2=false, melt_H2O=false, h2o_law=:sunyao, atol=1e-12, maxiter=60)
+                         melt_H2=false, melt_H2O=false, h2o_law=:sunyao, atol=1e-12, maxiter=100,
+                         frozen0=nothing)
     molH_tot <= 0 && return (0.0, 1.0)
     (nOxideTotal <= 0 || !(melt_H2 || melt_H2O)) && return (molH_tot, 1.0)
-    function meltH(m, lam)
-        s = _melt_H_state(m, lam, fO₂, Pbar, K1, K2, K3, K4, φ, nC_total, nOxideTotal, Bmelt,
-                          aC_cap, XCO2max, T, Mf, molfracXB;
-                          h2_comp=h2_comp, XH2max=XH2max, melt_H2=melt_H2, melt_H2O=melt_H2O,
-                          h2o_law=h2o_law)
-        return 2*s.nH2 + s.nHw
+    function state(m, lam; frozen=frozen0)
+        return _melt_H_state(m, lam, fO₂, Pbar, K1, K2, K3, K4, φ, nC_total, nOxideTotal, Bmelt,
+                             aC_cap, XCO2max, T, Mf, molfracXB;
+                             h2_comp=h2_comp, XH2max=XH2max, melt_H2=melt_H2, melt_H2O=melt_H2O,
+                             h2o_law=h2o_law, frozen=frozen)
     end
+    s0 = state(0.0, 1.0)
     # UNDERSATURATED: melt H rises with lam (H₂ linearly, H₂O as lam^0.81 and lam^0.45), so the
     # root is unique. No fluid, so the fluid's oxygen term vanishes on its own.
-    meltH(0.0, 1.0) >= molH_tot &&
-        return (0.0, clamp(safe_root(l -> meltH(0.0, l)/molH_tot - 1.0, 1e-12, 1.0;
-                                     atol=atol, maxiter=maxiter).x, 0.0, 1.0))
+    if 2*s0.nH2 + s0.nHw >= molH_tot
+        # log₁₀ lam on a log residual, floor 60 decades down; aC and speciation frozen since molH_fl
+        # is 0 at every trial lam (restricted cells pass the pure-water speciation in frozen0).
+        fz = frozen0 === nothing ?
+             (s0.aC, _coh_reaction_step(fO₂, Pbar, K1, K2, K3, K4, φ[1], φ[2], φ[3], φ[4], φ[5], s0.aC)...) :
+             frozen0
+        function gl(u)
+            s = state(0.0, 10.0^u; frozen=fz)
+            d = 2*s.nH2 + s.nHw
+            !isfinite(d) && return 1e3
+            d <= 0 && return -1e3
+            return log10(d/molH_tot)
+        end
+        r = safe_root(gl, -60.0, 0.0; atol=atol, maxiter=maxiter)
+        return (0.0, clamp(10.0^r.x, 0.0, 1.0))
+    end
     # SATURATED: the melt takes what the fugacities dictate, the fluid keeps the rest.
-    r = safe_root(m -> (m + meltH(m, 1.0))/molH_tot - 1.0, 0.0, molH_tot; atol=atol, maxiter=maxiter)
-    return (r.bracketed ? clamp(r.x, 0.0, molH_tot) : molH_tot, 1.0)
+    r = safe_root(m -> (m + (t = state(m, 1.0); 2*t.nH2 + t.nHw))/molH_tot - 1.0, 0.0, molH_tot;
+                  atol=atol, maxiter=maxiter)
+    # A bracketed iterate is a partition and is kept even unconverged; with no sign change the
+    # melt instead takes its saturated demand at lam = 1 and the fluid keeps only the remainder.
+    r.bracketed && return (clamp(r.x, 0.0, molH_tot), 1.0)
+    return (clamp(molH_tot - (2*s0.nH2 + s0.nHw), 0.0, molH_tot), 1.0)
 end
 
 # Fluid, carbon activity and oxygen draw solved together at one fO2. φ is frozen while aC is
 # bisected, then refreshed from the result, so the EOS runs once per outer iteration, not per trial.
-function coh_state(f, T, P, Mh, Mc, nOxideTotal, TOₑₓ; outer_iters=6, wEMOG=0.25, XCO2max=0.3,
+function coh_state(f, T, P, Mh, Mc, nOxideTotal, TOₑₓ; nit_min=2, nit_max=30, id_tol=1e-8,
+                   wEMOG=0.25, XCO2max=0.5,
                    melt_H2=true, melt_H2O=true, h2_comp=:basalt, XH2max=0.3,
-                   Mf=0.0, molfracXB=nothing, h2o_law=:sunyao)
+                   Mf=0.0, molfracXB=nothing, h2o_law=:sunyao, fluid_Pmax=50.0)
     Pbar  = 1e4*P                  # GPa → bar, matching the 1-bar standard state of the data
     fO₂   = 10.0^f
     K1, K2, K3, K4 = reaction_Ks(T, Pbar)
@@ -596,56 +595,138 @@ function coh_state(f, T, P, Mh, Mc, nOxideTotal, TOₑₓ; outer_iters=6, wEMOG=
     # aC ceiling from the stable solid host: 1 for graphite/diamond, 10^(f_EMOG - f) for carbonate.
     # `_solve_aC` prices demand at this cap — under budget ⇒ solid C takes the rest, over ⇒ aC drops.
     aC_cap = min(1.0, 10.0^(fE - f))
+    # nC_melt divides by (1 - X), so the ceiling has to stay strictly inside (0, 1).
+    XCO2cap = min(max(XCO2max, 1e-6), 0.95)
 
     φ  = ones(7) # Ideal gas as starting point
-    aC = aC_cap
+    aC, aC_use = aC_cap, aC_cap
     molH_fl, nH2_melt, nH_H2O_melt, fH2, PH2O_melt, lam = molH_tot, 0.0, 0.0, 0.0, 0.0, 1.0
     meltH_on = melt_H2 || melt_H2O
     ok, XH2O, XCO2, XCH4, XCO, XH2 = true, 0.5, 0.5, 0.0, 0.0, 0.0
-    for _ in 1:outer_iters
+    vol_fluid = NaN
+    rC, rH, dφ, it = 0.0, 0.0, 0.0, 0
+    nit_min = max(1, nit_min)
+    nit_max = max(nit_min, nit_max)
+    # Nothing to speciate: skip the loop's EOS calls. aC MUST be zeroed explicitly or the melt
+    # dissolves CO₂ out of a carbon budget that does not exist.
+    if nC_total <= 0 && molH_tot <= 0
+        aC, aC_use = 0.0, 0.0
+        XH2O, XCO2, XCH4, XCO, XH2 = 0.0, 0.0, 0.0, 0.0, 0.0
+        nit_max = 0
+    end
+    # Moles of H matching the model's dry threshold in the 1 kg reference cell: below this the cell
+    # holds less hydrogen than anything else in the model treats as wet.
+    MOLH_DRY = 1e-8
+    # Above fluid_Pmax ZD09 is 5x past calibration and AQUA has no fluid, so neither speciation nor
+    # EOS is admissible: the free fluid is declared pure water and the ideality loop skipped (S.9).
+    fl_ok = P <= fluid_Pmax
+    if !fl_ok
+        fill!(φ, 1.0)                                  # ideal; nothing left to be non-ideal about
+        nit_max = 0                                    # skip the ideality loop entirely
+    end
+    # Gated on the cell having something: a dry, carbon-free cell has NO fluid, and calling it
+    # pure water would hand a_H2O = 1 to a phase that is not there.
+    if !fl_ok && (nC_total > 0 || molH_tot > 0)
+        XH2O, XCO2, XCH4, XCO, XH2 = 1.0, 0.0, 0.0, 0.0, 0.0
+        # a_H2O = 1 and fH2 = 0: the frozen pure-water speciation drives the SAME melt-H machinery,
+        # so the undersaturated lam branch still solves exactly as it does anywhere else.
+        frz = (0.0, true, 1.0, 0.0, 0.0, 0.0, 0.0)
+        if meltH_on
+            molH_fl, lam = _solve_hydrogen(molH_tot, fO₂, Pbar, K1, K2, K3, K4, φ, nC_total,
+                                           nOxideTotal, Bmelt, aC_cap, XCO2cap, T, Mf, molfracXB;
+                                           h2_comp=h2_comp, XH2max=XH2max, melt_H2=melt_H2,
+                                           melt_H2O=melt_H2O, h2o_law=h2o_law, frozen0=frz)
+            sR = _melt_H_state(molH_fl, lam, fO₂, Pbar, K1, K2, K3, K4, φ, nC_total, nOxideTotal,
+                               Bmelt, aC_cap, XCO2cap, T, Mf, molfracXB;
+                               h2_comp=h2_comp, XH2max=XH2max, melt_H2=melt_H2,
+                               melt_H2O=melt_H2O, h2o_law=h2o_law, frozen=frz)
+            nH2_melt, nH_H2O_melt, fH2, PH2O_melt = sR.nH2, sR.nHw, sR.fH2, sR.PH2O
+        end
+        # Carbon from the MELT demand alone: with no fluid the fluid term is gone, so nC_fluid is 0
+        # and the remainder precipitates on the same EMOG ramp as ever.
+        aC, aC_use = _solve_aC(fO₂, Pbar, K1, K2, K3, K4, φ, 0.0, nC_total, nOxideTotal, Bmelt,
+                               aC_cap, XCO2cap; melt_only=true)
+    end
+    for outer it in 1:nit_max
         # Hydrogen split first: it moves molH_fl, which the carbon balance then reads. Both are
         # bracketed Newton solves; the outer φ loop couples them without a second nested level.
         meltH_on && ((molH_fl, lam) = _solve_hydrogen(molH_tot, fO₂, Pbar, K1, K2, K3, K4, φ, nC_total,
-                                              nOxideTotal, Bmelt, aC_cap, XCO2max, T, Mf, molfracXB;
+                                              nOxideTotal, Bmelt, aC_cap, XCO2cap, T, Mf, molfracXB;
                                               h2_comp=h2_comp, XH2max=XH2max,
                                               melt_H2=melt_H2, melt_H2O=melt_H2O, h2o_law=h2o_law))
         # Solve for carbon mass balance -> i.e pin-pointing aC
-        aC = _solve_aC(fO₂, Pbar, K1, K2, K3, K4, φ, molH_fl, nC_total, nOxideTotal, Bmelt, aC_cap, XCO2max)
+        aC, aC_use = _solve_aC(fO₂, Pbar, K1, K2, K3, K4, φ, molH_fl, nC_total, nOxideTotal, Bmelt, aC_cap, XCO2cap)
         # Resolve C-O-H fluid given P,T,fO2, aC, and available fluid H
         ok, XH2O, XCO2, XCH4, XCO, XH2 = _coh_reaction_step(fO₂, Pbar, K1, K2, K3, K4, φ[1], φ[2], φ[3], φ[4], φ[5], aC)
         if meltH_on
             s = _melt_H_state(molH_fl, lam, fO₂, Pbar, K1, K2, K3, K4, φ, nC_total, nOxideTotal,
-                              Bmelt, aC_cap, XCO2max, T, Mf, molfracXB;
+                              Bmelt, aC_cap, XCO2cap, T, Mf, molfracXB;
                               h2_comp=h2_comp, XH2max=XH2max, melt_H2=melt_H2, melt_H2O=melt_H2O,
                               h2o_law=h2o_law)
             nH2_melt, nH_H2O_melt, fH2, PH2O_melt = s.nH2, s.nHw, s.fH2, s.PH2O
         end
         vx = zeros(7); vx[1]=XCH4; vx[2]=XH2O; vx[3]=XCO2; vx[4]=XH2; vx[5]=XCO
-        s = sum(vx); (s > 0) && (vx ./= s)
-        # C-O-H species ideality coefficients update
-        _, fug = zd_fugacity(vx, Pbar, T)
-        for i in 1:7
-            newφ = fug[i]/(vx[i]*Pbar)
-            (isfinite(newφ) && newφ > 0) && (φ[i] = newφ)
+        sv = sum(vx); (sv > 0) && (vx ./= sv)
+        # Joint residual on the state just produced. BOTH terms are checked: the loop alternates
+        # carbon and hydrogen, so either can sit at zero while the other is still moving.
+        rC = 0.0
+        if nC_total > 0
+            nHl = 2XH2O + 4XCH4 + 2XH2
+            nfl = (Mh > 0 && nHl > 0) ? molH_fl/nHl : 0.0
+            Xml = softcap(aC*Bmelt, XCO2cap)
+            nCm = Xml*nOxideTotal/(1 - Xml)
+            nCf = nfl*(XCO2 + XCH4 + XCO)
+            nCs = aC >= aC_use*(1 - 1e-9) ? max(0.0, nC_total - nCm - nCf) : 0.0
+            rC  = abs((nCm + nCf + nCs)/nC_total - 1)
         end
+        # Floor the DENOMINATOR, not the input: a 1e-14 hydrogen cell gives a ratio of 1e12 that
+        # means nothing, and flooring the input instead moves melt water into a fluid.
+        rH = (meltH_on && molH_tot > 0) ?
+             abs(molH_fl + 2nH2_melt + nH_H2O_melt - molH_tot)/max(molH_tot, MOLH_DRY) : 0.0
+        # C-O-H species ideality coefficients update
+        vol_fluid, fug = zd_fugacity(vx, Pbar, T)
+        dφ = 0.0
+        for i in 1:7
+            vx[i]*Pbar == 0 && continue
+            newφ = fug[i]/(vx[i]*Pbar)
+            if isfinite(newφ) && newφ > 0
+                φ[i] > 0 && (dφ = max(dφ, abs(newφ - φ[i])/φ[i]))
+                φ[i] = newφ
+            end
+        end
+        # Exit only once the floor is met AND all three have settled — the φ term is what makes the
+        # C and H residuals meaningful, since both were measured at the OLD φ.
+        it >= nit_min && max(rC, rH, dφ) < id_tol && break
+    end
+    it_ideality  = min(it, max(nit_max, 0))
+    res_ideality = max(rC, rH)
+    # An invalid final speciation is not a fluid: write it as WATER — keeps H, no Oₑₓ, no carbon.
+    if !ok
+        XH2O, XCO2, XCH4, XCO, XH2 = 1.0, 0.0, 0.0, 0.0, 0.0
     end
 
     # Extract absolute mols of fluid through molH/(molH/molfl) based off speciation
     nH       = 2XH2O + 4XCH4 + 2XH2
     n_fluid  = (Mh > 0 && nH > 0) ? molH_fl/nH : 0.0
 
+    # Darcy fluid density above Pmax: the PURE-WATER ZD09 root at (P,T). The mixture root is what
+    # fails for CO/CH4/H2 at depth; the water root does not, and vx here is water only.
+    if !fl_ok && n_fluid > 0
+        vw = zeros(7); vw[2] = 1.0
+        vpw, _ = zd_fugacity(vw, Pbar, T)
+        isfinite(vpw) && (vol_fluid = vpw)
+    end
+
     # Extract absolute amount of carbon in the fluid based off speciation
     nC_fluid = n_fluid*(XCO2 + XCH4 + XCO)
 
-    # Extract absolute amount of carbon in the melt as CO2
-    XCO2_melt = softcap(aC*Bmelt, XCO2max)
+    # Extract absolute amount of carbon in the melt as CO2. ONLY if there is a melt: a mole
+    # fraction in a phase that is not there is 0, not what it would be.
+    XCO2_melt = nOxideTotal > 0 ? softcap(aC*Bmelt, XCO2cap) : 0.0
     nC_melt   = XCO2_melt*nOxideTotal/(1 - XCO2_melt)
 
-    # Leftover carbon sits in a solid phase. NO BOOLEAN SATURATION TEST: `aC >= aC_cap*(1-1e-9)`
-    # was a knife-edge on whether a phase exists, inside a residual the outer solve requires to be
-    # continuous, and it punched a hole in that residual wherever the aC solve landed a hair below
-    # its ceiling. max(0, ·) is already the ramp — undersaturated, the aC solve has made
-    # nC_melt + nC_fluid = nC_total, so this is max(0,0); saturated, it is the true remainder.
+    # Leftover carbon sits in a solid phase. max(0,·) is the ramp itself: undersaturated the aC solve
+    # made nC_melt + nC_fluid = nC_total; a boolean saturation test punched holes in the residual.
     nC_solid = nC_total > 0 ? max(0.0, nC_total - nC_melt - nC_fluid) : 0.0
 
     # Which solid host: graphite/diamond below EMOG(D), carbonate above; ramped over `wEMOG`, not switched.
@@ -654,10 +735,8 @@ function coh_state(f, T, P, Mh, Mc, nOxideTotal, TOₑₓ; outer_iters=6, wEMOG=
     nC_gph   = nC_solid - nC_carb              # graphite/diamond: carries no excess oxygen
     carbO    = 2*nC_carb*mm.O
 
-    # Net draw vs the reduced reference (H₂O itself neutral): CO₂/CO consume O (+2/+1), CH₄/H₂
-    # release it (-2/-1). Negative is physical — a reduced fluid donates oxygen back to the rock.
-    # GATED ON THE FLUID EXISTING: with no hydrogen n_fluid is 0, and 0*Inf is NaN, which a
-    # clamp then launders into a plausible finite number and past every validity check.
+    # Net draw vs the reduced reference: CO₂/CO consume O (+2/+1), CH₄/H₂ release it (-2/-1), so a
+    # negative value is physical. Gated on n_fluid > 0: 0*Inf is NaN and a clamp would launder it.
     netO = n_fluid > 0 ? n_fluid*(2XCO2 + XCO - 2XCH4 - XH2)*mm.O : 0.0
     fₑₓ  = isfinite(netO) ? netO : NaN   # propagate, never clamp a non-finite value
 
@@ -666,8 +745,14 @@ function coh_state(f, T, P, Mh, Mc, nOxideTotal, TOₑₓ; outer_iters=6, wEMOG=
     O_up  = n_fluid > 0 ? n_fluid*(2XCO2 + XCO)*mm.O : 0.0   # consumed oxidising C to CO₂/CO
     O_rel = n_fluid > 0 ? n_fluid*(2XCH4 + XH2)*mm.O : 0.0   # released reducing H₂O to CH₄/H₂
 
-    # Melt H₂ is a sixth sink and always a SOURCE: an H₂ is one oxygen short of an H₂O, so -1 O per
-    # H₂ (-0.5 per H, the same rate as CH₄). Its own melt fraction is reported, not stored.
+    # Melt H₂ is always a SOURCE, -1 O per H₂. Clamped to the hydrogen the cell owns: the aC/H
+    # alternation can leave solubility demanding more, and invented H₂ is an invented oxygen source.
+    availH, demH = molH_tot - molH_fl, 2nH2_melt + nH_H2O_melt
+    if demH > 0 && availH >= 0 && demH > availH
+        scH = availH/demH
+        nH2_melt *= scH;  nH_H2O_melt *= scH
+    end
+
     meltH2ex = -nH2_melt*mm.O
     XH2_melt = (melt_H2 && nOxideTotal > 0) ? softcap(h2_melt_K(T, Pbar; comp=h2_comp)*fH2, XH2max) : 0.0
     # Melt H₂O is O_ex NEUTRAL by the reference state, so it never enters the oxygen residual -
@@ -679,12 +764,12 @@ function coh_state(f, T, P, Mh, Mc, nOxideTotal, TOₑₓ; outer_iters=6, wEMOG=
 
     # Thresholded: the logistic ramp's exponential tails would make a bare `> 0` report phantom phases.
     ctol = 1e-6*max(nC_total, eps())
-    return (; aC, aC_cap, fE, graphite = nC_gph > ctol, carbonate = nC_carb > ctol, valid = ok,
+    return (; aC, aC_cap = aC_use, fE, vol_fluid, it_ideality, res_ideality, graphite = nC_gph > ctol, carbonate = nC_carb > ctol, valid = ok,
               XH2O, XCO2, XCH4, XCO, XH2, n_fluid, nC_fluid,
               XCO2_melt, nC_melt, nC_solid, nC_carb, nC_gph, carbO, fₑₓ, O_up, O_rel,
               nH2_melt, molH_fl, molH_tot, fH2, XH2_melt, meltH2ex,
               nH2O_melt, nH_H2O_melt, XH2O_melt, SH2Om, SOH, PH2O_melt, lam,
-              fluid_absent = meltH_on && molH_fl <= 0)
+              fluid_absent = meltH_on && molH_fl <= 0, fluid_restricted = !fl_ok)
 end
 
 # EMOG(D), the graphite/diamond ⇄ carbonate boundary: 2 MgCO₃ + Mg₂Si₂O₆ = 2 Mg₂SiO₄ + 2C + 2O₂,
@@ -702,31 +787,62 @@ function logfO2_EMOG(T, Pbar)
     return -ΔG/(2*R*T*log(10))
 end
 
-# ------------------------------------------------------------
-# Section 4c — reference buffers: FMQ and IW, both out of sb24
-# ------------------------------------------------------------
-# An offset means nothing unless buffer and fO2 share a dataset: Frost (1991) put ΔFMQ up to +4.0
-#   off and metal-BEARING rock ABOVE its own IW, which is impossible. Numbers in TOex_bench.txt.
-# sb24's IW sits ~1.4 log units high because MAGEMin never applies the Landau term (`cme` = 0), so
-#   wüstite is short R·ln5 per Fe²⁺. It cancels in ΔIW — adding it to IW alone breaks metal.
-# FMQ is free from MAGEMin (QFM = fO2 - dQFM); `logfO2_FMQ` covers the no-solid case.
-# IW is built here because MAGEMin's `iw` phase calls an endmember `iron` sb24 lacks, and SEGFAULTS.
-# Parameters below are SLB (2024) Table C1 as printed: ≤0.0084 log units on FMQ, ≤0.0012 on IW.
+# ---- Section 4c — reference buffers: FMQ and IW, both out of sb24 ----
+
+# Both buffers out of sb24 so an offset shares its dataset with the solved fO2 (an empirical curve put
+# metal-bearing rock above IW). IW built here because MAGEMin's `iw` phase segfaults; caveats: TOex_math.md S.13.
 
 const T0_SLB = 300.0        # SLB reference temperature; F₀ and the thermal terms are relative to it
 
-# SLB (2024) Table C1: F0 J/mol | n atoms/fu | V0 J/bar/mol | K0 bar | Kp | θ0 K | γ0 | q0 | fe.
-# NOTE `wu` is Fe₄O₄, not FeO — SLB's B1 phases are written on four oxygens (`pe` is Mg₄O₄ too).
+# sb24 endmembers at full precision (stx24_data.json): F0 J/mol | n | V0 J/bar/mol | K0 bar | Kp | θ0 K | γ0 | q0 | fe.
+# `wu` is Fe₄O₄ (SLB B1 phases sit on four oxygens); `mod` = Landau (SD,TC,VD) or Hillert-Jarl magnetic (TC,β,pf,dE,dS).
 const SLB_EM = (
-    wu   = (F0=-962e3,  n=8.0, V0=4.902, K0=161e4, Kp=4.0,  θ0=427.0, γ0= 1.45, q0=1.5, fe=0),
-    wuls = (F0=-609e3,  n=8.0, V0=4.340, K0=200e4, Kp=4.0,  θ0=493.0, γ0= 1.45, q0=1.5, fe=0),
-    fea  = (F0=    0.0, n=1.0, V0=0.709, K0=163e4, Kp=6.0,  θ0=398.0, γ0= 1.67, q0=0.9, fe=1),
-    feg  = (F0=  4.7e3, n=1.0, V0=0.699, K0=165e4, Kp=6.0,  θ0=285.0, γ0= 1.85, q0=1.0, fe=3),
-    fee  = (F0=  3.4e3, n=1.0, V0=0.677, K0=165e4, Kp=5.0,  θ0=380.0, γ0= 2.13, q0=1.0, fe=2),
-    qtz  = (F0= -858e3, n=3.0, V0=2.242, K0= 61e4, Kp=19.8, θ0=883.0, γ0=-0.04, q0=1.0, fe=0),
-    fa   = (F0=-1372e3, n=7.0, V0=4.629, K0=136e4, Kp=4.9,  θ0=619.0, γ0= 1.08, q0=2.9, fe=0),
-    mag  = (F0=-1016e3, n=7.0, V0=4.453, K0=184e4, Kp=5.2,  θ0=529.0, γ0= 1.36, q0=0.4, fe=0),
+    wu   = (F0=-962050.35, n=8.0, V0=4.9024, K0=1607000.0, Kp=4.0, θ0=427.00102, γ0=1.45033, q0=1.5487, fe=0,
+            mod=(SD=53.5254, TC=191.0, VD=0.0)),
+    wuls = (F0=-609335.18, n=8.0, V0=4.33997, K0=1997000.0, Kp=4.0, θ0=492.99392, γ0=1.45033, q0=1.5487, fe=0,
+            mod=nothing),
+    fea  = (F0=11.82, n=1.0, V0=0.7093, K0=1634211.4, Kp=6.01732, θ0=398.00486, γ0=1.66729, q0=0.90658, fe=1,
+            mod=(TC=1043.01, β=2.1199287186834, pf=0.4, dE=8932.7399, dS=9.46028)),
+    feg  = (F0=4675.83, n=1.0, V0=0.698835, K0=1650000.0, Kp=5.97, θ0=285.19315, γ0=1.84924, q0=1.02176, fe=3,
+            mod=nothing),
+    fee  = (F0=3428.48, n=1.0, V0=0.67651, K0=1650000.0, Kp=4.97, θ0=379.74281, γ0=2.13092, q0=1.02253, fe=2,
+            mod=nothing),
+    qtz  = (F0=-858043.33, n=3.0, V0=2.242105, K0=614259.6, Kp=19.78014, θ0=883.46813, γ0=-0.03957, q0=1.0, fe=0,
+            mod=(SD=5.76, TC=847.0, VD=0.135936)),
+    fa   = (F0=-1371708.34, n=7.0, V0=4.629, K0=1364855.8, Kp=4.88157, θ0=618.96116, γ0=1.08388, q0=2.88055, fe=0,
+            mod=(SD=26.7627, TC=65.0, VD=0.0)),
+    mag  = (F0=-1015909.99, n=7.0, V0=4.4528, K0=1838766.4, Kp=5.22819, θ0=529.46966, γ0=1.35821, q0=0.41872, fe=0,
+            mod=(TC=845.5, β=178.9816942215617, pf=0.4, dE=33048.0797, dS=43.1758)),
 )
+
+# SLB property modifier for one endmember, J/mol. Landau is taken relative to the fully ordered
+# (Q = 1) state; the magnetic branch is Hillert & Jarl (1978) as SLB adopt it (A5-A9, Table C3).
+function slb_modifier(d, Pbar, T)
+    m = d.mod
+    m === nothing && return 0.0
+    G = 0.0
+
+    if haskey(m, :SD)
+        Tc = m.TC + m.VD*Pbar/m.SD
+        G += -m.SD*((T - Tc) + m.TC/3)
+        # below Tc the order parameter is finite; Q² is capped at 4 to stop runaway stabilisation
+        if T < Tc
+            Q2 = min(sqrt((Tc - T)/m.TC), 4.0)
+            G += m.SD*((T - Tc)*Q2 + m.TC*Q2^3/3)
+        end
+    end
+
+    if haskey(m, :β)
+        D = 518/1125 + (11692/15975)*(1/m.pf - 1)
+        τ = T/m.TC
+        f = τ < 1 ? 1 - (79/(140*m.pf*τ) + (474/497)*(1/m.pf - 1)*(τ^3/6 + τ^9/135 + τ^15/600))/D :
+                       -(τ^-5/10 + τ^-15/315 + τ^-25/1500)/D
+        G += R*T*log(m.β + 1)*f
+    end
+
+    haskey(m, :dE) && (G += m.dE - T*m.dS)
+    return G
+end
 
 # Metal electronic term ℱ_el = -½·β_el0·(V/V₀)^γ_el·T² (SLB 2024 A2-A3); fe = 1 α, 2 ε, 3 γ.
 # Worth ~0.45 log units on IW at 1700 K. The only values the paper omits — from its repository.
@@ -815,17 +931,8 @@ function slb_gibbs(d, Pbar, T)
     G    = d.F0 + c1*f*f*(0.5 + c2*f) +
            nr9*(T/tht^3*slb_plg(tht) - T0_SLB/tht0^3*slb_plg(tht0)) + fel + Pbar*v
 
-    # Magnetic ordering, α-iron only: Hillert & Jarl (1978), which SLB adopt for bcc in place of
-    # Landau (A5-A9, Table C3). `p` = 0.4 is the standard bcc value, defined in A7 but not given.
-    if d.fe == 1
-        SD, TC, pf = 9.46, 1043.01, 0.4
-        D = 518/1125 + (11692/15975)*(1/pf - 1)
-        τ = T/TC
-        G += τ <= 1 ?
-             T*SD/D*(1 - (79/τ/140/pf + (474/497)*(1/pf - 1))*(τ^3/6 + τ^9/135 + τ^15/600)) :
-            -T*SD/D*(τ^-5/10 + τ^-15/315 + τ^-25/1500)
-    end
-    return G
+    # Ordering/magnetic modifiers; zero for the endmembers that carry none
+    return G + slb_modifier(d, Pbar, T)
 end
 
 # O₂ standard state: sb24 keeps O₂ on a HP Cp polynomial fitted to JANAF, same five constants as
@@ -877,9 +984,7 @@ function logfO2_FMQ_hp98(T, Pbar)
     return (dG0 + dGP)/(R*T*log(10))
 end
 
-# ------------------------------------------------------------
-# Section 5 — smooth saturation and finiteness helpers
-# ------------------------------------------------------------
+# ---- Section 5 — smooth saturation and finiteness helpers ----
 
 @inline function softmax2(a, b, β)
     m = max(a, b)
@@ -897,9 +1002,7 @@ end
     return val
 end
 
-# ------------------------------------------------------------
-# Section 6 — the residual (1 unknown: the shared log₁₀ fO2)
-# ------------------------------------------------------------
+# ---- Section 6 — the residual (1 unknown: the shared log₁₀ fO2) ----
 
 # Inverts an increasing oxybarometer for the loading that reads `target`, saturating at the bounds.
 function _invert_demand(g, target, lo, hi; iters=80)
@@ -917,7 +1020,7 @@ end
 # solving and reporting, so the reported state is exactly the one the residual saw.
 function _coh_derive(f, ctx)
     (; sfO2, T, P, IDV, TOₑₓ, Mf, Mc, molfracXB, nB_per_mass, Φ, Mh, nOxideTotal, maxmOₑₓ, maxsOₑₓ,
-       minsOₑₓ, lowclip, melt_H2, melt_H2O, h2_comp, XH2max, h2o_law) = ctx
+       minsOₑₓ, lowclip, melt_H2, melt_H2O, h2_comp, XH2max, XCO2max, h2o_law, fluid_Pmax) = ctx
 
     # The solid's bracket straddles zero (below IW it hands oxygen back); the melt has no metal branch.
     sOₑₓ = _invert_demand(s -> sfO2(s), f, -minsOₑₓ + lowclip, maxsOₑₓ - lowclip)
@@ -927,7 +1030,8 @@ function _coh_derive(f, ctx)
     # One joint solve: aC enforces carbon mass balance exactly, so melt XCO₂ needs no ceiling of its own.
     cs      = coh_state(f, T, P, Mh, Mc, nOxideTotal, TOₑₓ;
                         melt_H2=melt_H2, melt_H2O=melt_H2O, h2_comp=h2_comp, XH2max=XH2max,
-                        Mf=Mf, molfracXB=molfracXB, h2o_law=h2o_law)
+                        XCO2max=XCO2max, Mf=Mf, molfracXB=molfracXB, h2o_law=h2o_law,
+                        fluid_Pmax=fluid_Pmax)
     XCO₂    = cs.XCO2_melt
     carbonO = Φ*XCO₂/(1 - XCO₂)
 
@@ -936,22 +1040,18 @@ function _coh_derive(f, ctx)
     fₛ    = nancheck("sfO2(sOₑₓ)", sfO2(sOₑₓ), sOₑₓ)
     fₗ    = nancheck("melt_fO2", melt_fO2(mOₑₓ, T, TOₑₓ, Mf, molfracXB, nB_per_mass, IDV), mOₑₓ)
 
-    # Melt H₂ is the sixth sink (F.8). It is monotone the same way as the others: fO2 up ⇒ f_H2
-    # down ⇒ less dissolved H₂ ⇒ its deficit shrinks toward zero, so the unique root survives.
+    # Melt H₂ is the sixth sink and monotone like the others: fO2 up ⇒ f_H2 down ⇒ less dissolved H₂,
+    # so its deficit shrinks toward zero and the unique root survives.
     mH2ex = nancheck("coh_state.meltH2ex", cs.meltH2ex, f, Mh)
     return (; f, sOₑₓ, mOₑₓ, XCO₂, carbonO, carbO, fₑₓ, mH2ex, fₛ, fₗ, cs,
               total = sOₑₓ + mOₑₓ + carbonO + carbO + fₑₓ + mH2ex)
 end
 
-# The one equation: total demand must equal the budget.
-# ONE EQUATION, IN GRAMS: the sinks' absolute oxygen demand must equal the budget. The budget
-# appears only here, on the right-hand side, so its sign and its nearness to zero cannot reach
-# the sink brackets — which is the whole reason for the absolute-mass form.
+# The one equation, in grams: total sink demand equals the budget. The budget appears only here,
+# so its sign and nearness to zero never reach the sink brackets (math S.3).
 unified_residual(f, ctx) = _coh_derive(f, ctx).total - ctx.TOₑₓ
 
-# ------------------------------------------------------------
-# Section 6b — regime diagnosis (reporting only)
-# ------------------------------------------------------------
+# ---- Section 6b — regime diagnosis (reporting only) ----
 
 # Labels the converged state. Never an input to the solve, so it cannot disagree with what was solved.
 function classify_regime(st, ctx, res)
@@ -988,81 +1088,84 @@ function classify_regime(st, ctx, res)
               has_fluid = ctx.Mh > 0, fluid_reducing = st.fₑₓ < 0)
 end
 
-# ------------------------------------------------------------
-# Section 7 — bracketed bisection solver
-# ------------------------------------------------------------
+# ---- Section 7 — bracketed bisection solver ----
 
-# Bracketed regula-falsi with the Illinois correction: a secant step whenever it lands inside the
-# bracket, and the retained endpoint's value is halved so neither side can stick. Superlinear like
-# Newton, but it cannot leave the bracket or diverge, which plain Newton can at the softcap kinks.
+# Bracketed regula falsi with the Illinois correction (retained endpoint halved so neither side sticks):
+# superlinear, yet unable to leave the bracket or diverge at the softcap kinks as Newton can (S.26).
 function safe_root(F, lo, hi; maxiter=100, atol=1e-12, xtol=1e-14)
     a, b = float(lo), float(hi)
     fa, fb = F(a), F(b)
-    (abs(fa) <= atol) && return (x=a, f=fa, iters=0, bracketed=true)
-    (abs(fb) <= atol) && return (x=b, f=fb, iters=0, bracketed=true)
+    (abs(fa) <= atol) && return (x=a, f=fa, iters=0, bracketed=true, converged=true)
+    (abs(fb) <= atol) && return (x=b, f=fb, iters=0, bracketed=true, converged=true)
     # No sign change ⇒ the root is outside; hand back the closer end, flagged, as bisect_solve does.
     (!isfinite(fa) || !isfinite(fb) || sign(fa) == sign(fb)) &&
-        return (x = abs(fa) <= abs(fb) ? a : b, f = min(abs(fa), abs(fb)), iters=0, bracketed=false)
+        return (x = abs(fa) <= abs(fb) ? a : b, f = min(abs(fa), abs(fb)), iters=0,
+                bracketed=false, converged=false)
     x, fx, side = b, fb, 0
     for it in 1:maxiter
         x = (fa*b - fb*a)/(fa - fb)
         (!isfinite(x) || x <= min(a,b) || x >= max(a,b)) && (x = 0.5*(a + b))
         fx = F(x)
-        (abs(fx) <= atol || abs(b - a) <= xtol*max(1.0, abs(x))) && return (x=x, f=fx, iters=it, bracketed=true)
+        (abs(fx) <= atol || abs(b - a) <= xtol*max(1.0, abs(x))) &&
+            return (x=x, f=fx, iters=it, bracketed=true, converged=true)
         if sign(fx) == sign(fa)
             a, fa = x, fx;  side == -1 && (fb *= 0.5);  side = -1
         else
             b, fb = x, fx;  side == +1 && (fa *= 0.5);  side = +1
         end
     end
-    return (x=x, f=fx, iters=maxiter, bracketed=true)
+    # Iterations exhausted: x is still inside the bracket and is usable, but it is not a root.
+    return (x=x, f=fx, iters=maxiter, bracketed=true, converged=false)
 end
 
-# Bisection suits a 1-D monotone bracketed residual: no derivatives, no guess, no divergence.
-# Convergence is judged on the RESIDUAL alone — a collapsed bracket with |F| large means no root exists.
-function bisect_solve(F::Function, lo::Real, hi::Real; maxiter=200, atol=1e-10, xtol=1e-14, debug=false)
+# Illinois false position with a halving fallback: stays bracketed, which the tabulated solid sink
+# (step-function slope) needs. Converged on the RESIDUAL alone: a collapsed bracket with |F| large is no root.
+function bisect_solve(F::Function, lo::Real, hi::Real; maxiter=200, atol=1e-10, xtol=1e-14,
+                      newton=true, debug=false)
     flo, fhi = F(lo), F(hi)
     # No sign change: the root is outside the bracket, so return the closer endpoint, unconverged.
     if sign(flo) == sign(fhi)
         best = abs(flo) <= abs(fhi) ? lo : hi
-        return (converged=false, x=best, resnorm=abs(F(best)), iters=0)
+        return (converged=false, x=best, resnorm=min(abs(flo), abs(fhi)), iters=0)
     end
-    x, fx = lo, flo
+    x, fx, side = lo, flo, 0
     it = 0
     while it < maxiter
         it += 1
-        x  = 0.5*(lo + hi)
+        if newton && (flo - fhi) != 0
+            x = (flo*hi - fhi*lo)/(flo - fhi)
+            (!isfinite(x) || x <= min(lo, hi) || x >= max(lo, hi)) && (x = 0.5*(lo + hi))
+        else
+            x = 0.5*(lo + hi)
+        end
         fx = F(x)
         debug && println("  it=$it: x=$x F=$fx  bracket=[$lo, $hi] width=$(hi-lo)")
         (abs(fx) <= atol || (hi - lo) <= xtol*max(1.0, abs(x))) && break
-        sign(fx) == sign(flo) ? (lo = x; flo = fx) : (hi = x)
+        if sign(fx) == sign(flo)
+            lo, flo = x, fx;  side == -1 && (fhi *= 0.5);  side = -1
+        else
+            hi, fhi = x, fx;  side == +1 && (flo *= 0.5);  side = +1
+        end
     end
     return (converged = abs(fx) <= atol, x=x, resnorm=abs(fx), iters=it)
 end
 
-# ------------------------------------------------------------
-# Section 8 — top-level driver
-# ------------------------------------------------------------
+# ---- Section 8 — top-level driver ----
 
-# Partitions the Oₑₓ budget at (P,T); `out` returns a NamedTuple. `p`: 0 harzburgitic, 1 basaltic.
-# `H` is the hydrogen offered to fluid AND melt (H₂O-equivalent); with melt_H2 off it is fluid-only.
-# `tol` = 1e-8 clears bisection's ~1e-11 floor and stays below the ~0.1-3.5 graphite cliff.
+# Partitions the Oₑₓ budget at (P,T); `out` returns a NamedTuple. `p`: 0 harzburgitic, 1 basaltic;
+# `H` is hydrogen offered to fluid AND melt (H₂O-equivalent). `tol` = 1e-8 clears bisection's floor (S.12).
 function partition_Oₑₓ(P::Real, T::Real, p::Real, ϕ::Real, TOex::Real, TC::Real, H::Real;
-                           nr=100, Rmax=0.4, nrm=15, R0=2e-3, maxiter=500, tol=1e-8, verbose=true,
+                           nr=100, Rmax=0.4, nrm=15, R0=2e-3, maxiter=500, tol=1e-8,
+                           tol_floor=1e-12, verbose=true,
                            data=nothing, out=false, debug=false,
                            melt_H2=true, melt_H2O=true, h2_comp=:basalt, XH2max=0.3,
-                           h2o_law=:sunyao)
+                           XCO2max=0.5, h2o_law=:sunyao, fluid_Pmax=50.0)
 
     (; X, XB, Xox, SymXox, mmXox) = endmember_composition(p)
     Mt = 1e3   # reference cell mass (1 kg in grams, matching mm.* in g/mol)
     (; Mf, Ms, Mc, Mh, TOₑₓ, molfracXB, nB_per_mass, maxXCO₂_raw, Φ) = mass_budget(Mt, ϕ, TC, TOex, H, XB, mmXox)
 
-    if TOₑₓ == 0.0
-        verbose && println("Total Oₑₓ budget = 0.0 — nothing to partition.")
-        return (converged=true, sOₑₓ=0.0, mOₑₓ=0.0, XCO₂=0.0, iters=0, resnorm=0.0)
-    end
-
-    IDV = nancheck("solve_∫ΔVdP", solve_∫ΔVdP([P-0.05P, P, P+0.05P], [T-0.05T, T, T+0.05T])[2,2,1], P, T)
+    IDV = nancheck("solve_∫ΔVdP", solve_∫ΔVdP(P, T), P, T)   # kJ/mol, 1 bar to P
 
     # Ceilings at Fe³⁺/ΣFe = 1: moles of Fe, half an O each, over the budget. NOT clipped at 100% of
     # TOₑₓ — that is the residual's job, and doing it twice would break fO2 equality.
@@ -1085,14 +1188,15 @@ function partition_Oₑₓ(P::Real, T::Real, p::Real, ϕ::Real, TOex::Real, TC::
     # Both melt-H terms default ON. They are live even with no carbon (a pure H-O fluid is nearly
     # all H₂ at low fO2), so switch them OFF to reproduce a pre-2026-09-04 benchmark.
     ctx = (; sfO2, T, P, IDV, TOₑₓ, Mf, Mc, molfracXB, nB_per_mass, Φ, Mh, nOxideTotal, maxmOₑₓ,
-             maxsOₑₓ, minsOₑₓ, lowclip, melt_H2, melt_H2O, h2_comp, XH2max, h2o_law)
+             maxsOₑₓ, minsOₑₓ, lowclip, melt_H2, melt_H2O, h2_comp, XH2max, XCO2max, h2o_law,
+             fluid_Pmax)
 
-    # Bracket far wider than physical: every demand saturates outside its range, so this only has
-    # to straddle the root — it is not a constraint on the answer.
-    # THE RESIDUAL IS IN GRAMS, so its tolerance cannot be an absolute constant. Read `tol` as
-    # RELATIVE and scale it by the budget, floored by the sink capacity so a near-zero budget does
-    # not demand impossible precision.
+    # Bracket far wider than physical; demands saturate outside their range, so it only straddles the root.
+    # The residual is in grams, so `tol` is relative: scaled by the budget, floored by sink capacity (S.12).
     atol_g = tol*max(abs(TOₑₓ), 1e-6*max(maxsOₑₓ + s_floor, maxmOₑₓ, floatmin(Float64)))
+    # Absolute floor on the tolerance: at a zero budget the relative rule collapses to
+    # 1e-14·capacity, below the inner solves' own gram-level noise. tol_floor = 0 disables it.
+    atol_g = max(atol_g, tol_floor*(Mc + Mh + max(maxsOₑₓ + s_floor, maxmOₑₓ)))
     res  = bisect_solve(f -> unified_residual(f, ctx), -120.0, 40.0; maxiter=maxiter, atol=atol_g, debug=debug)
     st   = _coh_derive(res.x, ctx)
     sOₑₓ, mOₑₓ, XCO₂ = st.sOₑₓ, st.mOₑₓ, st.XCO₂
@@ -1109,18 +1213,26 @@ function partition_Oₑₓ(P::Real, T::Real, p::Real, ϕ::Real, TOex::Real, TC::
     nFe0_solid = metal_wt*Ms/mm.Fe                                     # moles of native iron
     FeM_solid  = nFe_solid > 0 ? nFe0_solid/nFe_solid : 0.0            # Fe⁰/ΣFe, total
     FeM_net    = nFe_solid > 0 ? max(0.0, -nO_solid/nFe_solid) : 0.0   # Fe⁰/ΣFe, net-oxygen only
-    # With metal present the net oxygen alone no longer gives Fe³⁺: balance is nFe³⁺ = 2(nO + nFe⁰),
-    # which returns the 2:1 ratio at nO = 0 and zero when metal is exactly paid for by released O.
-    FeR_solid = nFe_solid > 0 ? max(0.0, 2(nO_solid + nFe0_solid)/nFe_solid) : 0.0
     FeR_net   = nFe_solid > 0 ? max(0.0, 2nO_solid/nFe_solid) : 0.0
     # The two routes, split by the oxygen budget since MAGEMin reports only a total: dissociation
     # frees exactly 1 O per Fe⁰ and that O IS -sOₑₓ, so the rest was made at constant oxygen.
     FeM_diss = min(FeM_net, FeM_solid)                                 # paid for by O leaving the solid
     FeM_disp = max(0.0, FeM_solid - FeM_diss)                          # made at constant oxygen
+    # IRON BALANCE. 3 Fe²⁺ → 2 Fe³⁺ + Fe⁰, so the disproportionated metal cannot exceed a third
+    # of the Fe²⁺ left after the net oxygen and the dissociated metal have taken theirs.
+    R_net      = nFe_solid > 0 ? 2nO_solid/nFe_solid : 0.0
+    disp_cap   = max(0.0, (1 - max(R_net, 0.0) - FeM_diss)/3)
+    fe_clipped = FeM_disp - min(FeM_disp, disp_cap) > 1e-9
+    FeM_disp   = min(FeM_disp, disp_cap)
+    FeM_solid  = FeM_diss + FeM_disp
+    # With metal present the net oxygen alone no longer gives Fe³⁺: balance is nFe³⁺ = 2(nO + nFe⁰),
+    # which returns the 2:1 ratio at nO = 0 and zero when metal is exactly paid for by released O.
+    FeR_solid  = min(1.0, max(0.0, R_net + 2FeM_solid))
 
     eqfO2     = st.f       # the shared fO2 all unpinned sinks equilibrate to
     cohsink   = st.fₑₓ
-    shortfall = (TOₑₓ - st.total)/TOₑₓ   # still reported as a FRACTION of the budget
+    # A FRACTION of the budget, and the budget can legitimately be zero.
+    shortfall = TOₑₓ != 0 ? (TOₑₓ - st.total)/TOₑₓ : 0.0
 
     cs = st.cs
     # Both out of sb24, the dataset that produced `eqfO2`: FMQ off MAGEMin's own dQFM, IW from its
@@ -1129,9 +1241,7 @@ function partition_Oₑₓ(P::Real, T::Real, p::Real, ϕ::Real, TOex::Real, TC::
     if verbose
         XH2O, XCO2f, XCH4, XCOf, XH2 = cs.XH2O, cs.XCO2, cs.XCH4, cs.XCO, cs.XH2
         rg = classify_regime(st, ctx, res)
-        # ---- light layout helpers. No boxes: they force truncation and read as a cage. Two
-        #      columns are set by padding alone, so a long line simply runs on instead of
-        #      breaking a border.
+        # Layout helpers. No boxes: two columns are set by padding alone, so a long line runs on.
         L, C = 4, 48                                  # left margin, second-column offset
         pad(s, w) = s * " "^max(0, w - length(s))
         # rstrip everywhere: a column of trailing blanks is invisible until someone diffs it.
@@ -1190,9 +1300,7 @@ function partition_Oₑₓ(P::Real, T::Real, p::Real, ϕ::Real, TOex::Real, TC::
             say("fO₂ — treat this result as suspect.")
         end
 
-        # ══ the two IRON sinks, and only those. Putting the melt's dissolved volatiles in this
-        #    column too was what made it unreadable: the columns stopped being parallel, so the
-        #    eye had nothing to compare across. Volatiles get their own section below.
+        # ══ the two IRON sinks only; the melt's volatiles get their own section so the columns stay parallel
         unphys(x) = x > 1.05 ? "  ⚠ >1" : ""
         shr(x)    = TOₑₓ != 0 ? @sprintf("%+.2f %%", 1e2x/TOₑₓ) : "n/a"
         cap(x, c) = c > 0 ? @sprintf("%.2f %% of its cap", 1e2x/c) : "n/a"
@@ -1327,19 +1435,15 @@ function partition_Oₑₓ(P::Real, T::Real, p::Real, ϕ::Real, TOex::Real, TC::
             say("─"^33)
             @printf("%s%-20s %+9.3f %%\n", " "^(L+2), "", 1e2)
             println()
-            say("solid bound water is outside this solve — it has a lagged proxy (B.19).")
+            say("solid bound water is outside this solve — it has a lagged proxy.")
         else
             say("H = 0 — no hydrogen in this tracer.")
         end
         println()
     end
 
-    # ! THE INTERFACE IS IN SHARES, THE SOLVE IS IN MASSES. Internally every demand and bound is
-    # absolute grams, because a budget in a DENOMINATOR is what broke on a negative or near-zero
-    # TOₑₓ (G.6/3.C.7). Nothing on the way OUT needs that protection: a caller passed wt% in and
-    # wants fractions of what it passed back, and the division is a single safe operation guarded
-    # by the TOₑₓ == 0 early return above. So the boundary converts, once, here.
-    #   oxygen  → fraction of TOₑₓ      carbon → fraction of Mc      hydrogen → fraction of molH
+    # Interface in SHARES, solve in masses: oxygen as a fraction of TOₑₓ, carbon of Mc, hydrogen of molH.
+    # At TOₑₓ = 0 a share is undefined, so oS returns 0 and the gram values below carry the answer.
     oS(x) = TOₑₓ != 0 ? x/TOₑₓ : 0.0
     fC(x) = Mc    > 0 ? x*mm.C/Mc : 0.0
     fH(x) = cs.molH_tot > 0 ? x/cs.molH_tot : 0.0
@@ -1350,7 +1454,7 @@ function partition_Oₑₓ(P::Real, T::Real, p::Real, ϕ::Real, TOex::Real, TC::
                     fluid_O_uptake=oS(cs.O_up), fluid_O_release=oS(cs.O_rel),
                     Oex_added=max(0.0, -oS(cohsink)), rock_pool=1.0-oS(cohsink),
                     FeR_solid=FeR_solid, FeR_net=FeR_net, FeM_solid=FeM_solid, FeM_net=FeM_net,
-                    FeM_diss=FeM_diss, FeM_disp=FeM_disp, metal_wt=metal_wt,
+                    FeM_diss=FeM_diss, FeM_disp=FeM_disp, metal_wt=metal_wt, fe_clipped=fe_clipped,
                     nFe_solid=nFe_solid, FeR_melt=FeR_melt,
                     fC_gph=fC(st.cs.nC_gph), fC_carb=fC(st.cs.nC_carb),
                     fC_melt=fC(st.cs.nC_melt), fC_fluid=fC(st.cs.nC_fluid),
@@ -1361,6 +1465,15 @@ function partition_Oₑₓ(P::Real, T::Real, p::Real, ϕ::Real, TOex::Real, TC::
                     molH_fluid=cs.molH_fl, molH_total=cs.molH_tot,
                     XH2O_melt=cs.XH2O_melt, nH2O_melt=cs.nH2O_melt, SH2O_melt=cs.SH2Om+cs.SOH,
                     SH2Om=cs.SH2Om, SOH=cs.SOH, PH2O_melt=cs.PH2O_melt, fluid_absent=cs.fluid_absent,
-                    lam=cs.lam); end
+                    fluid_restricted=cs.fluid_restricted, vol_fluid=cs.vol_fluid,
+                    lam=cs.lam,
+                    # GRAMS, the solve's own units. The only meaningful oxygen output at TOₑₓ = 0,
+                    # where every share above divides by a zero budget.
+                    TOₑₓ_g=TOₑₓ, sOₑₓ_g=sOₑₓ, mOₑₓ_g=mOₑₓ, carbonO_g=st.carbonO, carbO_g=st.carbO,
+                    cohsink_g=cohsink, meltH2ex_g=st.mH2ex, atol_g=atol_g,
+                    mC_gph=st.cs.nC_gph*mm.C, mC_carb=st.cs.nC_carb*mm.C,
+                    mC_melt=st.cs.nC_melt*mm.C, mC_fluid=st.cs.nC_fluid*mm.C,
+                    mH_fluid=cs.molH_fl*0.5*mm.H2O,
+                    mH_melt=(cs.molH_tot - cs.molH_fl)*0.5*mm.H2O); end
 
 end

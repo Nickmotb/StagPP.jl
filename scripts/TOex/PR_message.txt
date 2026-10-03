@@ -1,0 +1,42 @@
+Title: Volatile cycle (H2O + C-O-H) with a redox-coupled partition solver, plus base-code fixes
+
+Summary
+This branch adds a coupled water-carbon-oxygen volatile cycle to StagYY and fixes a set of
+pre-existing defects found while building it. It is squashed onto the current master as one
+commit. All volatile code lives in three new modules (volatiles_mod.f90, volatileprocs_mod.f90,
+volatiles_bind.f90) behind traceelement_water / traceelement_carbon; with both off the code path
+is the existing one.
+
+What is new
+- Volatile inventory per tracer: bound and free water, oxidised/reduced/fluid carbon, excess oxygen.
+- TOex partition solver: one unknown (log10 fO2) closes the oxygen balance between solid (Fe3+/Fe2+,
+  native iron), silicate melt (H2O, OH, H2, CO2) and a C-O-H fluid (H2O, H2, CH4, CO, CO2, ZD09 EOS).
+- Solid fO2 and native-iron tables (100 P x 100 T x 36 Fe3+/SumFe, MAGEMin sb24) and hydrous
+  solid/melt density tables in Perple_X_MAGEMin/MAGEMin/Tables, read by thermochem_mod, with a README;
+  the two stand-alone generator/solver scripts (s_fO2_dens_metal.jl, TOex.jl) sit in Perple_X_MAGEMin/MAGEMin.
+- Surface as two boxes (atmosphere/ocean and deposited carbon), hydrogen escape modes, ingassing on a
+  fracture (stress-ratio) criterion, speciated degassing, Darcy transport of the fluid as an (H, C, O)
+  triple.
+- Volatile-enhanced melting: Katz (2003) / Sun & Yao (2026) water law with melt-fraction dilution; carbonated solidus
+  from the Dasgupta & Hirschmann (2010) compilation with a carbonatite plateau, applied only within
+  the pressure range of the data (carb_Pmax).
+- Element-by-element inventory and per-step diagnostics.
+
+Base-code fixes (independent of the volatile switches)
+- CMB face conductivity under magma_effective_tcond destabilised the explicit core update.
+- justbelow linear scan -> bisection; tracer-cell link memoised (-14 % link time).
+- thermochem_int per-call allocations and string compares removed.
+- Restart: reader magic caps, cread_* abort on truncated files, delete_old_* delete instead of
+  truncating, ifile_search picks the newest complete frame.
+- Tracer temperature bounded at every advection write
+
+Merge notes against master
+- Upstream alpha_saturation and this branch's WaterSatCutoff are the same knob; WaterSatCutoff is kept,
+  alpha_saturation is accepted as an alias.
+- water_dependent_rho is the single switch for hydrous density; water_dependent_rho_law = 'linear'
+  (upstream a0rho_water) or 'minimize' (tabulated Perple_X/MAGEMin maps).
+- etalaw_water: 9 (Karato, normalised to saturation), 11 (upstream exponential), 12 (phase-dependent)
+  coexist; 11 and 12 are distinct laws.
+- All water parameters moved to the &volatiles namelist; upstream's eruption_zeroH2O and the improved
+  basalt solubility map (#1264) are ported there (the map applies when minimized_solubility is off).
+- All volatile parameters live in the &volatiles namelist and every entry has a defaults_include line.

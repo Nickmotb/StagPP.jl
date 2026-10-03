@@ -1,0 +1,4 @@
+[ Info: Revise successfully loaded
+Using libMAGEMin.dylib from MAGEMin_jll
+300000 points in 1987 s, 0 not converged
+Wrote /Users/nickmotb/Desktop/StagPP.jl/scripts/sH2O/out_moon/StagH2O_moon.dat: capacity 5.12e-04 to 1.08e-01 wt%

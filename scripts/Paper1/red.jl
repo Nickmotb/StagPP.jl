@@ -8,8 +8,10 @@
 #      threshold-free view: stagnant and plutonic-squishy lids both sit at low mobility and
 #      separate on plateness, since squishy localizes deformation into weak zones between
 #      blocks while a stagnant lid deforms diffusely.
-#   2. Regime heatmaps — the same runs classified, rows = friction set, columns = the swept
-#      parameter (yield stress in one slice, eruption efficiency in the other).
+#   2. Mobile-time-fraction heatmaps — rows = friction set, columns = the swept parameter
+#      (yield stress in one slice, eruption efficiency in the other). Colour is continuous in
+#      the quantity the regime cut acts on, so runs sitting near a boundary read as such
+#      instead of snapping to a category; the categorical label lives in panel 3.
 #   3. Regime raster — one strip per run through time, mobile intervals highlighted. Keeps
 #      the temporal information the two time-averaged panels above discard, which is what
 #      separates a bursty episodic lid from a persistently deforming squishy one.
@@ -19,7 +21,7 @@ using StagPP, GLMakie, Printf, Statistics
 # Configuration
 # ------------------------------------------------------------------------
 simroot = "/Volumes/Sinergia/EarthWater"
-load_sims = false
+load_sims = true
 
 # Per-instant mobility threshold above which the lid counts as locally "mobile".
 # 0.6 matches the `tectonic_threshold` convention already used by `regime(...;
@@ -42,6 +44,9 @@ tstart = 0.5 # Gyr
 
 const REGIMES = ["Stagnant", "Squishy", "Episodic", "Mobile"]
 const REGIME_COLORS = [:grey60, :mediumpurple3, :goldenrod2, :seagreen]
+# Continuous scale for the heatmaps. Perceptually uniform and distinct from the :inferno used
+# for heat flux in panel 1, so the two colourbars are not mistaken for each other.
+const MOB_CMAP = :vik100
 
 # ------------------------------------------------------------------------
 # Discover + load simulations
@@ -136,7 +141,7 @@ effA = most_common([s.eff for s in sims])
 ysB  = most_common([s.ys for s in sims])
 
 fig = Figure(size=(1900, 1250))
-Label(fig[1, 1:4], "Tectonic regimes of the water-friction sweep", fontsize=19, tellwidth=false)
+Label(fig[1, 1:5], "Tectonic regimes of the water-friction sweep", fontsize=19, tellwidth=false)
 
 # --- Panel 1: mobility–plateness plane (no thresholds applied to the data itself)
 axsc = Axis(fig[2, 1], xscale=log10, title="Mobility–plateness plane",
@@ -161,10 +166,17 @@ axislegend(axsc,
 Colorbar(fig[2, 2], limits=crange, colormap=:inferno, label="Mean surface heat flux [mW/m²]",
          width=14, ticklabelsize=9, labelsize=10)
 
-# --- Panel 2: regime heatmaps, one per slice
-function regime_heatmap!(pos, subset, xkey, xlabel, title)
+# --- Panel 2: mobile-time fraction, one heatmap per slice
+# Cell labels sit on top of the colours, so pick black or white from the luminance of the
+# colour the cell actually gets — viridis runs dark at 0 and bright at 1.
+function label_color(v)
+    c = cgrad(MOB_CMAP)[clamp(v, 0, 1)]
+    return 0.299c.r + 0.587c.g + 0.114c.b > 0.55 ? :black : :white
+end
+
+function mobility_heatmap!(pos, subset, xkey, xlabel, title)
     xvals = sort(unique([getproperty(s, xkey) for s in subset]))
-    codes = fill(NaN, length(xvals), length(muvals)) # heatmap! wants [x, y]
+    fmob = fill(NaN, length(xvals), length(muvals)) # heatmap! wants [x, y]
     ax = Axis(fig[pos...], title=title, xlabel=xlabel, ylabel="Wet friction μ_wet",
               xticks=(1:length(xvals), [x == round(x) ? string(Int(x)) : string(x) for x in xvals]),
               yticks=(1:length(muvals), string.(muvals)))
@@ -172,26 +184,32 @@ function regime_heatmap!(pos, subset, xkey, xlabel, title)
         k = findfirst(s -> s.muw == mu && getproperty(s, xkey) == xv, subset)
         isnothing(k) && continue
         d = diag[subset[k].name]
-        codes[j, i] = d.code
+        fmob[j, i] = d.frac_mobile
         text!(ax, j, i, text=@sprintf("%.0f%%\nP %.2f", 100d.frac_mobile, d.plateness),
-              align=(:center, :center), fontsize=9, color=:black)
+              align=(:center, :center), fontsize=9, color=label_color(d.frac_mobile))
     end
-    heatmap!(ax, 1:length(xvals), 1:length(muvals), codes,
-             colormap=cgrad(REGIME_COLORS, categorical=true), colorrange=(0.5, 4.5))
+    # Fixed 0-1 range so the two slices are directly comparable cell for cell.
+    heatmap!(ax, 1:length(xvals), 1:length(muvals), fmob, colormap=MOB_CMAP, colorrange=(0, 1))
     translate!(ax.scene.plots[end], 0, 0, -1) # keep the cell text on top
     return ax
 end
 
-regime_heatmap!((2, 3), filter(s -> s.eff == effA, sims), :ys,
-                "Ductile yield stress [MPa]", "Regime vs yield stress  (eff = $(effA))")
-regime_heatmap!((2, 4), filter(s -> s.ys == ysB, sims), :eff,
-                "Eruption efficiency [-]", "Regime vs eruption efficiency  (ys = $(Int(ysB)) MPa)")
-Legend(fig[3, 1:4],
+mobility_heatmap!((2, 3), filter(s -> s.eff == effA, sims), :ys,
+                  "Ductile yield stress [MPa]", "Mobile time fraction vs yield stress  (eff = $(effA))")
+mobility_heatmap!((2, 4), filter(s -> s.ys == ysB, sims), :eff,
+                  "Eruption efficiency [-]", "Mobile time fraction vs eruption efficiency  (ys = $(Int(ysB)) MPa)")
+# Ticks carry the two regime cutoffs, so the categorical boundaries are still readable off the
+# continuous bar without quantizing the cells themselves.
+Colorbar(fig[2, 5], limits=(0, 1), colormap=MOB_CMAP, width=14, ticklabelsize=9, labelsize=10,
+         label="Fraction of time with Mob ≥ $(Mob_thresh)",
+         ticks=([0.0, stagnant_cut, 0.2, 0.4, mobile_cut, 0.8, 1.0],
+                ["0", "0.08", "0.2", "0.4", "0.6", "0.8", "1"]))
+Legend(fig[3, 1:5],
        [PolyElement(color=c) for c in REGIME_COLORS], REGIMES,
        orientation=:horizontal, framevisible=false, labelsize=12, tellheight=true)
 
 # --- Panel 3: regime through time, one strip per run
-axr = Axis(fig[4, 1:4], title="Mobile intervals through time  (Mob ≥ $(Mob_thresh))",
+axr = Axis(fig[4, 1:5], title="Mobile intervals through time  (Mob ≥ $(Mob_thresh))",
            xlabel="Time [Gyr]", yticks=(1:length(sims), [s.name for s in sims]),
            yticklabelsize=8)
 vlines!(axr, [tstart], color=:gray30, linestyle=:dash, linewidth=1)

@@ -734,7 +734,8 @@ end
     # Color palette generator
     function cpalette(scheme_sym::Symbol, n::Integer)
         cs = getfield(ColorSchemes, scheme_sym)         # e.g. :vik100 → ColorSchemes.vik100
-        ts = range(0.0, 1.0; length=n)                  # n evenly spaced points
+        # range(0,1;length=1) is an error, so a lone series takes the middle of the scheme
+        ts = n == 1 ? [0.5] : range(0.0, 1.0; length=n) # n evenly spaced points
         return get.(Ref(cs), ts)                        # cs(t) for each t
     end
 
