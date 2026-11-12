@@ -12,15 +12,12 @@ using StagPP, GLMakie, MAGEMin_C
 
 P       = 8.0
 T       = 1400.
-
 p       = 0.0
+ϕ       = 0.005        # Melt fraction k
+TOex    = 1e-2        # Excess oxygen as a wt% of tracer mas
+TC      = 0.05       # Carbon content as wt% of tracer mass
+H       = 3.0         # Free H₂O mass in wt%
 
-ϕ       = 0.001        # Melt fraction k
-
-TOex    = 1e-3        # Excess oxygen as a wt% of tracer mas
-TC      = 0.001       # Carbon content as wt% of tracer mass
-H       = 0.1         # Free H₂O mass in wt%
-
-data = Initialize_MAGEMin("sb24", verbose=false)
+# data = Initialize_MAGEMin("sb24", verbose=false)
 partition_Oₑₓ(P, T, p, ϕ, 1e-2TOex, 1e-2TC, 1e-2H, data=data)
-Finalize_MAGEMin(data)
+# Finalize_MAGEMin(data)

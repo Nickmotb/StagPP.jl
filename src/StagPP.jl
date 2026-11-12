@@ -50,7 +50,7 @@ module StagPP
     # Function export
     export load_sim, load_local, data_encoding, solve_sH2O_fO2, min_sᴴ²ᴼ_assembler, solve_point
     # Misc export
-    export partition_Oₑₓ, P_T_ϕ_TOₑₓ_TC_topoplogy
+    export partition_Oₑₓ, load_StagH2Oa, P_T_ϕ_TOₑₓ_TC_topoplogy
     # Plot exports
     export time_vs_field, rprof_vs_field, field_vs_field, ta_field_vs_field, ta_series_vs_field, 
             mantle_water, mantle_water_at_t, plot_sf, minmap, time_vs_ratio,

@@ -19,6 +19,7 @@ twice, and from the Julia drivers `md_figs/scripts/bench_numerics.jl` (sections 
 | 4 | Table read against a live minimisation | 98 % of 4000 random points within 0.3 log units, median 0.03 |
 | 5 | Julia solver sweep, 1296 cases | 88.9 % converged; the rest is one infeasible corner; carbon closure 3·10⁻¹⁶ |
 | 6 | Fortran against Julia | 53 melt-only cases agree to 5·10⁻⁷ log units |
+| 7 | Hydrogen floor and closure test (2026-11-08) | worst C or H closure 47.7 → 5·10⁻⁹ in a 12-step continuation; failure counts unchanged |
 
 ## 1. Structure of the solve
 
@@ -164,7 +165,7 @@ fluid volume 10⁻¹³ relative (Illinois) or a Newton step of 10⁻⁸, column 
 
 Every change of regime that a bracketed root has to cross is a ramp, not a switch, because a jump
 in a sink puts a step in the residual and a step can hide the root: the graphite–carbonate host is a
-logistic of width 0.25 log units around EMOG(D) (S.6); melt CO₂ and melt H₂ approach their ceilings
+logistic of width 0.05 log units around EMOG(D) (S.6); melt CO₂ and melt H₂ approach their ceilings
 through a soft cap (S.8, S.10); the carbonate solidus ledge is a smoothstep in pressure and a tanh
 in log concentration (S.16).
 
@@ -174,6 +175,12 @@ No sign change on the full bracket, a collapsed bracket with a large residual, o
 is reported as a failure and never as a success. The cell keeps its previous partition, which is
 exactly conservative under the incremental write-back, the failure is counted with its cause, and
 the run continues (S.12).
+
+The unified engine also requires the carbon and hydrogen balances of the final state to close to
+`toex_closure_tol` = 10⁻⁶ (S.11). A cell whose solid holds more water than the budget even at the
+lowest tabulated activity (the hydrogen floor, S.15) is closed onto the solid when it has no melt and
+failed when it has melt. Each step the log prints the three counts:
+`TOex: H floor (no melt, solid holds all H) N   H floor with melt (failed) N   closure failures N`.
 
 ## 3. Benchmarks
 
@@ -269,6 +276,29 @@ and every case converges.
 53 melt-only cases (2026-09-13) agree to 5·10⁻⁷ log units on the IW and FMQ offsets and to the
 printed digits on the partition, so the scientific benchmarks of `TOex_bench.md`, which run the Julia
 code, describe what the simulation computes.
+
+### 3.6 Hydrogen floor and the closure test (2026-11-08)
+
+The newcode2 run logged a worst joint residual of 3.3 and later 47.7. That is the C and H closure
+`res_ideality` (S.11), printed for rank 0's worst cell only. The cause was the hydrogen floor of
+S.15 in cold shallow solid. The fix (eqs. 15.2, 15.3 and the closure test) was checked in Julia
+against the previous code on the same cells, then in Fortran:
+
+| test set | cells | result |
+|---|---|---|
+| frame-600 floor cells | 7 | closure 47.7 → 0, solid share of H 48.7 → 1, fO₂ unchanged |
+| cold cells with melt (frame 600) and the frame-530 dump | 81 | identical |
+| floor cell with a melt trace, ϕ = 10⁻⁹, 10⁻⁶, 10⁻³ | 3 | failed, flagged floor with melt |
+| random near-surface cells | 400 | 391 identical, 9 floor cells closed, closure above 10⁻⁶: 9 → 0 |
+| regression grid, all sectors | 756 | 624 identical, 66 floor closed, 66 floor with melt failed, no other difference |
+| legacy engine | 48 | identical |
+| Fortran harness on the 7 cells | 7 | as Julia, a_solid = 10⁻³ |
+
+The grid's three cells that failed before (20 GPa, 350 K, p = 1, no fO₂ root) still fail. In a
+12-step continuation of frame 600 (`mpirun -np 16`) the worst closure stayed below 5·10⁻⁹ in every
+step (3.3 and 47.7 before), the floor fired in one cell per step from step 6, never with melt,
+no cell failed the closure test, the failed counts (29 to 35 per step) matched the old build step
+for step and the water totals did not change.
 
 ## 4. Not done
 

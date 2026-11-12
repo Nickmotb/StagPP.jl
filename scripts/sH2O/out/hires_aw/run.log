@@ -1,0 +1,18 @@
+[ Info: Revise successfully loaded
+Using libMAGEMin.dylib from MAGEMin_jll
+NAM fits + DHMS setup: 3.2 s (phase H: ΔfH -1721.19 kJ, S 71.57 J/K, V0 3.2293 J/bar, K' 8.04)
+sH2O UM   p = 0.00 ume a = 1: 90000 points in 209.3 s, 0 not converged
+sH2O UM   p = 0.00 ume a = 0.1: 90000 points in 200.8 s, 0 not converged
+sH2O UM   p = 0.00 ume a = 0.01: 90000 points in 199.9 s, 0 not converged
+sH2O UM   p = 1.00 mbe a = 1: 90000 points in 223.2 s, 0 not converged
+sH2O UM   p = 1.00 mbe a = 0.1: 90000 points in 213.5 s, 0 not converged
+sH2O UM   p = 1.00 mbe a = 0.01: 90000 points in 209.4 s, 0 not converged
+sH2O UM   p = 0.20 ume a = 1: 90000 points in 194.2 s, 0 not converged
+sH2O UM   p = 0.20 ume a = 0.1: 90000 points in 193.6 s, 0 not converged
+sH2O UM   p = 0.20 ume a = 0.01: 90000 points in 190.6 s, 0 not converged
+sH2O UM   hand-over: 51600 sb24 + DHMS points above 5.00 GPa
+sH2O TZ+LM: 540000 points in 952.8 s, 0 not converged
+sH2O TZ   mbe: 15000 points per composition below 10.00 GPa
+real 2986.42
+user 36164.49
+sys 1179.37

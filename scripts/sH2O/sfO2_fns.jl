@@ -12,6 +12,11 @@ const NAMLAW = Dict("ol" => :ol, "opx" => :opx, "pig" => :opx, "aug" => :cpx, "d
                     "pv" => :pv, "ppv" => :ppv, "mw" => :mw, "fper" => :mw, "cf" => :cf, "capv" => :capv, "crst" => :crst)
 const DRY    = Set(["spi", "mgt", "hem", "abc", "ky", "cm", "spl", "ru", "ilm", "sph", "cor", "sill", "and", "mt",
                     "nal", "sp", "feg", "fea", "fee", "neph", "ne", "crn"])
+# Fugacity exponent n per NAM law, c(a) = c(1) a^n: 1 for (2H)Mg or molecular water, 1/2 for single OH (Keppler & Bolfan-
+#  Casanova 2006); constant-capacity laws take 1. opx: En term 1, Al term 1/2
+const NAM_N = Dict(:ol => 1.0, :opx => 1.0, :opxAl => 0.5, :cpx => 0.5, :grt => 0.5, :coe => 1.0, :pl => 1.0, :wa => 1.0,
+                   :ri => 1.0, :hpx => 0.5, :ak => 1.0, :st => 0.5, :apbo => 0.5, :pv => 0.5, :ppv => 0.5, :mw => 1.0,
+                   :cf => 1.0, :capv => 1.0, :crst => 1.0)
 
 # ---- Pitzer & Sterner (1994) H2O, fugacity in GPa; P capped at 100 GPa like sf_H2O.jl
 const PS_C = [
@@ -129,8 +134,9 @@ function nam_laws(P::AbstractVector, T::AbstractVector, F; alpv=true)           
 end
 
 # ---- One composition over the (P,T) grid: water in hydrous solids + NAM laws, per unit solid mass (wt%).
-#  With sub, also stores the MSH-type phases' moles of MgO+FeO and SiO2, their mass and their NAM water (dhms! input)
-function assemble!(cap, hyd, host, unknown, out, L; sub=nothing, alpv=true)
+#  With sub, also stores the MSH-type phases' moles of MgO+FeO and SiO2, their mass and their NAM water (dhms! input).
+#  a: water activity of the capacity; NAM laws scale as a^n (NAM_N), hydrous phases come from the run itself
+function assemble!(cap, hyd, host, unknown, out, L; sub=nothing, alpv=true, a=1.0)
     lk = ReentrantLock()
     Threads.@threads for k in eachindex(out)
         o = out[k]; iH = findfirst(==("H2O"), o.oxides); iAl = findfirst(==("Al2O3"), o.oxides)
@@ -152,7 +158,7 @@ function assemble!(cap, hyd, host, unknown, out, L; sub=nothing, alpv=true)
                     ij = findfirst(e -> e == "jd" || e == "jdm", em); xjd = ij === nothing ? 0.0 : ef[ij]
                     w = x*(xjd*l.jd + (1.0 - xjd)*l.di)
                 elseif law === :opx
-                    w = x*(l.opx + min(o.SS_vec[j].Comp[iAl]/0.1005, 1.0)*l.opxAl)
+                    w = x*(l.opx*a^NAM_N[:opx] + min(o.SS_vec[j].Comp[iAl]/0.1005, 1.0)*l.opxAl*a^NAM_N[:opxAl])
                 elseif law === :pv && alpv
                     w = x*bdg_h2o(100o.SS_vec[j].Comp_wt[iAl])
                 elseif law === :ppv                                         # coexisting-pv reference at the ppv's own Al2O3
@@ -161,6 +167,7 @@ function assemble!(cap, hyd, host, unknown, out, L; sub=nothing, alpv=true)
                 else
                     w = x*getfield(l, law)
                 end
+                law === :opx || (w *= a^NAM_N[law])
                 wn += w
             else
                 w = 0.0; ph in DRY || lock(() -> push!(unknown, ph), lk)
@@ -317,11 +324,12 @@ function msh_min(NM::Float64, NS::Float64, G, K)
 end
 
 # DHMS term on sb24 nodes: the (Mg+Fe, Si) of the MSH-type phases (sub, from assemble!) is re-equilibrated with H2O.
-#  Where a DHMS forms the node is rebuilt (DHMS water + NAM laws on the MSH anhydrous phases); elsewhere it is untouched
-function dhms!(cap, hyd, host, sub, P, T, L, A, K; Pmax=60.0, Tmax=1873.0, PDmax=50.0)
+#  Where a DHMS forms the node is rebuilt (DHMS water + NAM laws on the MSH anhydrous phases); elsewhere it is untouched.
+#  a: cell water activity, added to the map's effective one in μ; the anhydrous member's NAM law scales as a^n
+function dhms!(cap, hyd, host, sub, P, T, L, A, K; Pmax=60.0, Tmax=1873.0, PDmax=50.0, a=1.0)
     Threads.@threads for k in eachindex(cap)
         (P[k] > Pmax || T[k] > Tmax || sub[1, k] <= 0.0) && continue
-        mu = mu_h2o(P[k], T[k]) + Rgas*T[k]*ln_ah2o(P[k], T[k], A)
+        mu = mu_h2o(P[k], T[k]) + Rgas*T[k]*(ln_ah2o(P[k], T[k], A) + log(a))
         G  = ntuple(i -> (i == 4 && P[k] > PDmax) ? 1e12 : g_ko(K[i], P[k], T[k]) - K[i].h*mu, Val(length(K)))  # no phD beyond PDmax
         i, j, ni, nj = msh_min(sub[1, k], sub[2, k], G, K)
         (KO_DHMS[i] && ni > 0) || (KO_DHMS[j] && nj > 0) || continue
@@ -332,8 +340,8 @@ function dhms!(cap, hyd, host, sub, P, T, L, A, K; Pmax=60.0, Tmax=1873.0, PDmax
             if KO_DHMS[q]
                 W += n*p.h*18.015; w = 100n*p.h*18.015
             else
-                law = KO_LAW[q]; l = L[k]
-                w = n*(p.m*Mb + 60.08p.s)*(law === :hen ? (P[k] < 8.0 ? l.opx : l.hpx) : getfield(l, law)); wN += w
+                law = KO_LAW[q]; l = L[k]; law === :hen && (law = P[k] < 8.0 ? :opx : :hpx)
+                w = n*(p.m*Mb + 60.08p.s)*getfield(l, law)*a^NAM_N[law]; wN += w
             end
             w > best && (best = w; bname = KO_NAME[q])
         end

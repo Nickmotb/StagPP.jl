@@ -1,0 +1,48 @@
+run,comp,tag,TC,PGPa,XCO2,logfO2,phases
+H289a,EDDOG2,,1100,2.5,0.5,-8.85,Ol Opx Cpx G Liq vap
+H298a,EDDOG2,,1265,2.8,0.5,-7.26,Ol Opx Cpx G (Liq)
+V588a,EDDOG2,,1100,3.0,0.5,-8.64,Ol Opx Cpx G Dol
+V538a,EDDOG2,,1200,3.0,0.49,-7.83,Ol Opx Cpx G Liq
+V426a,EDDOG2,,1250,3.0,0.46,-7.37,Ol Opx Cpx G Liq
+V403a,EDDOG2,,1300,3.0,0.44,-7.01,Ol Opx Cpx G Liq
+V406a,EDDOG2,,1350,3.0,0.43,-6.74,Ol Opx Cpx G Liq
+V511a,EDDOG2,,1400,3.0,0.28,-6.38,Ol Opx Cpx G Liq
+V542a,EDDOG2,,1400,3.0,0.28,-6.3,Ol Opx Cpx G Liq
+V550a,EDDOG2,,1400,3.0,0.35,-5.85,Ol Opx Cpx G Liq
+V512a,EDDOG2,,1450,3.0,0.24,-6.23,Ol Opx Cpx G Liq
+V514a,EDDOG2,,1507,3.0,0.17,-5.98,Ol Opx Cpx G Liq
+V592a,EDDOG2,,1500,3.0,0.21,-6.2,Ol Opx Cpx G Liq
+V587a,EDDOG2,gnt layer,1400,3.0,0.29,-5.98,Ol Opx Cpx G Liq Gnt
+V538b,EMOG1,,1200,3.0,0.5,-7.59,Ol Opx G Mst
+V496b,EMOG1,,1250,3.0,0.44,-7.17,Ol Opx G Mst Liq
+V406b,EMOG1,,1350,3.0,0.4,-6.56,Ol Opx G Liq
+V511b,EMOG1,,1400,3.0,0.31,-6.23,Ol Opx G Liq
+V514b,EMOG1,,1500,3.0,0.26,-5.63,Ol Opx G Liq
+S4135a,EDDOG2,,1240,6.0,0.5,-5.75,Ol Opx Cpx G/D Mst (Liq)
+V567a,EDDOG2,,1285,6.0,0.46,-5.46,Ol Opx Cpx G/D Mst Liq
+V543a,EDDOG2,,1300,6.0,0.45,-5.49,Ol Opx Cpx G/D Liq
+V539a,EDDOG2,,1350,6.0,0.48,-5.2,Ol Opx Cpx G/D Liq
+V525a,EDDOG2,,1450,6.0,0.31,-4.79,Ol Opx Cpx G/D Liq
+V457a,EDDOG2,,1500,6.0,0.23,-4.68,Ol Opx Cpx G/D Liq
+V553a,EDDOG2,,1560,6.0,0.17,-4.17,Ol Opx Cpx G/D Liq
+V606a,EDDOG2,gnt layer,1150,6.0,0.5,-6.9,Ol Opx Cpx G/D Mst Gnt
+V604a,EDDOG2,gnt layer,1300,6.0,0.49,-5.56,Ol Opx Cpx G/D Liq Gnt
+V605a,EDDOG2,gnt layer,1400,6.0,0.36,-4.98,Ol Opx Cpx G/D Liq Gnt
+V615a,EDDOG2,gnt layer,1200,6.0,0.5,-6.54,Ol Opx Cpx G/D Mst Gnt
+V617a,EDDOG2,gnt layer,1400,6.0,0.42,-4.87,Ol Opx Cpx G/D Liq Gnt
+V585a,EDDOG2,NaCl,1400,6.0,0.47,-5.55,Ol Opx Cpx G/D Liq NaCl
+V576a,EDDOG2,,1350,6.0,0.49,-5.36,Ol Opx Cpx G/D Liq Apatite
+V573a,EDDOG2,,1400,6.0,0.25,-5.17,Ol Opx Cpx G/D Liq Apatite
+V539b,EMOG1,,1350,6.0,0.5,-4.92,Ol Opx G/D Mst
+V541b,EMOG1,,1450,6.0,0.43,-4.54,Ol Opx G/D Mst Liq
+V458a,EDDOG2,,1350,7.0,0.5,-4.6,Ol Opx Cpx G/D Mst (Liq) Gnt
+V492a,EDDOG2,,1400,7.0,0.37,-4.43,Ol Opx Cpx G/D Liq Gnt
+V517a,EDDOG2,,1500,7.0,0.32,-3.81,Ol Opx Cpx G/D Liq Gnt
+V564a,EDDOG2,,1600,7.0,0.26,-3.33,Ol Opx Cpx G/D Liq Gnt
+S4402a,EDDOG2,H2O,1400,7.0,0.45,-4.36,Ol Opx Cpx G/D Liq Gnt
+H2759b,EMOG1,,1400,7.0,0.5,-4.65,Ol Opx G/D Mst Gnt
+V493b,EMOG1,,1400,7.0,0.5,-4.4,Ol Opx G/D Mst Gnt
+V524b,EMOG1,,1500,7.0,0.5,-3.82,Ol Opx G/D Mst Gnt
+V565a,EDDOG2,,1400,11.0,0.5,-2.93,Ol Cl-en Cpx D Mst (Liq) Gnt
+S4230a,EDDOG2,,1500,11.0,0.46,-2.5,Ol Cl-en Cpx D Liq Gnt
+S4232,EMOG1,,1500,11.0,0.5,-2.57,Ol Cl-en D Mst Gnt

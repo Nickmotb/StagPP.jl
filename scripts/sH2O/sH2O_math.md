@@ -7,7 +7,7 @@ that StagYY reads for water and redox:
 - `StagfO2step.dat` (the silica-saturation step in basalt fraction);
 - `StagSdens.dat` and `StagMdens.dat` (hydrous density corrections).
 
-`sH2O_plot.jl` draws every figure in `md_figs/` from a finished run.
+`sH2O_plot.jl` draws every figure in `md_figs/` from a finished run, except the TikZ scheme S.20.
 
 Notation:
 - P in GPa and T in K, unless °C is stated.
@@ -94,6 +94,18 @@ Here c_φ is the water content of phase φ:
 MAGEMin's hydrous phases are recognised by H2O > 10⁻⁶ in their composition. A phase that falls in none of these three cases stops the run, so no phase is silently dropped.
 
 **Why the tables have no water axis.** C is defined at water saturation, a = 1 (or the map's a for the DHMS, S.7), with free water in excess. Once free water is present, adding more changes only the amount of fluid, not the solid: the fluid is pure H2O, so it removes nothing from the rock. C is therefore a property of (P, T, p) alone. A rock with bulk water w holds min(w, C) in its solids, and the excess w − C is free fluid. A table in w would repeat C along that axis. StagYY's reader has none since 2026-09-27; a file with the former water-axis header (`nP nT 1`) is rejected at load. Below saturation, the NAM part of the solid's water at a < 1 is handled in StagYY (TOex_math S.15).
+
+**How StagYY uses C in a time step.** Each tracer carries bound water w and free water w_f, and reads C from `StagH2O.dat` at its P, T and p (`eval_fO2_traWsol`). It does so twice per step: after advection, and again after melting and eruption. Figure S.20 shows the order:
+1. tracers advect;
+2. C is read at the new position, and a tracer whose C fell below w becomes oversaturated;
+3. within δ_hyd of the surface, where the rock is fractured, undersaturated tracers take up water from the ocean towards αC_s (scaled by f_oc when the ocean runs short), and the free water of saturated tracers there goes to the ocean;
+4. wet rock melts at the lowered solidus; the melt erupts or intrudes, erupted tracers equilibrate with the ocean and crystallise as new crust, and C is read again;
+5. the Darcy sweep carries the free water up each column, each tracer sheds at most M_max/n_c, and undersaturated tracers absorb it;
+6. tracer values are averaged onto the grid, and set viscosity, yield stress and friction for the next Stokes solve.
+
+<img src="md_figs/S20_routine.png" alt="S.20" width="1100">
+
+*Figure S.20. The water routine of one StagYY time step, on a 3 × 3 patch of cells below the ocean. The figure writes the capacity as S and the composition as X; here they are C and p. M_max = min(k A Δρ g ρ_w Δt / η_w, M_cell) is the Darcy limit on the water that crosses a cell face in one step, and n_c the number of tracers in the cell. Drawn in TikZ (`Drafts/Water/figures/methods/routine_scheme.tex`), not by `sH2O_plot.jl`.*
 
 **Hosts and layout.** The phase contributing the largest x_φ c_φ is stored as the node's host (maps only; it is not written to the table). `StagH2O.dat` layout:
 - header `nP nT nEM` and the eight mix fractions;
@@ -398,7 +410,7 @@ Code: `BDG_AL`, `BDG_W`, the `law === :pv && alpv` branch of `assemble!`, `nam_l
 
 <img src="md_figs/S06_ko_benchmark.png" alt="S.6" width="1100">
 
-*Figure S.6. (a) Our minimiser in MgO-SiO2-H2O at Mg/Si = 1.4 (K&O's phA + En bulk), water-saturated at the fitted activity, with K&O's reaction checkpoints. (b) Offsets of our boundaries from 50 digitised checkpoints: ΔP at the checkpoint's T and ΔT at its P.*
+*Figure S.6. (a) Our minimiser in MgO-SiO2-H2O at Mg/Si = 1.4 (K&O's phA + En bulk), water-saturated at the fitted activity, with K&O's 50 digitised reaction checkpoints by class. (b) ΔP of our boundary at the checkpoint's T and (c) ΔT at its P, ours minus K&O's; for dehydration reactions, filled at K&O's own a(H2O) and open at our activity map (S.7), joined per checkpoint. Shaded band: the 0.2 GPa / 20 K tolerance of the benchmark counts below.*
 
 **Phases.** The dense hydrous magnesium silicates (DHMS) and their anhydrous partners are taken from K&O Tables 3-4. There are 16 rows plus phase H (S.8), and each row carries its MgO, SiO2 and H2O per formula (m, s, h):
 
@@ -455,7 +467,7 @@ Code: `ko_row`, `KO`, `KO_NAME`, `KO_DHMS`, `KO_LAW`, `g_ko`; the benchmark in `
 
 <img src="md_figs/S07_activity.png" alt="S.7" width="1100">
 
-*Figure S.7. log10 a_H2O of the DHMS minimisation, with the anchors labelled by their activity. Dashed box: the region where the map varies (held flat outside).*
+*Figure S.7. a_H2O of the DHMS minimisation on a log colour scale; contours and anchors are labelled in a: a = 1 from Komabayashi et al. (2005) (circles), the activities Komabayashi & Omori (2006) fitted to fluid-present experiments (diamonds), and the activities that put the Nishi et al. (2014) phase D and phase H dehydration lines on this model (squares). Dashed box: the region where the map varies (held flat outside).*
 
 **Why a map.** K&O reproduce fluid-present experiments with water activities below 1: the fluid carries dissolved silicate, and the activity falls with P and T. We make this a smooth field. A thin-plate spline in ln a is fitted exactly through the anchors, in scaled coordinates x = P/5 and y = T(°C)/200:
 
@@ -631,7 +643,7 @@ Code: `msh_min`, the `G` tuple in `dhms!`.
 
 <img src="md_figs/S10_capacity.png" alt="S.10" width="1100">
 
-*Figure S.10. Capacity of the three blocks (rows) in the three sectors (columns), with host phases. Contours: 0.01, 0.1, 1 wt%. Dashed: 50 and 60 GPa (phase D and DHMS limits); dotted: the hand-over windows.*
+*Figure S.10. Capacity of the three blocks (columns) in the three sectors (rows, pressure increasing downwards), with host phases, computed on 300 × 300 nodes per sector (the shipped table has 100 × 100). Contours: 0.01, 0.1, 1 wt%. Dashed: 50 and 60 GPa (phase D and DHMS limits); dotted: the hand-over windows.*
 
 <img src="md_figs/S11_dhms_gain.png" alt="S.11" width="1100">
 

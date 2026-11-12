@@ -12,6 +12,7 @@ save_fig(name, f) = (save(joinpath(figs, name), f, px_per_unit=2); println("wrot
 
 ink = colorant"#0b0b0b"; muted = colorant"#52514e"; faint = colorant"#e8e7e2"
 seq = cgrad([colorant"#f3f7fd", colorant"#cde2fb", colorant"#9ec5f4", colorant"#6da7ec", colorant"#3987e5", colorant"#256abf", colorant"#184f95", colorant"#0d366b"])
+seqa = cgrad([colorant"#f6f3fd", colorant"#e2d9f8", colorant"#c6b4f0", colorant"#a88de6", colorant"#8a5cd6", colorant"#6c3fbd", colorant"#522d94", colorant"#371d66"])   # a(H2O): light = dry, dark = a 1
 div = cgrad([colorant"#184f95", colorant"#6da7ec", colorant"#e8e7e2", colorant"#f0a07a", colorant"#b8431a"])
 cat3 = (colorant"#2a78d6", colorant"#eb6834", colorant"#1baf7a"); cat4 = (cat3..., colorant"#8a5cd6")
 ramp4 = (colorant"#9ec5f4", colorant"#3987e5", colorant"#184f95", colorant"#0b0b0b")
@@ -35,17 +36,86 @@ function smooth(I; n=2)
     return I
 end
 # Phase boundaries: the 0.5 contour of each phase's smoothed indicator
-boundaries!(a, P, T, H; color=ink, linewidth=0.9) = for h in unique(H)
-    h == "" || contour!(a, collect(P), collect(T), smooth(Float64.(H .== h)), levels=[0.5], color=color, linewidth=linewidth)
+boundaries!(a, P, T, H; color=ink, linewidth=0.9, n=2) = for h in unique(H)
+    h == "" || contour!(a, collect(P), collect(T), smooth(Float64.(H .== h); n=n), levels=[0.5], color=color, linewidth=linewidth)
 end
-function labels!(a, P, T, H; nmin=25, fs=10)
+# Host labels: white with an outline of width sw, or dark without one where the map V is below vdark (light background)
+function labels!(a, P, T, H; nmin=25, fs=10, sw=0.6, V=nothing, vdark=-0.6, yrev=false)
     for h in unique(H)
         (h == "" || count(==(h), H) < nmin) && continue
         id = findall(==(h), H); ii = round(Int, median(first.(Tuple.(id)))); jj = round(Int, median(last.(Tuple.(id))))
         H[ii, jj] == h || ((ii, jj) = Tuple(id[argmin([(Tuple(k)[1]-ii)^2 + (Tuple(k)[2]-jj)^2 for k in id])]))
-        text!(a, P[ii], T[jj], text=h, align=(:center, :center), fontsize=fs, font=:bold, color=:white, strokecolor=ink, strokewidth=0.6)
+        lt = V !== nothing && V[ii, jj] < vdark
+        u = (P[ii] - first(P))/(last(P) - first(P)); v = (T[jj] - first(T))/(last(T) - first(T))   # labels at an edge stay inside
+        hi, lo = yrev ? (v < 0.05, v > 0.95) : (v > 0.95, v < 0.05)
+        al = (u > 0.93 ? :right : (u < 0.07 ? :left : :center), hi ? :top : (lo ? :bottom : :center))
+        text!(a, P[ii], T[jj], text=h, align=al, fontsize=fs, font=:bold, color=lt ? ink : :white, strokecolor=ink, strokewidth=lt ? 0.0 : sw)
     end
 end
+# Host labels inside the regions as drawn (smoothed indicators): per connected region, the label box that fits whole,
+#  clear of the `avoid` lines, farthest from the region edge (10 -> 8 pt); regions too thin get a callout with a leader
+function labels_fit!(a, X, Y, H; nsm=4, nmin=25, big=4, fs=10, fmin=8, sw=0.35, V=nothing, vdark=-0.6, avoid=Float64[], pts=Tuple{Float64, Float64}[], rpt=9.0)
+    nx, ny = size(H); wpx, hpx = widths(a.scene.viewport[]); px, py = wpx/nx, hpx/ny
+    ph = [h for h in unique(H) if h != ""]; Sm = [smooth(Float64.(H .== h); n=nsm) for h in ph]
+    R = [argmax([Sm[k][i, j] for k in eachindex(ph)]) for i in 1:nx, j in 1:ny]      # region map as drawn
+    bar = falses(nx, ny); for yv in avoid, j in 1:ny; abs(Y[j] - yv) < 1.5step(Y) && (bar[:, j] .= true); end
+    for (xp, yp) in pts, i in 1:nx, j in 1:ny                             # keep labels off plotted markers
+        hypot((X[i] - xp)/step(X)*px, (Y[j] - yp)/step(Y)*py) < rpt && (bar[i, j] = true)
+    end
+    sat(B) = (S = zeros(Int, nx + 1, ny + 1); for i in 1:nx, j in 1:ny; S[i+1, j+1] = B[i, j] + S[i, j+1] + S[i+1, j] - S[i, j]; end; S)
+    inbox(S, i, j, hw, hh) = i - hw >= 1 && i + hw <= nx && j - hh >= 1 && j + hh <= ny &&
+                             S[i+hw+1, j+hh+1] - S[i-hw, j+hh+1] - S[i+hw+1, j-hh] + S[i-hw, j-hh] == (2hw + 1)*(2hh + 1)
+    box(h, fz) = (ceil(Int, (0.31fz*length(h) + 3)/px), ceil(Int, (0.55fz + 2)/py))
+    free = [sat(R .== k) for k in eachindex(ph)]; freeb = [sat((R .== k) .& .!bar) for k in eachindex(ph)]
+    placed = Tuple{Int, Int, Int, Int}[]; callouts = Any[]
+    put(h, i, j, fz) = (lt = V !== nothing && V[i, j] < vdark;
+        text!(a, X[i], Y[j], text=h, align=(:center, :center), fontsize=fz, font=:bold, color=lt ? ink : :white, strokecolor=ink, strokewidth=lt ? 0.0 : sw))
+    for (k, h) in enumerate(ph)
+        M = R .== k; lab = zeros(Int, nx, ny); comps = Vector{Vector{CartesianIndex{2}}}()
+        for c0 in findall(M)                                              # 4-connected regions by flood fill
+            lab[c0] == 0 || continue; push!(comps, [c0]); lab[c0] = length(comps); st = [c0]
+            while !isempty(st)
+                c = pop!(st)
+                for d in (CartesianIndex(1, 0), CartesianIndex(-1, 0), CartesianIndex(0, 1), CartesianIndex(0, -1))
+                    e = c + d; (checkbounds(Bool, M, e) && M[e] && lab[e] == 0) || continue; lab[e] = lab[c0]; push!(comps[end], e); push!(st, e)
+                end
+            end
+        end
+        sort!(comps, by=length, rev=true)
+        for (n, cc) in enumerate(comps)
+            (count(c -> H[c] == h, cc) < nmin || (n > 1 && length(cc) < big*nmin)) && break
+            C = falses(nx, ny); C[cc] .= true
+            D = [C[i, j] ? 1e9 : 0.0 for i in 1:nx, j in 1:ny]               # distance (px) to the region edge, chamfer two-pass
+            for i in 1:nx, j in 1:ny; C[i, j] || continue
+                D[i, j] = min(D[i, j], i > 1 ? D[i-1, j] + px : px/2, j > 1 ? D[i, j-1] + py : py/2); end
+            for i in nx:-1:1, j in ny:-1:1; C[i, j] || continue
+                D[i, j] = min(D[i, j], i < nx ? D[i+1, j] + px : px/2, j < ny ? D[i, j+1] + py : py/2); end
+            done = false
+            for fz in fs:-1:fmin, S in (freeb[k], free[k])
+                hw, hh = box(h, fz); best = nothing; sc = -1.0
+                for c in cc; i, j = Tuple(c); inbox(S, i, j, hw, hh) && D[i, j] > sc && (sc = D[i, j]; best = (i, j)); end
+                best === nothing && continue
+                put(h, best..., fz); push!(placed, (best[1] - hw, best[1] + hw, best[2] - hh, best[2] + hh)); done = true; break
+            end
+            done || push!(callouts, (h, Tuple(cc[argmax([D[c] for c in cc])])))
+        end
+    end
+    for (h, (i0, j0)) in callouts                                         # nearest free spot inside one region, then a leader
+        hw, hh = box(h, 9); best = nothing; sc = Inf
+        for i in 1:nx, j in 1:ny
+            d = hypot((i - i0)*px, (j - j0)*py); (d < sc && d > 2hh*py) || continue
+            any(b -> i + hw >= b[1] - 2 && i - hw <= b[2] + 2 && j + hh >= b[3] - 2 && j - hh <= b[4] + 2, placed) && continue
+            inbox(freeb[R[i, j]], i, j, hw, hh) && (sc = d; best = (i, j))
+        end
+        best === nothing && continue
+        i, j = best; put(h, i, j, 9); push!(placed, (i - hw, i + hw, j - hh, j + hh))
+        t = clamp(min(hw/max(abs(i0 - i), 1e-9), hh/max(abs(j0 - j), 1e-9)), 0, 1)   # leader starts at the label box edge
+        lc = V !== nothing && V[i, j] < vdark ? ink : colorant"#ffffff"     # leader in the label's colour, outlined in ink
+        lines!(a, [X[i] + t*(X[i0] - X[i]), X[i0]], [Y[j] + t*(Y[j0] - Y[j]), Y[j0]], color=lc, linewidth=0.9)
+        scatter!(a, [X[i0]], [Y[j0]], color=lc, strokecolor=ink, strokewidth=0.5, markersize=4)
+    end
+end
+
 # Bilinear value of map M[:, :, q, c] at (P, T) on sector q's axes
 function at(M, q, c, P, T)
     Pa, Ta = r.sectors[q]; x = clamp((P - Pa[1])/step(Pa) + 1, 1, length(Pa) - 1e-9); y = clamp((T - Ta[1])/step(Ta) + 1, 1, length(Ta) - 1e-9)
@@ -254,7 +324,7 @@ dh = [x for x in rows if !isnan(x.a)]
 @printf("S06: dehydration within 0.2 GPa or 20 K: %d/%d at K&O's a, %d/%d with our map; fluid-absent median |dP| %.2f GPa, dry %.2f\n",
         count(ok2, dh), length(dh), count(ok2m, dh), length(dh), median([abs(x.dP) for x in rows if isnan(x.a) && x.src != "dry"]),
         median([abs(x.dP) for x in rows if x.src == "dry"]))
-Pg6 = range(5, 35, length=241); Tc6 = range(500, 1600, length=161); W6 = zeros(length(Pg6), length(Tc6)); as6 = fill("", length(Pg6), length(Tc6))
+Pg6 = range(5, 35, length=601); Tc6 = range(490, 1620, length=453); W6 = zeros(length(Pg6), length(Tc6)); as6 = fill("", length(Pg6), length(Tc6))
 function msh_map!(W, asm, Pv, Tv, MgSi)
     Threads.@threads for i in eachindex(Pv)
         for j in eachindex(Tv)
@@ -266,42 +336,88 @@ function msh_map!(W, asm, Pv, Tv, MgSi)
     end
 end
 msh_map!(W6, as6, Pg6, Tc6, 1.4)
-f = Figure(size=(1400, 1050))
-a = Axis(f[1, 1:2], title="a  MgO-SiO2-H2O at Mg/Si = 1.4, water-saturated at the fitted a(H2O), our minimiser", xlabel="Pressure (GPa)", ylabel="Temperature (°C)")
-hm = heatmap!(a, Pg6, Tc6, W6, colormap=seq, colorrange=(0, 12), interpolate=true); boundaries!(a, Pg6, Tc6, as6)
-labels!(a, Pg6, Tc6, as6; nmin=60)
-scatter!(a, [x.P for x in rows if isnan(x.a)], [x.T for x in rows if isnan(x.a)], marker=:diamond, markersize=10, color=:white, strokecolor=ink, strokewidth=1.2,
-         label="K&O fluid-absent / dry checkpoint")
-scatter!(a, [x.P for x in dh], [x.T for x in dh], markersize=10, color=:white, strokecolor=cat3[2], strokewidth=1.8, label="K&O dehydration checkpoint")
-axislegend(a, position=:rt, labelsize=10, framevisible=true)
-Colorbar(f[1, 3], hm, label="H2O in the solid (wt%)", width=12)
+# ---- S06 figure: map (a), ΔP (b) and ΔT (c) by checkpoint; one symbol per checkpoint class across all panels
 grp(x) = isnan(x.a) ? (x.src == "dry" ? 2 : 1) : 3
-labs = ["R$(x.k) $(round(x.P, digits=1))/$(round(Int, x.T))" for x in rows]
-for (col, (fld, fldm, yl)) in enumerate(((:dP, :dPm, "ΔP at the checkpoint T (GPa)"), (:dT, :dTm, "ΔT at the checkpoint P (K)")))
-    ax = Axis(f[2, col], ylabel=yl, xticks=(1:length(rows), labs), xticklabelrotation=π/2, xticklabelsize=8, title=col == 1 ? "b  Our boundary minus K&O's" : "")
-    hlines!(ax, [0.0], color=muted, linewidth=0.8)
-    for g in 1:3
-        id = [k for k in eachindex(rows) if grp(rows[k]) == g]
-        scatter!(ax, id, [getfield(rows[k], fld) for k in id], color=cat3[g], markersize=9,
-                 label=("fluid-absent (incl. Ohtani calibration)", "dry (Fabrichnaya 2004)", "dehydration at K&O's a(H2O)")[g])
-    end
-    id = [k for k in eachindex(rows) if grp(rows[k]) == 3]
-    scatter!(ax, id, [getfield(rows[k], fldm) for k in id], color=:white, strokecolor=cat3[3], strokewidth=1.5, markersize=9, label="dehydration at our a(H2O) map")
-    col == 1 && axislegend(ax, position=:lb, labelsize=9, framevisible=true)
+mk3 = (:diamond, :rect, :circle); ms3 = (13, 10, 11); dark = colorant"#2b2b2b"; band = colorant"#d9e6f6"; gshade = colorant"#f3f2ee"
+f = with_theme(Theme(fontsize=13, Axis=(xgridvisible=false, ygridvisible=false, xlabelsize=16, ylabelsize=16, xticklabelsize=13, yticklabelsize=13,
+           xticksmirrored=true, yticksmirrored=true, xminorticksvisible=true, yminorticksvisible=true, xtickalign=1, ytickalign=1, xminortickalign=1, yminortickalign=1),
+           )) do
+f = Figure(size=(1400, 1000))
+a = Axis(f[1, 1:2], xlabel="Pressure (GPa)", ylabel="Temperature (°C)")
+hm = heatmap!(a, Pg6, Tc6, W6, colormap=seq, colorrange=(0, 12), interpolate=true)
+boundaries!(a, Pg6, Tc6, as6; color=ink, linewidth=0.8, n=3)
+hyd6 = [any(p in ("phA", "phE", "phD", "shB", "phH", "br") for p in split(h, '+')) for h in as6]   # thick: hydrous-phase stability limit
+contour!(a, collect(Pg6), collect(Tc6), smooth(Float64.(hyd6); n=3), levels=[0.5], color=ink, linewidth=2.4)
+for g in 1:3
+    id = [x for x in rows if grp(x) == g]
+    scatter!(a, [x.P for x in id], [x.T for x in id], marker=mk3[g], color=cat3[g], strokecolor=dark, strokewidth=1.2, markersize=ms3[g])
 end
-save_fig("S06_ko_benchmark.png", f)
+xlims!(a, 5, 35); ylims!(a, 490, 1620)
+Colorbar(f[1, 3], hm, label="H2O in the solid (wt%)", width=14, labelsize=16, ticklabelsize=13)
+labs = ["R$(x.k)  $(round(x.P, digits=1))/$(round(Int, x.T))" for x in rows]; nr = length(rows)
+edges = [findfirst(x -> grp(x) == g, rows) - 0.5 for g in 2:3]
+axs = Axis[]
+for (col, (fld, fldm, yl, tol)) in enumerate(((:dP, :dPm, "ΔP at the checkpoint T (GPa)", 0.2), (:dT, :dTm, "ΔT at the checkpoint P (K)", 20.0)))
+    ax = Axis(f[3, col], ylabel=yl, xlabel="Checkpoint: reaction, P (GPa) / T (°C)", xticks=(1:nr, labs), xticklabelrotation=π/2,
+              xticklabelsize=9, xminorticksvisible=false, xticksmirrored=false)
+    push!(axs, ax)
+    vspan!(ax, edges[1], edges[2], color=gshade)                     # the dry group shaded, the other two plain
+    hspan!(ax, -tol, tol, color=(band, 0.9)); hlines!(ax, [0.0], color=muted, linewidth=0.8)
+    vlines!(ax, edges, color=muted, linewidth=0.6, linestyle=:dash)
+    for (xg, tg) in zip(([0.5, edges[1]], [edges[1], edges[2]], [edges[2], nr + 0.5]), ("fluid-absent", "dry", "dehydration"))
+        text!(ax, (sum(xg)/2 - 0.5)/nr, 1, text=tg, space=:relative, align=(:center, :top), offset=(0, -5), fontsize=12, color=muted, font=:italic)
+    end
+    id = [k for k in 1:nr if grp(rows[k]) == 3]
+    for k in id                                                      # K&O's a -> our map, for the same checkpoint
+        y0, y1 = getfield(rows[k], fld), getfield(rows[k], fldm); (isnan(y0) || isnan(y1)) || lines!(ax, [k, k], [y0, y1], color=(cat3[3], 0.7), linewidth=1.2)
+    end
+    for g in 1:3
+        idg = [k for k in 1:nr if grp(rows[k]) == g]
+        scatter!(ax, idg, [getfield(rows[k], fld) for k in idg], marker=mk3[g], color=cat3[g], strokecolor=dark, strokewidth=1.0, markersize=ms3[g] - 2)
+    end
+    scatter!(ax, id, [getfield(rows[k], fldm) for k in id], marker=:circle, color=:white, strokecolor=cat3[3], strokewidth=1.6, markersize=9)
+    yv = filter(isfinite, vcat([getfield(x, fld) for x in rows], [getfield(x, fldm) for x in rows])); lo, hi = extrema(yv)
+    xlims!(ax, 0.5, nr + 0.5); ylims!(ax, lo - 0.06(hi - lo), hi + 0.16(hi - lo))   # headroom for the group names
+end
+leg = [MarkerElement(marker=mk3[1], color=cat3[1], strokecolor=dark, strokewidth=1.2, markersize=13),
+       MarkerElement(marker=mk3[2], color=cat3[2], strokecolor=dark, strokewidth=1.2, markersize=10),
+       MarkerElement(marker=:circle, color=cat3[3], strokecolor=dark, strokewidth=1.2, markersize=11),
+       MarkerElement(marker=:circle, color=:white, strokecolor=cat3[3], strokewidth=1.6, markersize=10),
+       PolyElement(color=band), LineElement(color=ink, linewidth=2.4)]
+Legend(f[2, 1:3], leg, ["fluid-absent (incl. Ohtani calibration)", "dry (Fabrichnaya 2004)", "dehydration at K&O's a(H2O)",
+       "dehydration at our a(H2O) map (b, c)", "tolerance: 0.2 GPa / 20 K (b, c)", "hydrous-phase limit (a)"], orientation=:horizontal, framevisible=false, labelsize=13, patchsize=(16, 16), colgap=22)
+for (lt, pos) in (("a", f[1, 1:2]), ("b", f[3, 1]), ("c", f[3, 2]))
+    Label(pos[1, 1, TopLeft()], lt, fontsize=18, font=:bold, padding=(0, 8, 4, 0), halign=:right)
+end
+rowsize!(f.layout, 1, Fixed(560)); rowsize!(f.layout, 3, Fixed(250)); rowgap!(f.layout, 1, 8); rowgap!(f.layout, 2, 4)
+resize_to_layout!(f); Makie.update_state_before_display!(f)
+labels_fit!(a, Pg6, Tc6, as6; nsm=3, nmin=round(Int, 0.0015length(as6)), fs=12, fmin=9, sw=0.4, V=W6, vdark=4.0, pts=[(x.P, x.T) for x in rows], rpt=11.0)
+f
+end
+save(joinpath(figs, "S06_ko_benchmark.png"), f, px_per_unit=3); println("wrote S06_ko_benchmark.png")
 
-# ---- S07: the a(H2O) map of the DHMS minimisation
-Pa7 = range(5, 64, length=296); Ta7 = range(400, 1700, length=131); La = [log10(exp(ln_ah2o(P, T + 273.15, A))) for P in Pa7, T in Ta7]
-f = Figure(size=(1100, 560)); a = Axis(f[1, 1], xlabel="Pressure (GPa)", ylabel="Temperature (°C)", title="a(H2O): thin-plate spline in ln a through the labelled anchors")
-hm = heatmap!(a, Pa7, Ta7, La, colormap=Reverse(seq), colorrange=(-2, 0))
-contour!(a, Pa7, Ta7, La, levels=log10.([0.02, 0.05, 0.1, 0.2, 0.5, 0.8]), color=ink, linewidth=0.7, labels=true, labelsize=9)
+# ---- S07: the a(H2O) map of the DHMS minimisation, anchors by source
+Pa7 = range(5, 64, length=591); Ta7 = range(400, 1700, length=261); La = [log10(exp(ln_ah2o(P, T + 273.15, A))) for P in Pa7, T in Ta7]
+f = Figure(size=(1100, 540)); a = Axis(f[1, 1], xlabel="Pressure (GPa)", ylabel="Temperature (°C)")
+hm = heatmap!(a, Pa7, Ta7, La, colormap=:vik100, colorrange=(-2, 0))
+for (lv, cl) in (([0.05, 0.1, 0.2], ink), ([0.02, 0.5, 0.8], :white))   # contours and colorbar in a; white on both dark ends
+    contour!(a, Pa7, Ta7, La, levels=log10.(lv), color=cl, linewidth=0.7, labels=true, labelsize=10, labelformatter=v -> string(round(10^v, sigdigits=2)))
+end
 poly!(a, Rect(5, 500, 55, 1100), color=:transparent, strokecolor=muted, strokewidth=1, linestyle=:dash)
-nk = size(KO_AH2O, 1); Q = A.Q
-scatter!(a, Q[1:nk, 1], Q[1:nk, 2], color=:white, strokecolor=ink, strokewidth=1.2, markersize=9, label="K&O 2006 fits, a = 1 from Komabayashi 2005")
-scatter!(a, Q[nk+1:end, 1], Q[nk+1:end, 2], color=:white, strokecolor=cat3[2], strokewidth=1.8, markersize=9, label="Nishi 2014 dehydration lines (phase D, phase H)")
-for k in axes(Q, 1); text!(a, Q[k, 1], Q[k, 2], text=string(round(Q[k, 3], sigdigits=2)), offset=(5, 3), fontsize=9, color=ink); end
-axislegend(a, position=:lb, labelsize=9, framevisible=true); Colorbar(f[1, 2], hm, label="log10 a(H2O)", width=12)
+nk = size(KO_AH2O, 1); Q = A.Q; dark = colorant"#3a3a3a"
+for (lab, id, mk, fc, ms) in (("Komabayashi et al. 2005 (a = 1)", [k for k in 1:nk if Q[k, 3] == 1], :circle, colorant"#ffffff", 11),
+                              ("Komabayashi & Omori 2006 fits", [k for k in 1:nk if Q[k, 3] < 1], :diamond, colorant"#f5b83d", 14),
+                              ("Nishi et al. 2014 dehydration lines (phase D, phase H)", collect(nk+1:size(Q, 1)), :rect, cat3[3], 12))
+    scatter!(a, Q[id, 1], Q[id, 2], marker=mk, color=fc, strokecolor=dark, strokewidth=1.3, markersize=ms, label=lab)
+end
+for k in axes(Q, 1)                                     # white values on the dark ends; below the point if a left neighbour sits level
+    cl = any(j != k && abs(Q[j, 1] - Q[k, 1]) < 2.5 && abs(Q[j, 2] - Q[k, 2]) < 15 && Q[j, 1] < Q[k, 1] for j in axes(Q, 1))
+    text!(a, Q[k, 1], Q[k, 2], text=string(round(Q[k, 3], sigdigits=2)), offset=cl ? (7, -4) : (7, 4), align=cl ? (:left, :top) : (:left, :bottom),
+          fontsize=10, color=abs(log10(Q[k, 3]) + 1) > 0.55 ? :white : ink)
+end
+axislegend(a, position=:rt, labelsize=12, framevisible=true, backgroundcolor=(:white, 0.92), patchsize=(14, 14), rowgap=4)
+av = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0]
+Colorbar(f[1, 2], hm, label="a(H2O) (log scale)", width=12, ticks=(log10.(av), string.(av)))
 save_fig("S07_activity.png", f)
 
 # ---- S08: phase H in Nishi et al. (2014) Fig 2 bulks, with their boundaries and observations
@@ -351,9 +467,31 @@ for (col, (P, T)) in enumerate(((20.0, 1100.0), (40.0, 1100.0)))
 end
 save_fig("S09_msh_hull.png", f)
 
-# ---- S10 / S11 / S12: capacity with host, DHMS gain, share held by hydrous phases (all sectors)
-for (fn, M, cm, cr, cl, lab) in (("S10_capacity.png", r.S, seq, (-3, 1.3), "log10 capacity (wt% of solid); dashed: 0.01, 0.1, 1 wt%", true),
-                                 ("S11_dhms_gain.png", r.S ./ r0.S, div, (-2.5, 2.5), "log10 (with DHMS / without)", false),
+# ---- S10: capacity with host; columns are compositions, rows the sectors with pressure increasing downwards.
+#  Uses the 300 x 300 maps of out/hires (SFO2_NP/NT=300, harzburgite, basalt, 20 % mix) when present
+mh = isfile(joinpath(run, "hires", "sH2O_maps.jls")) ? blk3(deserialize(joinpath(run, "hires", "sH2O_maps.jls"))) : r
+f = Figure(size=(1400, 1500)); hms = Any[]; lbl = Any[]
+for (col, c) in enumerate((1, 3, 2)), q in 1:3
+    P, T = mh.sectors[q]; C = log10.(max.(mh.S[:, :, q, c], 1e-4)); H = permutedims(mh.Shost[:, :, q, c])
+    a = Axis(f[q, col], title="$(bnames[c]): $(snames[q])", xlabel=q == 3 ? "Temperature (K)" : "", ylabel=col == 1 ? "Pressure (GPa)" : "")
+    push!(hms, heatmap!(a, collect(T), collect(P), permutedims(C), colormap=seq, colorrange=(-3, 1.3), interpolate=true))
+    contour!(a, collect(T), collect(P), permutedims(smooth(C; n=3)), levels=[-2, -1, 0], color=ink, linewidth=0.7, linestyle=:dash)
+    boundaries!(a, T, P, H; color=(ink, 0.6), n=4)
+    push!(lbl, (a, T, P, H, permutedims(C), q == 3 ? [50.0, 60.0] : (q == 1 && c != 2 ? [5.0, 6.0] : (q == 2 && c == 2 ? [9.5, 10.0] : Float64[]))))
+    q == 3 && hlines!(a, [50.0, 60.0], color=muted, linestyle=:dash, linewidth=1)
+    q == 1 && c != 2 && hlines!(a, [5.0, 6.0], color=muted, linestyle=:dot, linewidth=1)
+    q == 2 && c == 2 && hlines!(a, [9.5, 10.0], color=muted, linestyle=:dot, linewidth=1)
+    xlims!(a, T[1], T[end]); ylims!(a, P[end], P[1])           # high-to-low limits: pressure increases downwards
+end
+Colorbar(f[4, 1:3], hms[1], vertical=false, flipaxis=false, width=Relative(0.5), height=16, halign=:center,
+         label="log10 capacity (wt% of solid); dashed: 0.01, 0.1, 1 wt%")
+rowgap!(f.layout, 3, 18)
+Makie.update_state_before_display!(f)                               # labels need the final axis sizes in pixels
+for (a, T, P, H, Vc, av) in lbl; labels_fit!(a, T, P, H; nmin=round(Int, 0.0025length(H)), V=Vc, avoid=av); end
+save(joinpath(figs, "S10_capacity.png"), f, px_per_unit=3); println("wrote S10_capacity.png")
+
+# ---- S11 / S12: DHMS gain, share held by hydrous phases (all sectors)
+for (fn, M, cm, cr, cl, lab) in (("S11_dhms_gain.png", r.S ./ r0.S, div, (-2.5, 2.5), "log10 (with DHMS / without)", false),
                                  ("S12_hydrous_share.png", r.Shyd ./ r.S, seq, (0, 1), "share of the capacity in hydrous phases", false))
     f = Figure(size=(1400, 1150)); hms = Any[]
     for (row, c) in enumerate((1, 3, 2)), q in 1:3

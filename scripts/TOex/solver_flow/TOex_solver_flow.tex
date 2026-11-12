@@ -1,0 +1,883 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,landscape,margin=1.6cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{mathtools}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{tabularx}
+\usepackage{array}
+\captionsetup{font=small,labelfont=bf}
+\newcommand{\fig}[2]{\begin{figure}[p]\centering\includegraphics[width=\linewidth,height=0.86\textheight,keepaspectratio]{#1}\caption{#2}\end{figure}\clearpage}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+\allowdisplaybreaks
+\newcommand{\fOt}{f_{\mathrm{O_2}}}
+\newcommand{\fHt}{f_{\mathrm{H_2}}}
+\newcommand{\aC}{a_{\mathrm{C}}}
+\newcommand{\aw}{a_{\mathrm{H_2O}}}
+\newcommand{\mO}{m_{\mathrm{O}}}
+\newcommand{\mW}{m_{\mathrm{H_2O}}}
+\newcommand{\nox}{n_{\mathrm{ox}}}
+\newcommand{\Xm}[1]{X^{m}_{\mathrm{#1}}}
+\newcommand{\src}[1]{from #1}
+\newcommand{\solved}[1]{\textcolor{red!80!black}{\bfseries #1}}
+\newenvironment{vartab}{\small\renewcommand{\arraystretch}{1.25}\tabularx{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.30\linewidth}>{\raggedright\arraybackslash}X@{}}\hline variable & what it is\\\hline}{\hline\endtabularx}
+
+\begin{document}
+
+\section*{1a. Oxygen demand $D^{\mathrm{Oxy}}$ \quad (unknown $f=\log_{10}\fOt$)}
+\vspace*{\fill}
+{\small\setlength{\abovedisplayskip}{13pt}\setlength{\belowdisplayskip}{13pt}\setlength{\abovedisplayshortskip}{13pt}\setlength{\belowdisplayshortskip}{13pt}
+\begin{center}\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}l l l@{}}
+  \hline
+  species & excess O & why \\
+  \hline
+  FeO, H$_2$O, C (graphite, diamond) & 0 & the reference \\
+  Fe$^{3+}$ (FeO$_{1.5}$), solid and melt & $+\tfrac12$ per Fe & FeO $+\tfrac12$O \\
+  Fe metal & $-1$ per Fe & FeO $-$ O, the most reduced the solid can be \\
+  H$_2$, fluid and melt & $-1$ per H$_2$ & H$_2$O $-$ O \\
+  CH$_4$ & $-2$ per C & C $+$ 2H$_2$, two waters without their O \\
+  CO & $+1$ per C & C $+$ O \\
+  CO$_2$, fluid and melt & $+2$ per C & C $+$ 2O \\
+  carbonate (CO$_3^{2-}$ with MgO, CaO) & $+2$ per C & as CO$_2$, the oxide part is neutral \\
+  \hline
+\end{tabular}
+\end{center}
+
+\textbf{What is solved.} The cell holds an excess-oxygen budget of $\mathrm{TOex}\,M$ grams ($\mathrm{TOex}$ per gram of cell, carried by the tracers; $M$ the cell mass). Each sink of the cell holds an amount of this oxygen that grows with the cell's fO$_2$. The \emph{oxygen demand} $D^{\mathrm{Oxy}}(f)$ is what all sinks together hold at a trial $f$, and the solve looks for the $f$ at which it equals the budget:
+\begin{gather}
+  F^{\mathrm{Oxy}}(f)=D^{\mathrm{Oxy}}(f)-\mathrm{TOex}\,M=0\\[14pt]
+  D^{\mathrm{Oxy}}(f)=\underbrace{s_{\mathrm{ex}}}_{\text{solid Fe}^{3+}}
+  +\underbrace{m_{\mathrm{ex}}}_{\text{melt Fe}^{3+}}
+  +\underbrace{\Phi\,\frac{\Xm{CO_2}}{1-\Xm{CO_2}}}_{\text{melt CO}_2}
+  +\underbrace{2\mO\,n_{\mathrm{C}}^{\mathrm{carb}}}_{\text{carbonate}}
+  +\underbrace{\mO\,n\big(2X_{\mathrm{CO_2}}+X_{\mathrm{CO}}-2X_{\mathrm{CH_4}}-X_{\mathrm{H_2}}\big)}_{\text{fluid}}
+  \underbrace{-\,\mO\,n^{m}_{\mathrm{H_2}}}_{\text{melt H}_2}
+\end{gather}
+with every term in grams of O and $\mO$ the molar mass of O. The other sinks are introduced in Secs.~2--4. Every sink holds more oxygen at higher $f$, so $D^{\mathrm{Oxy}}$ rises with $f$.
+}
+
+\vspace*{\fill}
+\clearpage
+\section*{1b. Oxygen: the iron sinks}
+\vspace*{\fill}
+{\small\setlength{\abovedisplayskip}{13pt}\setlength{\belowdisplayskip}{13pt}\setlength{\abovedisplayshortskip}{13pt}\setlength{\belowdisplayshortskip}{13pt}
+Both iron sinks are read at the trial $f$ by inverting an oxybarometer:
+\begin{itemize}[leftmargin=1.2em,itemsep=5pt,topsep=5pt]
+  \item \textbf{Solid Fe$^{3+}$}, $s_{\mathrm{ex}}$ (g of O). MAGEMin gives the fO$_2$ of the solid, $f_s(s)$, as a function of its ferric load $s$. The solve inverts it at the trial $f$:
+  \[ f_s(s_{\mathrm{ex}})=f,\qquad -\underbrace{s_{\mathrm{floor}}}_{\text{all metal}}\le s_{\mathrm{ex}}\le \underbrace{s_{\mathrm{stoich}}}_{\text{all ferric}}=\tfrac12\,n_{\mathrm{Fe}}^{s}\,\mO \]
+  with $n_{\mathrm{Fe}}^{s}$ the moles of Fe in the solid. Above the MAGEMin table the solid's fO$_2$ is extrapolated in log, with $r=s/s_{\mathrm{stoich}}$ its Fe$^{3+}$/$\Sigma$Fe:
+  \[ f_s(s)=f_N+\frac{1}{0.1917}\Big[\log_{10}\frac{r}{1-r}-\log_{10}\frac{R_{\max}}{1-R_{\max}}\Big],\qquad r>R_{\max} \]
+  with $R_{\max}=0.4$ the top of the MAGEMin table and $f_N$ its fO$_2$ there.
+  \vspace{1.4cm}
+  \item \textbf{Melt Fe$^{3+}$}, $m_{\mathrm{ex}}$ (g of O). Hirschmann (2022) gives $f$ from the melt's Fe$^{3+}$/Fe$^{2+}$ ratio $\rho$; the solve inverts it at the trial $f$:
+  \begin{gather*}
+    f=\frac{1}{a}\Big[\log_{10}\rho-b-\frac{c}{T}+\frac{\Delta C_p}{R\ln10}\Big(1-\frac{T_0}{T}-\ln\frac{T}{T_0}\Big)+\frac{\int_1^P\!\Delta V\,dP}{RT\ln10}-\frac{Y}{T}\Big],\qquad
+    \rho=\frac{2m_{\mathrm{ex}}/\mO}{n_{\mathrm{Fe}}^{m}-2m_{\mathrm{ex}}/\mO}\\[20pt]
+    Y=y_1X_{\mathrm{Si}}+y_3X_{\mathrm{Mg}}+y_4X_{\mathrm{Ca}}+y_5X_{\mathrm{Na}}+y_8X_{\mathrm{Si}}X_{\mathrm{Al}}+y_9X_{\mathrm{Si}}X_{\mathrm{Mg}}
+  \end{gather*}
+  with $a$, $b$, $c$, $\Delta C_p$, $T_0$, $y_k$ the constants of the law, $Y$ its composition term, $X_k$ the cation fractions of the melt and $n_{\mathrm{Fe}}^{m}$ its moles of Fe.
+\end{itemize}
+}
+
+% ---------------------------------------------------------------------------------------------------
+\vspace*{\fill}
+\clearpage
+\section*{1c. Oxygen: variables}
+\vspace*{\fill}
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $f=\log_{10}\fOt$               & oxygen fugacity of the cell, the unknown \\
+  $D^{\mathrm{Oxy}}(f)$           & oxygen demand: excess O all sinks hold at $f$, g \\
+  $F^{\mathrm{Oxy}}(f)$           & oxygen residual, demand minus budget, g \\
+  $\mathrm{TOex}$, $M$            & excess-oxygen budget per gram of cell (tracers), and cell mass (1000 g) \\
+  $\mO$                           & molar mass of oxygen \\
+  $s_{\mathrm{ex}}$, $m_{\mathrm{ex}}$ & excess oxygen held as Fe$^{3+}$ in the solid and in the melt \\
+  $f_s(s)$                        & fO$_2$ of the solid at ferric load $s$ (MAGEMin sb24 table) \\
+  $R_{\max}$, $f_N$               & top of the MAGEMin table in Fe$^{3+}$/$\Sigma$Fe (0.4), and the fO$_2$ there \\
+  $r=s/s_{\mathrm{stoich}}$       & ferric fraction Fe$^{3+}$/$\Sigma$Fe of the solid \\
+  $s_{\mathrm{floor}}$, $s_{\mathrm{stoich}}$ & solid load with all Fe as metal, and with all Fe ferric \\
+  $n_{\mathrm{Fe}}^{s}$, $n_{\mathrm{Fe}}^{m}$ & moles of Fe in the solid and in the melt \\
+  $\rho$                          & Fe$^{3+}$/Fe$^{2+}$ of the melt \\
+\end{vartab}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $a$, $b$, $c$                   & constants of the melt oxybarometer (Hirschmann 2022) \\
+  $\Delta C_p$, $T_0$             & its heat-capacity term and reference temperature \\
+  $y_1\dots y_9$                  & its melt-composition coefficients \\
+  $\int\!\Delta V\,dP$            & its volume term, per $P$ and $T$ \\
+  $X_{\mathrm{Si}}\dots X_{\mathrm{Na}}$ & cation fractions of the basaltic melt \\
+  $\Phi=2\mO\nox$                 & grams of O per unit $X/(1-X)$ of melt CO$_2$ \\
+  $\nox$                          & moles of oxide in the melt \\
+  $\Xm{CO_2}$                     & CO$_2$ mole fraction of the melt (Sec.~3) \\
+  $n_{\mathrm{C}}^{\mathrm{carb}}$ & moles of carbon in carbonate (Sec.~3) \\
+  $n$, $X_i$                      & fluid moles and species mole fractions (Sec.~2) \\
+  $n^{m}_{\mathrm{H_2}}$          & moles of H$_2$ dissolved in the melt (Sec.~4) \\
+  $P$, $T$                        & pressure and temperature of the cell \\
+\end{vartab}
+\end{minipage}
+
+% ---------------------------------------------------------------------------------------------------
+\vspace*{\fill}
+\clearpage
+\section*{2a. Fluid closure $s_X^{\mathrm{Flu}}$ \quad (unknown $n$, the fluid moles, solved as $u=\ln n$)}
+\vspace*{\fill}
+{\small\setlength{\abovedisplayskip}{13pt}\setlength{\belowdisplayskip}{13pt}\setlength{\abovedisplayshortskip}{13pt}\setlength{\belowdisplayshortskip}{13pt}
+\textbf{The species.} At the trial fO$_2$ the four C--O--H equilibria
+\begin{equation*}
+  \begin{aligned}
+    \mathrm{C}+\mathrm{O_2}               &= \mathrm{CO_2}, & \qquad K_1 &= \frac{f_{\mathrm{CO_2}}}{\aC\,\fOt}\\[3pt]
+    \mathrm{C}+\tfrac12\mathrm{O_2}       &= \mathrm{CO},   & \qquad K_2 &= \frac{f_{\mathrm{CO}}}{\aC\,\fOt^{1/2}}\\[3pt]
+    \mathrm{H_2}+\tfrac12\mathrm{O_2}     &= \mathrm{H_2O}, & \qquad K_3 &= \frac{f_{\mathrm{H_2O}}}{\fHt\,\fOt^{1/2}}\\[3pt]
+    \mathrm{C}+2\mathrm{H_2}              &= \mathrm{CH_4}, & \qquad K_4 &= \frac{f_{\mathrm{CH_4}}}{\aC\,\fHt^{2}}
+  \end{aligned}
+  \qquad\qquad\qquad
+  \begin{aligned}
+    K_j &= \exp\!\big(-\Delta G^\circ_j/RT\big)\\[6pt]
+    f_i &= \varphi_i\,X_i\,P
+  \end{aligned}
+\end{equation*}
+fix every fluid species from two potentials, the carbon activity $\aC=e^{x}$ (Sec.~3) and the H$_2$ fugacity $\fHt=e^{y}$ (Sec.~4):
+\begin{equation}
+  X_{\mathrm{H_2O}}=\frac{K_3\fHt\sqrt{\fOt}}{\varphi_{\mathrm{H_2O}}P},\quad
+  X_{\mathrm{H_2}}=\frac{\fHt}{\varphi_{\mathrm{H_2}}P},\quad
+  X_{\mathrm{CO_2}}=\frac{\aC K_1\fOt}{\varphi_{\mathrm{CO_2}}P},\quad
+  X_{\mathrm{CO}}=\frac{\aC K_2\sqrt{\fOt}}{\varphi_{\mathrm{CO}}P},\quad
+  X_{\mathrm{CH_4}}=\frac{\aC K_4\fHt^{2}}{\varphi_{\mathrm{CH_4}}P}
+\end{equation}
+$f_i$ is the fugacity of species $i$ and $K_j$ the equilibrium constant of reaction $j$, from its standard Gibbs energy $\Delta G^\circ_j$ with carbon at its stable polymorph, $\mu^\circ_{\mathrm C}=\min(G_{\mathrm{gph}},G_{\mathrm{dia}})(P,T)$, and the gases at 1 bar (HP98). $\varphi_i$ is the fugacity coefficient of species $i$ (Sec.~6), held fixed during this solve, and $P$, $T$ are the cell's pressure and temperature.
+
+\textbf{The closure.} A fluid can exist only if its mole fractions add up to one. Their sum is $s_X^{\mathrm{Flu}}$:
+\begin{equation}
+  s_X^{\mathrm{Flu}}=\sum_iX_i,\qquad F^{\mathrm{Flu}}(u)=\ln s_X^{\mathrm{Flu}}\big(x(u),\,y(u)\big)=0,\qquad n\ge0,\quad s_X^{\mathrm{Flu}}\le1,\quad n\,(1-s_X^{\mathrm{Flu}})=0
+\end{equation}
+It depends on $n$ only indirectly. The carbon and hydrogen closures (Secs.~3--4) share their budgets between the fluid and the other sinks, so their potentials $x(u)$ and $y(u)$ depend on how much fluid there is. More fluid moles leave less of each element per mole, the potentials drop, and $s_X^{\mathrm{Flu}}$ falls with $u$.
+
+\textbf{The switch.} Whether a fluid exists is decided first. Carbon and hydrogen are solved at $n=0$, and if $s_X^{\mathrm{Flu}}\le1$ there is no fluid. Only otherwise is $u$ solved, so no step ever crosses the switch. Above 50 GPa the fluid is taken as ideal pure water.
+}
+
+% ---------------------------------------------------------------------------------------------------
+\vspace*{\fill}
+\clearpage
+\section*{2b. Fluid: the derivative}
+\vspace*{\fill}
+{\small\setlength{\abovedisplayskip}{13pt}\setlength{\belowdisplayskip}{13pt}\setlength{\abovedisplayshortskip}{13pt}\setlength{\belowdisplayshortskip}{13pt}
+\textbf{Species.} Each species is a power law in the two potentials, $X_i\propto\aC^{\nu_{C,i}}\fHt^{\nu_{H,i}}$, with exponents $(\nu_C,\nu_H)$ of $(0,1)$ for H$_2$O and H$_2$, $(1,0)$ for CO$_2$ and CO, and $(1,2)$ for CH$_4$. So
+\begin{equation}
+  \frac{\partial X_i}{\partial x}=\nu_{C,i}X_i,\qquad \frac{\partial X_i}{\partial y}=\nu_{H,i}X_i,\qquad
+  \frac{\partial s_X^{\mathrm{Flu}}}{\partial x}=X_{\mathrm{CO_2}}+X_{\mathrm{CO}}+X_{\mathrm{CH_4}},\qquad
+  \frac{\partial s_X^{\mathrm{Flu}}}{\partial y}=X_{\mathrm{H_2O}}+2X_{\mathrm{CH_4}}+X_{\mathrm{H_2}}
+\end{equation}
+\textbf{How $x$ and $y$ move with $u$.} The carbon and hydrogen residuals $F^{\mathrm{Car}}(x,y,u)$ and $F^{\mathrm{Hyd}}(x,y,u)$ (Secs.~3--4) stay zero as $u$ changes, so the direct effect of $u$ is cancelled by the shift of the roots:
+\begin{equation}
+  \frac{\partial F^{\mathrm{Car}}}{\partial u}+\frac{\partial F^{\mathrm{Car}}}{\partial x}\frac{dx}{du}+\frac{\partial F^{\mathrm{Car}}}{\partial y}\frac{dy}{du}=0,\qquad
+  \frac{\partial F^{\mathrm{Hyd}}}{\partial u}+\frac{\partial F^{\mathrm{Hyd}}}{\partial x}\frac{dx}{du}+\frac{\partial F^{\mathrm{Hyd}}}{\partial y}\frac{dy}{du}=0
+\end{equation}
+or, as one matrix equation in the two unknown shifts,
+\begin{equation}
+  \underbrace{\begin{pmatrix}\partial F^{\mathrm{Car}}/\partial x & \partial F^{\mathrm{Car}}/\partial y\\[2pt] \partial F^{\mathrm{Hyd}}/\partial x & \partial F^{\mathrm{Hyd}}/\partial y\end{pmatrix}}_{\mathbf J}
+  \begin{pmatrix}dx/du\\[2pt] dy/du\end{pmatrix}=-\begin{pmatrix}\partial F^{\mathrm{Car}}/\partial u\\[2pt] \partial F^{\mathrm{Hyd}}/\partial u\end{pmatrix}
+\end{equation}
+so their roots move as
+\begin{equation}
+  \begin{pmatrix}dx/du\\ dy/du\end{pmatrix}=-\mathbf J^{-1}\begin{pmatrix}\partial F^{\mathrm{Car}}/\partial u\\ \partial F^{\mathrm{Hyd}}/\partial u\end{pmatrix}
+\end{equation}
+where $\mathbf J$ is the Jacobian of the two closures, whose entries are derived in 3b and 4b.
+
+\textbf{The derivative} of the fluid residual is then the chain rule through both potentials:
+\begin{equation}
+  \frac{dF^{\mathrm{Flu}}}{du}=\frac{1}{s_X^{\mathrm{Flu}}}\Big(\frac{\partial s_X^{\mathrm{Flu}}}{\partial x}\frac{dx}{du}+\frac{\partial s_X^{\mathrm{Flu}}}{\partial y}\frac{dy}{du}\Big)<0
+\end{equation}
+
+\textbf{Newton on $u$.}
+\begin{equation}
+  u_{k+1}=u_k-\frac{F^{\mathrm{Flu}}(u_k)}{dF^{\mathrm{Flu}}/du},\qquad u\in\big[\ln n_{\max}-70,\ \ln n_{\max}\big],\qquad n_{\max}=N_{\mathrm C}+N_{\mathrm H}/2
+\end{equation}
+$n_{\max}$ is the fluid of a cell whose whole carbon budget $N_{\mathrm C}$ and hydrogen budget $N_{\mathrm H}$ (moles) were in the fluid. A step leaving the bracket is replaced by bisection. Tolerance $|F^{\mathrm{Flu}}|\le10^{-12}$.
+}
+
+% ---------------------------------------------------------------------------------------------------
+\vspace*{\fill}
+\clearpage
+\section*{2c. Fluid: variables}
+\vspace*{\fill}
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $u=\ln n$                       & log of the fluid moles, the unknown \\
+  $n$                             & moles of fluid in the cell \\
+  $s_X^{\mathrm{Flu}}$                           & sum of the species mole fractions \\
+  $F^{\mathrm{Flu}}=\ln s_X^{\mathrm{Flu}}$ & fluid residual \\
+  $X_i$                           & mole fraction of species $i$ (H$_2$O, H$_2$, CO$_2$, CO, CH$_4$) \\
+  $\aC=e^x$                       & carbon activity (Sec.~3) \\
+  $\fHt=e^y$                      & H$_2$ fugacity (Sec.~4) \\
+  $\fOt$                          & trial fO$_2$ of the outer solve (Sec.~1) \\
+  $\nu_{C,i}$, $\nu_{H,i}$        & exponents of $\aC$ and $\fHt$ in $X_i$ \\
+  $n_{\max}$                      & upper end of the bracket of $n$ \\
+\end{vartab}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $K_1\dots K_4$                  & equilibrium constants of the four reactions (HP98) \\
+  $\Delta G^\circ_j$              & standard Gibbs energy of reaction $j$ \\
+  $\mu^\circ_{\mathrm C}$         & standard potential of carbon, graphite or diamond \\
+  $\varphi_i$                     & fugacity coefficient of species $i$ (Sec.~6), fixed here \\
+  $P$, $T$                        & pressure and temperature of the cell \\
+  $F^{\mathrm{Car}}$, $F^{\mathrm{Hyd}}$ & carbon and hydrogen residuals (Secs.~3, 4) \\
+  $\mathbf J$                     & Jacobian of $(F^{\mathrm{Car}},F^{\mathrm{Hyd}})$ in $(x,y)$ \\
+  $N_{\mathrm C}$, $N_{\mathrm H}$ & carbon and hydrogen budgets, moles \\
+\end{vartab}
+\end{minipage}
+
+% ---------------------------------------------------------------------------------------------------
+\vspace*{\fill}
+\clearpage
+\section*{3a. Carbon demand $D^{\mathrm{Car}}$ \quad (unknown $x=\ln\aC$)}
+\vspace*{\fill}
+{\small\setlength{\abovedisplayskip}{13pt}\setlength{\belowdisplayskip}{13pt}\setlength{\abovedisplayshortskip}{13pt}\setlength{\belowdisplayshortskip}{13pt}
+\textbf{What is solved.} The cell holds $N_{\mathrm C}$ moles of carbon (tracers). It can sit dissolved as CO$_2$ in the melt, in the fluid, or as a solid (graphite, diamond or carbonate), and how much each sink holds grows with the carbon activity $\aC$. The \emph{carbon demand} $D^{\mathrm{Car}}(x)$ is what all three hold at a trial $x=\ln\aC$, with the fluid amount $n$ and the hydrogen potential $y$ held at their trial values:
+\begin{equation}
+  D^{\mathrm{Car}}(x)=\underbrace{\nox\frac{\Xm{CO_2}}{1-\Xm{CO_2}}}_{\text{melt CO}_2}
+  +\underbrace{n\big(X_{\mathrm{CO_2}}+X_{\mathrm{CO}}+X_{\mathrm{CH_4}}\big)}_{\text{fluid}}
+  +\underbrace{n_{\mathrm C}^{\mathrm{sol}}(x)}_{\text{solid}},\qquad
+  F^{\mathrm{Car}}=\ln\frac{D^{\mathrm{Car}}}{N_{\mathrm C}}=0
+\end{equation}
+\textbf{Melt CO$_2$.} $\nox$ is the moles of oxide in the melt and $\Xm{CO_2}$ its CO$_2$ mole fraction. A graphite-saturated melt at fO$_2$ $f$ holds $B_m$ (Stagno \& Frost 2010), and $\aC$ scales it:
+\begin{equation}
+  v=\aC B_m,\qquad B_m=10^{\,f-5.44+21380/T-0.078(P-1)/T},\qquad
+  \Xm{CO_2}=\mathrm{softcap}\big(v,\ X_{\max}\big)
+\end{equation}
+$v$ is the melt CO$_2$ before any limit, and $X_{\max}=0.5$ its ceiling. The \emph{softcap} is a smooth minimum, close to $v$ well below the ceiling and to $X_{\max}$ above it, so the demand has a continuous slope:
+\begin{equation}
+  \mathrm{softcap}(v,c)=\max\!\Big(0,\ -\tfrac1\beta\ln\big(e^{-\beta v}+e^{-\beta c}\big)\Big),\qquad \beta=30/c\quad\text{(sharpness)}
+\end{equation}
+\textbf{Fluid.} The carbon species of Sec.~2, $n$ moles of fluid times their mole fractions.
+
+\textbf{Solid.} At saturation the solid holds whatever melt and fluid do not. Saturation is at $x_{\mathrm{cap}}$, set by the EMOG(D) reaction $\mathrm{2MgCO_3+Mg_2Si_2O_6=2Mg_2SiO_4+2C+2O_2}$ with standard Gibbs energy $\Delta G^\circ_{\mathrm{EMOG}}$ (HP98). Below it the solid share falls by a factor $e$ for every $w=0.01\ln10$ in $\ln\aC$:
+\begin{gather}
+  n_{\mathrm C}^{\mathrm{sol}}(x)=N_{\mathrm C}\exp\!\Big(\frac{\min(x-x_{\mathrm{cap}},0)}{w}\Big),\qquad
+  x_{\mathrm{cap}}=\ln\min\big(1,10^{\,f_E-f}\big),\qquad f_E=-\frac{\Delta G^\circ_{\mathrm{EMOG}}}{2RT\ln10}\nonumber\\
+  n_{\mathrm{C}}^{\mathrm{carb}}=\chi\,n_{\mathrm C}^{\mathrm{sol}},\qquad n_{\mathrm{C}}^{\mathrm{gph}}=(1-\chi)\,n_{\mathrm C}^{\mathrm{sol}},\qquad
+  \chi=\Big[1+e^{-(f-f_E)/0.05}\Big]^{-1}
+\end{gather}
+$f_E$ is the fO$_2$ of EMOG(D). Above it the solid carbon is carbonate, below it graphite or diamond, and $\chi$ switches between them over 0.05 log units.
+}
+
+% ---------------------------------------------------------------------------------------------------
+\vspace*{\fill}
+\clearpage
+\section*{3b. Carbon: the derivative}
+\vspace*{\fill}
+\begin{minipage}[t]{\linewidth}\vspace{0pt}\small\setlength{\abovedisplayskip}{13pt}\setlength{\belowdisplayskip}{13pt}\setlength{\abovedisplayshortskip}{13pt}\setlength{\belowdisplayshortskip}{13pt}
+\textbf{The softcap's slope} is the weight of $v$ in the smooth minimum, 1 well below the ceiling and 0 above it (0 also where the outer max clips to 0):
+\begin{equation}
+  \sigma(v)=\frac{d\,\mathrm{softcap}}{dv}=\frac{1}{1+e^{\beta(v-X_{\max})}}
+\end{equation}
+\textbf{The derivative.} The solve differentiates $F^{\mathrm{Car}}=\ln D^{\mathrm{Car}}-\ln N_{\mathrm C}$, so each entry is a partial of $D^{\mathrm{Car}}$ divided by $D^{\mathrm{Car}}$. Since $dv/dx=v$ and $dX_i/dx=\nu_{C,i}X_i$ (2b):
+\begin{equation}
+  \frac{\partial F^{\mathrm{Car}}}{\partial x}=\frac{1}{D^{\mathrm{Car}}}\Big[
+  \underbrace{\frac{\nox\,\sigma(v)\,v}{(1-\Xm{CO_2})^2}}_{\text{melt}}
+  +\underbrace{n\big(X_{\mathrm{CO_2}}+X_{\mathrm{CO}}+X_{\mathrm{CH_4}}\big)}_{\text{fluid}}
+  +\underbrace{\frac{n_{\mathrm C}^{\mathrm{sol}}}{w}\,\mathbb 1[x<x_{\mathrm{cap}}]}_{\text{solid}}\Big]>0
+\end{equation}
+with $\mathbb 1[\cdot]$ equal to 1 where its condition holds and 0 elsewhere. The couplings to hydrogen (only through CH$_4$) and to the fluid amount are
+\begin{equation}
+  \frac{\partial F^{\mathrm{Car}}}{\partial y}=\frac{2nX_{\mathrm{CH_4}}}{D^{\mathrm{Car}}},\qquad
+  \frac{\partial F^{\mathrm{Car}}}{\partial u}=\frac{n\big(X_{\mathrm{CO_2}}+X_{\mathrm{CO}}+X_{\mathrm{CH_4}}\big)}{D^{\mathrm{Car}}}
+\end{equation}
+\textbf{At the cap} the solid term stops growing and $\partial F^{\mathrm{Car}}/\partial x$ steps down. The cap is the upper end of the bracket $[x_{\mathrm{cap}}-700,\ x_{\mathrm{cap}}]$ and, with graphite saturated, often the root itself. The slope is taken from below there, otherwise the Jacobian is singular. Without fluid ($n=0$) carbon no longer depends on $y$ and the carbon and hydrogen closures decouple.
+
+\textbf{Computed by} ForwardDiff (dual numbers) in one pass with $D^{\mathrm{Car}}$; the expressions above are what it returns. $D^{\mathrm{Car}}$ rises monotonically with $x$, so the root is unique. Tolerance $|F^{\mathrm{Car}}|\le10^{-12}$.
+\end{minipage}
+
+% ---------------------------------------------------------------------------------------------------
+\vspace*{\fill}
+\clearpage
+\section*{3c. Carbon: demand by sink against fO$_2$}
+\vspace*{\fill}
+\begin{center}\includegraphics[width=\linewidth]{figs/demand_C.png}\end{center}
+\vspace*{\fill}
+\clearpage
+\section*{3d. Carbon: variables}
+\vspace*{\fill}
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $x=\ln\aC$                      & log of the carbon activity, the unknown \\
+  $D^{\mathrm{Car}}(x)$           & carbon demand: moles of carbon all sinks hold at $x$ \\
+  $F^{\mathrm{Car}}$              & carbon residual, $\ln(D^{\mathrm{Car}}/N_{\mathrm C})$ \\
+  $N_{\mathrm C}$                 & carbon budget of the cell, moles (tracers) \\
+  $y$, $u=\ln n$                  & H$_2$ potential and fluid amount, at their trial values \\
+  $\nox$                          & moles of oxide in the melt \\
+  $\Xm{CO_2}$                     & CO$_2$ mole fraction of the melt \\
+  $B_m$                           & melt CO$_2$ of a graphite-saturated melt at $f$ (Stagno \& Frost 2010) \\
+  $v=\aC B_m$                     & melt CO$_2$ before its ceiling \\
+  $X_{\max}$                      & ceiling of the melt CO$_2$ \\
+  softcap, $\beta$                & smooth minimum and its sharpness \\
+  $\sigma(v)$                     & slope of the softcap \\
+\end{vartab}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $n_{\mathrm C}^{\mathrm{sol}}(x)$ & moles of solid carbon (graphite, diamond and carbonate) \\
+  $x_{\mathrm{cap}}$              & $\ln\aC$ at saturation, EMOG(D) or $\aC=1$ \\
+  $w$                             & width of the solid ramp below the cap, in $\ln\aC$ \\
+  $f_E$                           & fO$_2$ of the EMOG(D) boundary \\
+  $\Delta G^\circ_{\mathrm{EMOG}}$ & standard Gibbs energy of the EMOG(D) reaction (HP98) \\
+  $\chi$                          & carbonate share of the solid carbon \\
+  $n_{\mathrm{C}}^{\mathrm{carb}}$, $n_{\mathrm{C}}^{\mathrm{gph}}$ & moles of carbon in carbonate and in graphite or diamond \\
+  $n$, $X_i$                      & fluid moles and species fractions (Sec.~2) \\
+  $\mathbb 1[\cdot]$              & 1 where the condition holds, else 0 \\
+\end{vartab}
+\end{minipage}
+
+% ---------------------------------------------------------------------------------------------------
+\vspace*{\fill}
+\clearpage
+\section*{4a. Hydrogen demand $D^{\mathrm{Hyd}}$ \quad (unknown $y=\ln\fHt$)}
+\vspace*{\fill}
+{\small\setlength{\abovedisplayskip}{13pt}\setlength{\belowdisplayskip}{13pt}\setlength{\abovedisplayshortskip}{13pt}\setlength{\belowdisplayshortskip}{13pt}
+\textbf{What is solved.} The cell holds $N_{\mathrm H}$ moles of H (tracers, $2M_{\mathrm{H_2O}}/\mW$ with $\mW$ the molar mass of water). It can sit as H$_2$ in the melt, as water in the melt, as water in the solid, or in the fluid. The \emph{hydrogen demand} $D^{\mathrm{Hyd}}(y)$ is what all four hold at a trial $y=\ln\fHt$, with $x$ and $n$ held at their trial values. It is set through the water activity, which the melt and solid water read:
+\begin{equation}
+  \aw=\min\Big(1,\ \frac{K_3\,\fHt\sqrt{\fOt}}{\varphi^\circ_{\mathrm{H_2O}}P}\Big)
+\end{equation}
+the fugacity of water in equilibrium with $\fHt$ (reaction 3 of Sec.~2) relative to pure water, whose fugacity coefficient $\varphi^\circ_{\mathrm{H_2O}}$ comes from Sec.~6.
+\begin{equation}
+  D^{\mathrm{Hyd}}(y)=\underbrace{2\,n^{m}_{\mathrm{H_2}}}_{\text{melt H}_2}
+  +\underbrace{\frac{2\cdot10^{-2}M_m\big(S_{\mathrm{H_2O}}+S_{\mathrm{OH}}\big)}{\mW}}_{\text{melt water}}
+  +\underbrace{\frac{2\cdot10^{-2}M_s\,C_s(\aw)}{\mW}}_{\text{solid}}
+  +\underbrace{n\big(2X_{\mathrm{H_2O}}+4X_{\mathrm{CH_4}}+2X_{\mathrm{H_2}}\big)}_{\text{fluid}},\qquad
+  F^{\mathrm{Hyd}}=\ln\frac{D^{\mathrm{Hyd}}}{N_{\mathrm H}}=0
+\end{equation}
+$M_m$ and $M_s$ are the melt and solid masses of the cell; the factor $2\cdot10^{-2}/\mW$ turns wt\% of water into moles of H.
+
+\textbf{Melt H$_2$} (Hirschmann et al.\ 2012), with the softcap of 3a and a ceiling $X^{\mathrm H_2}_{\max}=0.3$:
+\begin{equation}
+  n^{m}_{\mathrm{H_2}}=\nox\frac{\Xm{H_2}}{1-\Xm{H_2}},\qquad
+  \Xm{H_2}=\mathrm{softcap}\big(v_h,\,X^{\mathrm H_2}_{\max}\big),\qquad v_h=K_{\mathrm{H_2}}\fHt,\qquad
+  K_{\mathrm{H_2}}=\exp\Big[\ln K_0-\frac{0.1\,\Delta V\,(P-1)}{RT}\Big]
+\end{equation}
+\textbf{Melt water} (Sun \& Yao 2026): molecular water $S_{\mathrm{H_2O}}$ and hydroxyl $S_{\mathrm{OH}}$ in wt\%, read at the water pressure $P_{\mathrm{H_2O}}=\aw P_c$, with $P_c$ and $T'$ the pressure and temperature clamped to the law's calibration and $a_1\dots a_{10}$ its coefficients:
+\begin{gather}
+  \ln S_{\mathrm{H_2O}}=a_1\ln P_{\mathrm{H_2O}}+a_2\ln T'+\frac{a_3P_c^{2}}{T'}+\frac{(a_4\sqrt{P_c}+a_5)X_{\mathrm{Na_2O}}}{T'},\qquad
+  \ln S_{\mathrm{OH}}=a_6\ln P_{\mathrm{H_2O}}+a_7\ln T'+\frac{(a_8+a_9X_{\mathrm{Al_2O_3}}+a_{10}X_{\mathrm{Na_2O}})P_c}{T'}\nonumber\\
+  P_c=\min(P,\,2\times10^{4}\ \mathrm{bar}),\qquad T'=\max(T,\,933.15\ \mathrm K)
+\end{gather}
+\textbf{Solid water.} $C_s(a)$ is the solid's water capacity at activity $a$ (wt\%), read from the table at the cell's $P$, $T$ and composition at 16 activities $a_k$ with values $C_k$, joined by straight lines in $\ln C$--$\ln a$. Above $a=1$ it is $C_s(1)$, below the lowest node the last slope continues.
+
+\textbf{Fluid.} The hydrogen species of Sec.~2.
+}
+
+% ---------------------------------------------------------------------------------------------------
+\vspace*{\fill}
+\clearpage
+\section*{4b. Hydrogen: the derivative}
+\vspace*{\fill}
+\begin{minipage}[t]{\linewidth}\vspace{0pt}\small\setlength{\abovedisplayskip}{13pt}\setlength{\belowdisplayskip}{13pt}\setlength{\abovedisplayshortskip}{13pt}\setlength{\belowdisplayshortskip}{13pt}
+\textbf{Two slopes first.} Below its cap $\aw\propto\fHt$, so $d\ln\aw/dy=1$, and 0 at $\aw=1$. Between nodes $k$ and $k+1$ the solid curve is a power law, so its log-slope is the segment slope:
+\begin{equation}
+  s_k=\frac{d\ln C_s}{d\ln a}=\frac{\ln C_{k+1}-\ln C_k}{\ln a_{k+1}-\ln a_k},\qquad s_k=0\ \text{at }a\ge1
+\end{equation}
+The melt water law is two power laws in $P_{\mathrm{H_2O}}$, so its log-slopes are $a_1$ and $a_6$. The melt H$_2$ uses the softcap slope $\sigma$ of 3b with $v_h$ and $X^{\mathrm H_2}_{\max}$.
+
+\textbf{The derivative.} As for carbon, the solve differentiates $F^{\mathrm{Hyd}}=\ln D^{\mathrm{Hyd}}-\ln N_{\mathrm H}$. The terms of $\partial D^{\mathrm{Hyd}}/\partial y$ are, in order, melt H$_2$, melt water and solid (both carrying $d\ln\aw/dy$), and fluid:
+\begin{equation}
+  \frac{\partial F^{\mathrm{Hyd}}}{\partial y}=\frac{1}{D^{\mathrm{Hyd}}}\Big[\frac{2\nox\sigma(v_h)v_h}{(1-\Xm{H_2})^2}
+  +\frac{2\cdot10^{-2}}{\mW}\big(M_m(a_1S_{\mathrm{H_2O}}+a_6S_{\mathrm{OH}})+M_sC_s\,s_k\big)
+  +n\big(2X_{\mathrm{H_2O}}+8X_{\mathrm{CH_4}}+2X_{\mathrm{H_2}}\big)\Big]
+\end{equation}
+The couplings to carbon (only through CH$_4$) and to the fluid amount are
+\begin{equation}
+  \frac{\partial F^{\mathrm{Hyd}}}{\partial x}=\frac{4nX_{\mathrm{CH_4}}}{D^{\mathrm{Hyd}}},\qquad
+  \frac{\partial F^{\mathrm{Hyd}}}{\partial u}=\frac{n\big(2X_{\mathrm{H_2O}}+4X_{\mathrm{CH_4}}+2X_{\mathrm{H_2}}\big)}{D^{\mathrm{Hyd}}}
+\end{equation}
+\textbf{Jumps at the nodes.} $s_k$ is exact for the interpolant but jumps at each of the 16 nodes. Newton and Illinois agree there to $3\times10^{-8}$ in $\aw$ (node test of 2026-11-09).
+
+\textbf{The hydrogen floor.} $D^{\mathrm{Hyd}}$ rises with $y$. If it exceeds $N_{\mathrm H}$ even at the lowest $y$, the solid alone holds more than the budget. Without melt the solid then takes the whole budget; with melt the cell fails. Bracket of $y$: $y_{\mathrm{ref}}-140$ to $y_{\mathrm{ref}}+20$, with $y_{\mathrm{ref}}$ the $\ln\fHt$ of a carbon-free H$_2$O--H$_2$ fluid whose fractions sum to one. Tolerance $|F^{\mathrm{Hyd}}|\le10^{-12}$.
+\end{minipage}
+
+% ---------------------------------------------------------------------------------------------------
+\vspace*{\fill}
+\clearpage
+\section*{4c. Hydrogen: demand by sink against fO$_2$}
+\vspace*{\fill}
+\begin{center}\includegraphics[width=\linewidth]{figs/demand_H.png}\end{center}
+\vspace*{\fill}
+\clearpage
+\section*{4d. Hydrogen: variables}
+\vspace*{\fill}
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $y=\ln\fHt$                     & log of the H$_2$ fugacity, the unknown \\
+  $D^{\mathrm{Hyd}}(y)$           & hydrogen demand: moles of H all sinks hold at $y$ \\
+  $F^{\mathrm{Hyd}}$              & hydrogen residual, $\ln(D^{\mathrm{Hyd}}/N_{\mathrm H})$ \\
+  $N_{\mathrm H}$                 & hydrogen budget of the cell, moles of H (tracers) \\
+  $x$, $u=\ln n$                  & carbon potential and fluid amount, at their trial values \\
+  $\aw$                           & water activity, relative to pure water \\
+  $K_3$                           & equilibrium constant of H$_2$ + $\tfrac12$O$_2$ = H$_2$O \\
+  $\varphi^\circ_{\mathrm{H_2O}}$ & fugacity coefficient of pure water (Sec.~6) \\
+  $M_m$, $M_s$                    & melt and solid mass of the cell \\
+  $\mW$                           & molar mass of water \\
+  $n^{m}_{\mathrm{H_2}}$, $\Xm{H_2}$ & moles and mole fraction of H$_2$ in the melt \\
+  $K_{\mathrm{H_2}}$, $\ln K_0$, $\Delta V$ & H$_2$ solubility constant of the melt, its 1-bar value and volume (Hirschmann et al.\ 2012) \\
+\end{vartab}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $X^{\mathrm H_2}_{\max}$        & ceiling of the melt H$_2$ \\
+  $v_h$, $\sigma(v_h)$            & melt H$_2$ before its ceiling, and the softcap slope \\
+  $S_{\mathrm{H_2O}}$, $S_{\mathrm{OH}}$ & molecular water and hydroxyl in the melt, wt\% \\
+  $a_1\dots a_{10}$               & coefficients of the melt water law (Sun \& Yao 2026) \\
+  $P_{\mathrm{H_2O}}$             & water pressure the melt sees, $\aw P_c$ \\
+  $P_c$, $T'$                     & $P$ and $T$ clamped to the law's calibration \\
+  $X_{\mathrm{Na_2O}}$, $X_{\mathrm{Al_2O_3}}$ & oxide fractions of the basaltic melt \\
+  $C_s(a)$                        & solid water capacity at activity $a$ (StagH2Oa table) \\
+  $C_k$, $a_k$                    & its 16 table nodes \\
+  $s_k$                           & slope of $\ln C_s$ against $\ln a$ between nodes \\
+  $y_{\mathrm{ref}}$              & $\ln\fHt$ of a carbon-free H$_2$O--H$_2$ fluid summing to one \\
+\end{vartab}
+\end{minipage}
+
+% ---------------------------------------------------------------------------------------------------
+\vspace*{\fill}
+\clearpage
+\section*{5a. Solver structure}
+\vspace*{\fill}
+\begin{center}
+\begin{minipage}{0.82\linewidth}\large
+\textbf{One cell, from outside in.} Each level holds the levels below it fixed while it moves its own unknown.
+\medskip
+
+\fbox{\begin{minipage}{0.95\linewidth}
+\textbf{Outer: fO$_2$} \quad $F^{\mathrm{Oxy}}(f)=0$ (Sec.~1). Bracketed Illinois on $[-120,40]$; no derivative, because $F^{\mathrm{Oxy}}$ jumps where MAGEMin's assemblage changes. (Fortran: a secant from the cell's stored fO$_2$ and slope first, the brackets as fallback.)
+
+\smallskip
+\fbox{\begin{minipage}{0.94\linewidth}
+\textbf{Ideality: $\varphi$} \quad fixed point (Sec.~6e): solve below at frozen $\varphi$, recompute $\varphi$ from the fluid EoS, repeat until $\max|\Delta\varphi/\varphi|<10^{-8}$ (at least 2 passes, damped after 4).
+
+\smallskip
+\fbox{\begin{minipage}{0.93\linewidth}
+\textbf{Fluid exists?} \quad solve carbon and hydrogen at $n=0$; if $s_X^{\mathrm{Flu}}\le1$, $n=0$ and stop here.
+
+\smallskip
+\textbf{Fluid amount: $u=\ln n$} \quad Newton on $F^{\mathrm{Flu}}(u)=\ln s_X^{\mathrm{Flu}}=0$ (Sec.~2), slope from the implicit derivative of the two closures; any step leaving the bracket is replaced by bisection.
+
+\smallskip
+\fbox{\begin{minipage}{0.92\linewidth}
+\textbf{Carbon and hydrogen: $(x,y)$} \quad 2D Newton on $(F^{\mathrm{Car}},F^{\mathrm{Hyd}})=0$ (Secs.~3, 4) at the trial $n$. Steps capped at 2 log units, projected onto the brackets, halved until $(F^{\mathrm{Car}})^2+(F^{\mathrm{Hyd}})^2$ drops (Armijo). Starts from the cell's last roots.
+
+\smallskip
+\emph{Fallback}: carbon closed by a 1D bracketed Newton at every trial $y$, hydrogen by a 1D bracketed Newton on its total derivative. It also detects the hydrogen floor.
+\end{minipage}}
+\end{minipage}}
+\end{minipage}}
+\end{minipage}}
+\end{minipage}
+\end{center}
+
+% ---------------------------------------------------------------------------------------------------
+\vspace*{\fill}
+\clearpage
+\section*{5b. The Jacobians}
+\vspace*{\fill}
+\begin{minipage}[t]{\linewidth}\vspace{0pt}\small\setlength{\abovedisplayskip}{13pt}\setlength{\belowdisplayskip}{13pt}\setlength{\abovedisplayshortskip}{13pt}\setlength{\belowdisplayshortskip}{13pt}
+\textbf{Inner 2D Newton} on $\mathbf z=(x,y)$ at fixed $n$, from Secs.~3b and 4b:
+\begin{equation}
+  \mathbf J=\frac{\partial(F^{\mathrm{Car}},F^{\mathrm{Hyd}})}{\partial(x,y)}=
+  \begin{pmatrix}
+    \dfrac{\partial F^{\mathrm{Car}}}{\partial x} & \dfrac{\partial F^{\mathrm{Car}}}{\partial y}\\[10pt]
+    \dfrac{\partial F^{\mathrm{Hyd}}}{\partial x} & \dfrac{\partial F^{\mathrm{Hyd}}}{\partial y}
+  \end{pmatrix}=
+  \begin{pmatrix}
+    \dfrac{1}{D^{\mathrm{Car}}}\dfrac{\partial D^{\mathrm{Car}}}{\partial x} & \dfrac{2nX_{\mathrm{CH_4}}}{D^{\mathrm{Car}}}\\[10pt]
+    \dfrac{4nX_{\mathrm{CH_4}}}{D^{\mathrm{Hyd}}} & \dfrac{1}{D^{\mathrm{Hyd}}}\dfrac{\partial D^{\mathrm{Hyd}}}{\partial y}
+  \end{pmatrix}
+\end{equation}
+\begin{equation}
+  \mathbf z_{k+1}=\mathbf z_k-\lambda\,\mathbf J^{-1}\mathbf F(\mathbf z_k)
+\end{equation}
+\textbf{A zero budget.} If $N_{\mathrm C}=0$ (or $N_{\mathrm H}=0$) its potential is frozen at $-\infty$ and its row is replaced by the identity, $F^{\mathrm{Car}}=x$, so the same $2\times2$ system covers water-only, carbon-only and mixed cells.
+
+\bigskip
+\textbf{Outer Newton on $u$} uses the augmented $3\times3$ Jacobian of $(F^{\mathrm{Car}},F^{\mathrm{Hyd}},F^{\mathrm{Flu}})$ in $(x,y,u)$:
+\begin{gather}
+  \mathbf J_3=
+  \begin{pmatrix}
+    \mathbf J & \partial_u F^{\mathrm{Car}}\\ & \partial_u F^{\mathrm{Hyd}}\\
+    \partial_x F^{\mathrm{Flu}}\ \ \partial_y F^{\mathrm{Flu}} & 0
+  \end{pmatrix},
+  \qquad
+  \frac{dF^{\mathrm{Flu}}}{du}=-\big(\partial_xF^{\mathrm{Flu}},\ \partial_yF^{\mathrm{Flu}}\big)\,\mathbf J^{-1}\begin{pmatrix}\partial_uF^{\mathrm{Car}}\\ \partial_uF^{\mathrm{Hyd}}\end{pmatrix},
+  \nonumber\\
+  u_{k+1}=u_k-\frac{F^{\mathrm{Flu}}(u_k)}{dF^{\mathrm{Flu}}/du}
+\end{gather}
+with $\partial_uF^{\mathrm{Car}}=n(X_{\mathrm{CO_2}}+X_{\mathrm{CO}}+X_{\mathrm{CH_4}})/D^{\mathrm{Car}}$, $\ \partial_uF^{\mathrm{Hyd}}=n(2X_{\mathrm{H_2O}}+4X_{\mathrm{CH_4}}+2X_{\mathrm{H_2}})/D^{\mathrm{Hyd}}$, $\ \partial_xF^{\mathrm{Flu}}=(X_{\mathrm{CO_2}}+X_{\mathrm{CO}}+X_{\mathrm{CH_4}})/s_X^{\mathrm{Flu}}$, $\ \partial_yF^{\mathrm{Flu}}=(X_{\mathrm{H_2O}}+2X_{\mathrm{CH_4}}+X_{\mathrm{H_2}})/s_X^{\mathrm{Flu}}$.
+
+\bigskip
+\textbf{How they are built.} One ForwardDiff pass in $(x,y)$ gives $\mathbf F$ and $\mathbf J$; one pass in $(x,y,u)$ gives $\mathbf J_3$. Nothing above is coded by hand; the expressions are what those passes return, and they hold the table slope $s_k$ of Sec.~4b.
+\end{minipage}
+
+
+\vspace*{\fill}
+\clearpage
+\section*{5c. Solver: variables}
+\vspace*{\fill}
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $\mathbf z=(x,y)$               & potentials of carbon and hydrogen, iterates of the inner Newton \\
+  $u=\ln n$                       & log of the fluid moles, iterate of the outer Newton \\
+  $\mathbf F=(F^{\mathrm{Car}},F^{\mathrm{Hyd}})$           & carbon and hydrogen residuals (Secs.~3, 4) \\
+  $F^{\mathrm{Flu}}(u)$                          & fluid closure residual (Sec.~2) \\
+  $\mathbf J$                     & Jacobian of $\mathbf F$ in $(x,y)$ \\
+  $\mathbf J_3$                   & Jacobian of $(F^{\mathrm{Car}},F^{\mathrm{Hyd}},F^{\mathrm{Flu}})$ in $(x,y,u)$ \\
+  $\lambda$                       & line-search factor, halved until $(F^{\mathrm{Car}})^2+(F^{\mathrm{Hyd}})^2$ drops (Armijo) \\
+\end{vartab}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $\partial_uF^{\mathrm{Car}}$, $\partial_uF^{\mathrm{Hyd}}$ & how the closures shift with the fluid amount \\
+  $\partial_xF^{\mathrm{Flu}}$, $\partial_yF^{\mathrm{Flu}}$    & how the fluid closure shifts with the potentials \\
+  $s_k$                           & table slope of the solid water curve (Sec.~4b) \\
+  $X_{\mathrm{CH_4}}$             & methane fraction, the only coupling of $x$ and $y$ \\
+  $N_{\mathrm C}$, $N_{\mathrm H}$ & carbon and hydrogen budgets; a zero one freezes its row \\
+\end{vartab}
+
+\medskip
+{\small Settings: steps capped at 2 log units, up to 8 halvings (Armijo $10^{-4}$), at most 40 inner and 100 outer iterations, tolerances $|F^{\mathrm{Car}}|,|F^{\mathrm{Hyd}}|,|F^{\mathrm{Flu}}|\le10^{-12}$, closure check $10^{-6}$ relative. Seeds: the cell's last $(x,y,u)$ and $\varphi$.}
+\end{minipage}
+
+\vspace*{\fill}
+\clearpage
+\section*{6a. Fluid ideality I: ZD09, the volume \quad (unknown $V_m$; Zhang \& Duan 2009, used at $T\ge773$~K)}
+{\large\setlength{\abovedisplayskip}{13pt}\setlength{\belowdisplayskip}{13pt}\setlength{\abovedisplayshortskip}{13pt}\setlength{\belowdisplayshortskip}{13pt}
+Secs.~2--4 need one fugacity coefficient $\varphi_i=f_i/(X_iP)$ per species. Above 773~K it comes from ZD09, a single equation of state fitted to \emph{methane}. Every other species and every mixture is mapped onto methane by corresponding states: temperature in units of the attraction energy $\varepsilon$, pressure in units of $\varepsilon/\sigma^3$. The hybrid of 6d--6e covers 673~K and below, with a blend in between.
+
+\textbf{Step 1, mix the molecular parameters} (attraction as a geometric mean, size as an arithmetic mean):
+\begin{equation}
+  \varepsilon=\sum_{ij}x_ix_jk^{(1)}_{ij}\sqrt{\varepsilon_i\varepsilon_j},\qquad
+  \sigma=\sum_{ij}x_ix_jk^{(2)}_{ij}\tfrac{\sigma_i+\sigma_j}{2},\qquad
+  \varepsilon_i'=\sum_jx_jk^{(1)}_{ij}\sqrt{\varepsilon_i\varepsilon_j},\qquad
+  \sigma_i'=\sum_jx_jk^{(2)}_{ij}\tfrac{\sigma_i+\sigma_j}{2}
+\end{equation}
+\textbf{Step 2, scale onto methane} ($\varepsilon_{\mathrm{CH_4}}=154$~K, $\sigma_{\mathrm{CH_4}}=3.691$~\AA):
+\begin{equation}
+  T_m= T\,\frac{154}{\varepsilon},\qquad P_m= P\,\Big(\frac{\sigma}{3.691}\Big)^3\frac{154}{\varepsilon}
+\end{equation}
+\textbf{Step 3, solve methane's equation for its molar volume} (L/mol), a virial-like series in $1/V_m$ plus one exponential term for dense fluids:
+\begin{equation}
+  Z=\frac{P_mV_m}{RT_m}=1+\frac{g_1}{V_m}+\frac{g_2}{V_m^2}+\frac{g_3}{V_m^4}+\frac{g_4}{V_m^5}
+   +\frac{c_{13}}{T_m^3V_m^2}\Big(c_{14}+\frac{c_{15}}{V_m^2}\Big)e^{-c_{15}/V_m^2},\qquad
+   g_k=c_{3k-2}+\frac{c_{3k-1}}{T_m^2}+\frac{c_{3k}}{T_m^3}
+\end{equation}
+\textbf{Derivative.} Newton runs in density $ d=1/V_m$ on the pressure residual, with its analytic slope ($g_5=c_{13}/T_m^3$, $q=c_{14}+c_{15} d^2$, $e=e^{-c_{15} d^2}$):
+\begin{gather}
+  F( d)= R\,T_m\, d\,Z( d)-P_m=0,\qquad d_{k+1}=d_k-\frac{F}{dF/d d}\nonumber\\
+  \frac{dF}{d d}= R\,T_m\Big[1+2g_1 d+3g_2 d^2+5g_3 d^4+6g_4 d^5+g_5\,e\, d^2\big(3q+2c_{15} d^2(1-q)\big)\Big]
+\end{gather}
+Brackets in $V_m$ of $[1,1000]$, $[0.01,10]$ and $[0.001,1]$ are tried in turn, widest first, so the fluid-like root is taken; a step leaving the bracket is replaced by bisection. The real volume scales back with the molecule size, $V=10^3V_m(\sigma/3.691)^3$~cm$^3$/mol.
+
+}
+
+\clearpage
+\section*{6b. ZD09: the fugacity coefficient \quad (result $\varphi_i$)}
+{\small\setlength{\abovedisplayskip}{2pt}\setlength{\belowdisplayskip}{2pt}
+\begin{minipage}[t]{0.60\linewidth}
+\textbf{Step 4.} The coefficient of each species is the mixture's own non-ideality plus two corrections for how $i$ differs from the average molecule, at the volume $V_m$ of 6a:
+\begin{equation}
+  \ln\varphi_i=\underbrace{Z-1-\ln Z+S_1}_{\text{same for every species}}
+  \;\underbrace{-\,2S_2\Big(1-\frac{\varepsilon_i'}{\varepsilon}\Big)}_{\text{attraction of }i\text{ vs average}}
+  \;\underbrace{+\,6(1-Z)\Big(1-\frac{\sigma_i'}{\sigma}\Big)}_{\text{size of }i\text{ vs average}}
+\end{equation}
+\begin{equation}
+  S_1=\sum_{k}\frac{g_k}{p_kV_m^{p_k}}+\frac{c_{13}}{2c_{15}T_m^3}\Big[c_{14}+1-\Big(c_{14}+1+\frac{c_{15}}{V_m^2}\Big)e^{-c_{15}/V_m^2}\Big],\qquad  p=(1,2,4,5)
+\end{equation}
+\begin{equation}
+  S_2=\sum_{k}\frac{h_k}{p_kV_m^{p_k}}+\frac{3c_{13}}{2c_{15}T_m^3}\Big[c_{14}+1-\Big(c_{14}+1-\frac{c_{15}}{V_m^2}\Big)e^{-c_{15}/V_m^2}\Big],\qquad h_k=\frac{2c_{3k-1}}{T_m^2}+\frac{3c_{3k}}{T_m^3}
+\end{equation}
+$S_1$ is the series of $Z-1$ integrated over volume, term by term. $S_2$ is the same integral of $-T_m\,\partial(Z-1)/\partial T_m$, which is how strongly the non-ideality depends on attraction. $\varepsilon_i'$ and $\sigma_i'$ are how strongly, and at what distance, species $i$ interacts with the \emph{average} neighbour of this mixture.
+
+\medskip
+$Z=4.2$ in the example means the fluid fills 4.2 times the volume of an ideal gas at the same $P$ and $T$: at 3~GPa repulsion dominates. CO$_2$ is larger and less attractive than the average molecule of this water-rich fluid, so it pays far more for its place ($\varphi$ 798 against 12.9). That raises its fugacity and pushes carbon out of the fluid.
+
+\medskip
+\textbf{Why ZD09 is not used cold.} It has no liquid-water root below about 600~K. Pure water at 0.3~GPa and 500~K: ZD09 returns $V=4.5$~cm$^3$/mol and $\varphi=6.5\times10^{-28}$, the hybrid of 6d--6e returns $V=18.3$~cm$^3$/mol and $\varphi=0.032$.
+\end{minipage}\hfill
+\begin{minipage}[t]{0.37\linewidth}
+\textbf{Worked example:} $X_{\mathrm{H_2O}}=0.9$, $X_{\mathrm{CO_2}}=0.1$, 3~GPa, 1600~K.
+
+\smallskip
+\begin{tabular}{@{}l r@{}}
+  Step 1: $\varepsilon$, $\sigma$               & 468.4~K, 2.983~\AA \\
+  Step 2: $T_m$, $P_m$                          & 526.0, 5206        \\
+  Step 3: $V_m$                                 & 0.03558 L/mol      \\
+  \quad $g_1/V_m$, $g_2/V_m^2$                  & 0.133, 1.020       \\
+  \quad $g_3/V_m^4$, $g_4/V_m^5$, exp           & 2.191, $-0.108$, 0 \\
+  \quad $Z$                                     & 4.235              \\
+  \quad $V$                                     & 18.78 cm$^3$/mol   \\
+  Step 4: $Z-1-\ln Z$, $S_1$, $S_2$             & 1.792, 1.178, $-0.957$ \\
+\end{tabular}
+
+\smallskip
+\begin{tabular}{@{}l r r@{}}
+                                                & H$_2$O   & CO$_2$  \\
+  $\varepsilon_i'/\varepsilon$                  & 1.043    & 0.616   \\
+  $\sigma_i'/\sigma$                            & 0.983    & 1.153   \\
+  attraction term                               & $-0.082$ & $+0.736$ \\
+  size term                                     & $-0.331$ & $+2.977$ \\
+  $\ln\varphi_i$                                & 2.558    & 6.683   \\
+  $\varphi_i$                                   & 12.9     & 798     \\
+\end{tabular}
+\end{minipage}
+
+}
+
+\clearpage
+\section*{6c. ZD09: variables}
+\vspace*{\fill}
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $\varphi_i=f_i/(X_iP)$          & fugacity coefficient of species $i$, the result \\
+  $V_m$                           & molar volume of the equivalent methane, L/mol, the unknown \\
+  $V$                             & molar volume of the real fluid, cm$^3$/mol \\
+  $x_i$                           & mole fraction of species $i$ (the $X_i$ of Sec.~2) \\
+  $\varepsilon_i$, $\sigma_i$     & depth of the Lennard-Jones well (K) and molecular diameter (\AA) of $i$ \\
+  $k^{(1)}_{ij}$, $k^{(2)}_{ij}$  & corrections for unlike pairs, attraction and size \\
+  $\varepsilon$, $\sigma$         & mixture averages of $\varepsilon_i$ and $\sigma_i$ \\
+  $\varepsilon_i'$, $\sigma_i'$   & attraction and distance of $i$ to the average neighbour \\
+\end{vartab}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $T_m$, $P_m$                    & temperature and pressure scaled onto methane \\
+  $Z$                             & compressibility factor, $P_mV_m/(RT_m)$ \\
+  $c_1\dots c_{15}$               & ZD09 constants of methane \\
+  $g_k$, $h_k$                    & temperature-dependent virial coefficients and their attraction part \\
+  $p_k$                           & powers of $1/V_m$ in the series, (1, 2, 4, 5) \\
+  $S_1$, $S_2$                    & volume integrals of $Z-1$ and of its temperature derivative \\
+  $P$, $T$                        & pressure and temperature of the cell \\
+\end{vartab}
+\end{minipage}
+
+\vspace*{\fill}
+% Slides 6d-6f (MRK, PS94 hybrid, blend and fixed point) hidden for now: delete \iffalse/\fi to restore
+\iffalse
+\clearpage
+\section*{6d. Fluid ideality II: MRK, the mixing part of the Perple\_X hybrid \quad (unknowns $ V$, then $\varphi_i^{\mathrm{MRK}}$; used at $T\le773$~K)}
+{\small\setlength{\abovedisplayskip}{2pt}\setlength{\belowdisplayskip}{2pt}
+\begin{minipage}[t]{0.60\linewidth}
+\textbf{The idea.} The modified Redlich--Kwong equation (Holloway 1977, de Santis et al.\ 1974, as coded by Connolly in Perple\_X) is a van der Waals-type equation. Pressure is the repulsion of molecules that occupy a volume $b$, minus their mutual attraction $a$, which fades with temperature as $1/\sqrt T$:
+\begin{equation}
+  P=\underbrace{\frac{RT}{V-b}}_{\text{repulsion}}-\underbrace{\frac{a}{\sqrt T\,V(V+b)}}_{\text{attraction}},\qquad R=83.1441\ \mathrm{cm^3\,bar\,mol^{-1}\,K^{-1}}
+\end{equation}
+
+\textbf{Step 1, species parameters.} $b_i$ is the excluded volume of one mole of molecules. The attraction $a_i$ is constant except for H$_2$O (a quartic in $T$ above 300~K, the liquid pair $a=1.27\times10^8$, $b=16$ at 298--300~K), CO$_2$ ($a=9.29\times10^7-8.21\times10^4T+21.29T^2$) and H$_2$ (Connolly's cubic fit).
+
+\textbf{Step 2, mix.} Size adds linearly. Attraction adds over pairs, with the geometric mean for unlike pairs, except H$_2$O--CO$_2$, which attract more than the geometric mean because they associate (de Santis et al.\ 1974):
+\begin{equation}
+  b=\sum_ix_ib_i,\qquad a=\sum_{ij}x_ix_ja_{ij},\qquad a_{ij}=\sqrt{a_ia_j},\qquad a_{\mathrm{H_2O,CO_2}}=a_{\mathrm{CO_2,H_2O}}=\tfrac12a_{wc}(T)
+\end{equation}
+\begin{equation}
+  a_{wc}(T)=6912.82\,T^{5/2}\exp\Big(-11.218+\frac{6032}{T}-\frac{2.782\times10^6}{T^2}+\frac{4.708\times10^8}{T^3}\Big)+7.927\times10^7
+\end{equation}
+
+\textbf{Step 3, the volume} is a root of a cubic. Above the critical point it has one real root larger than $b$. Inside the two-phase region it has three: liquid $V_{\min}$, an unphysical middle root, vapour $V_{\max}$. The stable one has the lower Gibbs energy:
+\begin{equation}
+   V^3-\frac{RT}{ P} V^2+\Big(\frac{a}{\sqrt{ T}\, P}-\frac{bRT}{ P}-b^2\Big) V-\frac{ab}{\sqrt{ T}\, P}=0
+\end{equation}
+\begin{equation}
+  \Delta G=P(V_{\max}-V_{\min})-RT\ln\frac{V_{\max}-b}{V_{\min}-b}-\frac{a}{b\sqrt T}\ln\frac{(V_{\max}+b)V_{\min}}{(V_{\min}+b)V_{\max}},\qquad
+  \Delta G>0\Rightarrow V_{\min}\ \text{(liquid), else }V_{\max}
+\end{equation}
+
+\textbf{Step 4, the fugacity coefficient} of species $i$ in the mixture:
+\begin{equation}
+  \ln\varphi_i^{\mathrm{MRK}}=\underbrace{\ln\frac{RT}{P(V-b)}}_{\text{reference}}
+  +\underbrace{\frac{b_i}{V-b}+\frac{a\,b_i}{RT^{3/2}b^2}\Big[\ln\frac{V+b}{V}-\frac{b}{V+b}\Big]}_{\text{size of }i\text{ (raises }\varphi)}
+  \;\underbrace{-\,\frac{2\sum_jx_ja_{ij}}{RT^{3/2}b}\ln\frac{V+b}{V}}_{\text{attraction of }i\text{ to its neighbours (lowers }\varphi)}
+\end{equation}
+The first term is the ideal-gas value with the free volume $V-b$ in place of $V$. The size terms are what it costs to fit one more molecule of size $b_i$ into the fluid. The last term is the energy gained from the attraction to the neighbours, weighted by who the neighbours are ($x_j$).
+\end{minipage}\hfill
+\begin{minipage}[t]{0.37\linewidth}
+\textbf{Worked example:} the same fluid ($X_{\mathrm{H_2O}}=0.9$, $X_{\mathrm{CO_2}}=0.1$) at 0.3~GPa and 600~K.
+
+\smallskip
+\begin{tabular}{@{}l r@{}}
+  Step 1: $a_{\mathrm{H_2O}}$, $a_{\mathrm{CO_2}}$      & $1.073\times10^8$, $5.13\times10^7$ \\
+  \quad $b_{\mathrm{H_2O}}$, $b_{\mathrm{CO_2}}$        & 14.6, 29.7 cm$^3$/mol               \\
+  Step 2: $\sqrt{a_{\mathrm{H_2O}}a_{\mathrm{CO_2}}}$  & $7.42\times10^7$                    \\
+  \quad $a_{wc}$                                       & $1.534\times10^8$                   \\
+  \quad $a$, $b$                                       & $1.0125\times10^8$, 16.11           \\
+  Step 3: $RT/P$                                       & 16.63 cm$^3$/mol                    \\
+  \quad roots $>b$                                     & one: $V=22.56$ cm$^3$/mol           \\
+  Step 4: reference term                               & 0.948                               \\
+\end{tabular}
+
+\smallskip
+\begin{tabular}{@{}l r r@{}}
+                                        & H$_2$O   & CO$_2$   \\
+  size terms                            & $+2.835$ & $+5.768$ \\
+  attraction term                       & $-5.709$ & $-4.060$ \\
+  $\ln\varphi_i^{\mathrm{MRK}}$         & $-1.926$ & $+2.656$ \\
+  $\varphi_i^{\mathrm{MRK}}$            & 0.146    & 14.2     \\
+\end{tabular}
+
+\smallskip
+At 600~K the attraction of water wins over its size, so $\varphi_{\mathrm{H_2O}}<1$: water is held in the dense fluid. CO$_2$ is twice as large and less attracted, so $\varphi_{\mathrm{CO_2}}>1$. Without the association term ($a_{wc}$ replaced by the geometric mean) the H$_2$O--CO$_2$ attraction would be halved.
+
+\smallskip
+\textbf{Root choice, pure water at 500~K.} At 20~bar the roots are 21.8, 77.5 and 1979~cm$^3$/mol and $\Delta G<0$: vapour. At 100~bar they are 21.6, 108 and 286~cm$^3$/mol and $\Delta G=+2.1$~kJ/mol: liquid.
+\end{minipage}
+}
+
+\clearpage
+\section*{6e. Hybrid: Pitzer \& Sterner (1994), the blend into ZD09, and the fixed point \quad (unknowns $\rho$, then $\varphi_i$)}
+{\small\setlength{\abovedisplayskip}{2pt}\setlength{\belowdisplayskip}{2pt}
+\begin{minipage}[t]{0.60\linewidth}
+\textbf{The idea.} MRK mixes species well but is crude for dense, polar pure water and for pure CO$_2$. Pitzer \& Sterner (1994, PS94) is an accurate equation of state for each pure fluid. Connolly's hybrid keeps MRK for the mixture and corrects H$_2$O and CO$_2$ by how much MRK misses their pure-fluid $\ln\varphi$.
+
+\textbf{Step 1, PS94 for one pure fluid,} written in density $\rho=1/V$ (mol/cm$^3$), $R=83.14$:
+\begin{equation}
+  \frac{ P}{RT}=\underbrace{\rho}_{\text{ideal gas}}+\underbrace{c_1\rho^2}_{\text{2nd virial}}
+  \underbrace{-\,\rho^2\frac{c_3+2c_4\rho+3c_5\rho^2+4c_6\rho^3}{(c_2+c_3\rho+c_4\rho^2+c_5\rho^3+c_6\rho^4)^2}}_{\text{dense-fluid attraction and repulsion}}
+  +\underbrace{c_7\rho^2e^{-c_8\rho}+c_9\rho^2e^{-c_{10}\rho}}_{\text{liquid-density corrections}}
+\end{equation}
+Each $c_k(T)$ is a short sum of powers of $T$ (from $T^{-4}$ to $T^{2}$) with separate tables for H$_2$O and CO$_2$. Integrating $P$ over volume gives the fugacity in closed form:
+\begin{align}
+  \ln f&=\ln\rho+c_1\rho+\frac{1}{c_2+c_3\rho+c_4\rho^2+c_5\rho^3+c_6\rho^4}-\frac{1}{c_2}
+  -\frac{c_7}{c_8}\big(e^{-c_8\rho}-1\big)-\frac{c_9}{c_{10}}\big(e^{-c_{10}\rho}-1\big)\nonumber\\
+  &\quad+\frac{P}{\rho RT}+\ln RT-1,\qquad \ln\varphi=\ln f-\ln P
+\end{align}
+$P(V)$ is not monotone across the liquid and vapour branches, so every root on a log grid from 5 to $\max(10^6,50RT/P)$~cm$^3$/mol is refined by bisection, and the root of lowest $\ln f$ (lowest Gibbs energy) is kept.
+
+\textbf{Step 2, the hybrid correction} for $i=\mathrm{H_2O,CO_2}$. $\delta_i$ is MRK's error on the pure fluid at the same $P$ and $T$. It is added to the mixture value, and the volume takes the same correction weighted by mole fraction. CH$_4$, H$_2$ and CO keep their MRK values.
+\begin{gather}
+  \delta_i=\ln\varphi_i^{\mathrm{PS}}(\text{pure})-\ln\varphi_i^{\mathrm{MRK}}(\text{pure}),\qquad
+  \ln\varphi_i^{\mathrm{hyb}}=\ln\varphi_i^{\mathrm{MRK}}(X)+\delta_i,\nonumber\\
+  V^{\mathrm{hyb}}=V^{\mathrm{MRK}}+\sum_{\mathrm{H_2O,CO_2}}x_i\big(V_i^{\mathrm{PS}}-V_i^{\mathrm{MRK}}\big)
+\end{gather}
+
+\textbf{Step 3, the blend into ZD09} between 673 and 773~K, on $\ln\varphi$ and $\ln V$ with a smoothstep weight, so neither the fugacities nor their slope jump. If one of the two fails inside the window, the other is used alone.
+\begin{gather}
+  \ln\varphi_i=(1-w)\ln\varphi_i^{\mathrm{hyb}}+w\ln\varphi_i^{\mathrm{ZD09}},\qquad
+  \ln V=(1-w)\ln V^{\mathrm{hyb}}+w\ln V^{\mathrm{ZD09}},\nonumber\\
+  w=s^2(3-2s),\qquad s=\mathrm{clamp}\Big(\frac{T-673}{100},0,1\Big)
+\end{gather}
+
+\textbf{Step 4, the fixed point on $\varphi$} (around Secs.~2--4). $\varphi$ depends on the composition that Secs.~2--4 return, so the two are alternated until $\varphi$ stops moving:
+\begin{gather}
+  \varphi^{(0)}_i=\varphi_i^{\text{seed}}\ \text{(previous $f$ trial of the cell, else 1)},\qquad
+  X^{(k)}=\frac{X\big(x,y,n;\varphi^{(k)}\big)}{s_X^{\mathrm{Flu}}},\nonumber\\
+  \tilde\varphi_i=\frac{f_i\big(X^{(k)};P,T\big)}{X^{(k)}_iP},\qquad
+  \varphi^{(k+1)}_i=\begin{cases}\tilde\varphi_i & k\le4\\ \sqrt{\varphi^{(k)}_i\tilde\varphi_i} & k>4\end{cases}
+\end{gather}
+Stop when $k\ge2$ and $\max_i|\tilde\varphi_i-\varphi^{(k)}_i|/\varphi^{(k)}_i<10^{-8}$ ($k\le30$). After pass 4 the geometric mean damps oscillation. $\varphi_i=1$ above $P_{\max}=50$~GPa, and $T\ge298.15$~K.
+\end{minipage}\hfill
+\begin{minipage}[t]{0.37\linewidth}
+\textbf{Worked example:} 0.3~GPa, 600~K, as in 6d.
+
+\smallskip
+\begin{tabular}{@{}l r r@{}}
+  pure fluid                                & H$_2$O   & CO$_2$   \\
+  PS94: $V$ (cm$^3$/mol)                    & 19.85    & 43.63    \\
+  PS94: $\ln\varphi$                        & $-2.215$ & $+1.064$ \\
+  MRK: $V$                                  & 19.92    & 43.32    \\
+  MRK: $\ln\varphi$                         & $-1.970$ & $+1.066$ \\
+  $\delta_i$                                & $-0.245$ & $-0.002$ \\
+\end{tabular}
+
+\smallskip
+\begin{tabular}{@{}l r r r@{}}
+  mixture 0.9/0.1                           & MRK      & hybrid   & ZD09     \\
+  $\ln\varphi_{\mathrm{H_2O}}$              & $-1.926$ & $-2.171$ & $-2.238$ \\
+  $\ln\varphi_{\mathrm{CO_2}}$              & $+2.656$ & $+2.654$ & $+2.822$ \\
+  $V$ (cm$^3$/mol)                          & 22.56    & 22.52    & 21.43    \\
+\end{tabular}
+
+\smallskip
+MRK overestimates $\varphi$ of pure water by 28\,\% here ($e^{0.245}$), and gets CO$_2$ almost right. The hybrid moves the mixture's water towards ZD09, which is still finite at 600~K.
+
+\smallskip
+\textbf{Blend at 723~K} ($w=0.5$), same fluid and pressure:
+
+\smallskip
+\begin{tabular}{@{}l r r r@{}}
+                                            & hybrid   & ZD09     & blend    \\
+  $\ln\varphi_{\mathrm{H_2O}}$              & $-1.280$ & $-1.283$ & $-1.281$ \\
+  $V$ (cm$^3$/mol)                          & 25.10    & 25.20    & 25.15    \\
+\end{tabular}
+
+\smallskip
+At the seam the two equations agree to 0.3\,\% in $\varphi$ and 0.4\,\% in $V$, so the blend only smooths a small difference.
+
+\smallskip
+{\footnotesize Numbers from \texttt{ideality\_examples.jl}, which runs the EoS functions of \texttt{src/TOex.jl}.}
+\end{minipage}
+}
+
+\clearpage
+\section*{6f. Hybrid: variables}
+\vspace*{\fill}
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $V$                             & molar volume of the fluid, cm$^3$/mol, the MRK unknown \\
+  $V_{\min}$, $V_{\max}$          & liquid and vapour roots of the cubic \\
+  $\Delta G$                      & Gibbs energy difference that picks between them \\
+  $a$, $b$                        & attraction and excluded volume of the mixture \\
+  $a_i$, $b_i$                    & the same for species $i$ \\
+  $a_{ij}$                        & attraction of the pair $ij$, geometric mean \\
+  $a_{wc}(T)$                     & H$_2$O--CO$_2$ attraction with association (de Santis et al.\ 1974) \\
+  $\varphi_i^{\mathrm{MRK}}$      & fugacity coefficient of $i$ from MRK \\
+  $R$                             & gas constant, 83.14 cm$^3$\,bar\,mol$^{-1}$\,K$^{-1}$ \\
+  $\rho=1/V$                      & molar density of a pure fluid, the PS94 unknown \\
+  $c_1\dots c_{10}$               & PS94 coefficients, each a sum of powers of $T$ \\
+\end{vartab}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}
+\begin{vartab}
+  $f$, $\varphi^{\mathrm{PS}}$    & fugacity and its coefficient of pure H$_2$O or CO$_2$ from PS94 \\
+  $\delta_i$                      & MRK's error on pure $i$, $\ln\varphi^{\mathrm{PS}}-\ln\varphi^{\mathrm{MRK}}$ \\
+  $\varphi_i^{\mathrm{hyb}}$, $V^{\mathrm{hyb}}$ & corrected mixture coefficient and volume \\
+  $w$, $s$                        & smoothstep weight of the ZD09 blend and its scaled temperature \\
+  $\varphi_i$                     & coefficient handed to Secs.~2--4 \\
+  $\varphi^{(k)}_i$, $\tilde\varphi_i$ & fixed-point iterate and the value recomputed from the EoS \\
+  $X^{(k)}$                       & composition of Secs.~2--4 at $\varphi^{(k)}$, normalised by $s_X^{\mathrm{Flu}}$ \\
+  $\varphi_i^{\mathrm{seed}}$     & the cell's previous $\varphi$, else 1 \\
+  $P_{\max}$                      & 50 GPa, above which the fluid is ideal \\
+\end{vartab}
+\end{minipage}
+
+\vspace*{\fill}
+\fi
+\clearpage
+\section*{7. Calibration ranges of the model laws}
+\vspace*{\fill}
+\begin{center}\includegraphics[width=\linewidth,height=0.82\textheight,keepaspectratio]{figs/calibration.png}\end{center}
+\vspace*{\fill}
+\clearpage
+\fig{/Users/nickmotb/Desktop/Drafts/Water/figures/methods/capacity_maps.png}{Storage capacity in the three mantle sectors, harzburgite (a) and basalt (b), flat at $a=1$ with $a=0.1$ and $0.01$ receding (Water paper, Figure 1).\label{f:A1}}
+\fig{figs/behaviour/A4_melt.png}{Melt water solubility of the Sun \& Yao law read at $P_{\mathrm{H_2O}}=aP$, with P held at 2~GPa and T floored at 933~K.\label{f:A4}}
+\section*{8a. Benchmark against experiments: Stagno et al. (2013)}
+\vspace*{\fill}
+\begin{center}\includegraphics[width=\linewidth,height=0.8\textheight,keepaspectratio]{figs/bench/bench_S13.png}\end{center}
+\vspace*{\fill}
+\clearpage
+\section*{8b. Benchmark against experiments: Fux et al. (2024)}
+\vspace*{\fill}
+\begin{center}\includegraphics[width=\linewidth,height=0.8\textheight,keepaspectratio]{figs/bench/bench_Fux.png}\end{center}
+\vspace*{\fill}
+\clearpage
+\section*{8c. Benchmark against natural rocks: Cottrell et al. (2021)}
+\vspace*{\fill}
+\begin{center}\includegraphics[width=\linewidth,height=0.8\textheight,keepaspectratio]{figs/bench/bench_C.png}\end{center}
+\vspace*{\fill}
+\clearpage
+\fig{figs/behaviour/B1_fo2_3GPa.png}{Oxygen budget swept at 3~GPa. Rows: no melt, 1\,\% and 10\,\% melt. Column 1 maps the budget to fO$_2$. Columns 2--4 are plotted against the resulting $\Delta$FMQ.\label{f:B1}}
+\fig{figs/behaviour/B2_H_solid.png}{Water budget swept at 3~GPa, no melt. Rows: reduced, graphite-buffered and oxidized oxygen budgets.\label{f:B2a}}
+\fig{figs/behaviour/B3_C_solid.png}{Carbon budget swept at 3~GPa, no melt. Rows as in Fig.~\ref{f:B2a}.\label{f:B3a}}
+\fig{figs/behaviour/B5_T_solid.png}{Temperature swept at 3~GPa, no melt. Rows as in Fig.~\ref{f:B2a}.\label{f:B5a}}
+
+\end{document}

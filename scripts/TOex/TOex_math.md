@@ -248,7 +248,7 @@ The host change is ramped, never switched, because a jump of 2 O per carbon woul
 F(f):
 
 ```julia
-x_carb = 1/(1 + exp[−(f − fE)/w]),  w = 0.25 log units                               (6.6)   # Carbonate fraction of the solid carbon as a smooth logistic across the buffer.
+x_carb = 1/(1 + exp[−(f − fE)/w]),  w = 0.05 log units                               (6.6)   # Carbonate fraction of the solid carbon as a smooth logistic across the buffer.
 nC_carb = x_carb nC_solid,  nC_gph = (1 − x_carb) nC_solid,  carbO = 2 nC_carb M_O   (6.7)   # Solid carbon split into carbonate and graphite, and the oxygen the carbonate holds.
 ```
 
@@ -279,8 +279,12 @@ D(aC) = nC_melt(aC) + nC_fluid(aC)  what melt and fluid demand          (7.2)   
 Procedure at each trial f:
 
 1. Is the speciation (S.9) valid at aC_cap? If not, walk the ceiling down a decade at a time to
-   the highest valid activity aC_use. The cap is an upper bound from the buffer, not a guarantee
-   that a fluid exists there; bracketing against an invalid endpoint returned garbage.
+   the first valid activity, then bisect (60 halvings) between it and the last invalid one to
+   the validity edge, aC_use. The cap is an upper bound from the buffer, not a guarantee that a
+   fluid exists there; bracketing against an invalid endpoint returned garbage. The bisection is
+   needed because the fluid's carbon demand diverges at the edge (X_H₂O → 0, n_fluid = molH/n_H);
+   stopping at the decade point declared the cell saturated with carbonate beside a water-rich
+   fluid below the decarbonation edge (EMOG above CCO), where it should hold no carbonate.
 2. Is D(aC_use) ≤ nC_total? Then the cell is saturated: sit at aC_use and let S.6 precipitate the
    remainder. Testing the cap first *is* the decision between the two physical states.
 3. Otherwise solve D(aC) = nC_total for log₁₀ aC ∈ [−300, log₁₀ aC_use] with a bracketed
@@ -290,8 +294,8 @@ Procedure at each trial f:
 
 D is monotone in aC (XCO₂, XCO ∝ aC; XCH₄ through aC; melt CO₂ through the softcap), which makes
 the bracket legal without repair. An invalid speciation returns D = +∞, read as "demand too
-high", which keeps D monotone and pushes aC down. With no hydrogen there is no fluid and D is the
-melt term alone.
+high", which keeps D monotone and pushes aC down. With no hydrogen in the fluid D is the melt
+term alone, and the hydrogen-free fluid of S.7b is placed after the solve.
 
 Above fE, aC is a formal bridging variable, the graphite-referenced carbon fugacity a
 carbonate-buffered rock is consistent with, which lets one set of equations serve on both sides
@@ -299,6 +303,43 @@ of the buffer.
 
 Code: `toex_solve_aC`, `toex_carbon_demand`, `toex_illinois`; Julia `_solve_aC`,
 `_carbon_demand`.
+
+## S.7b The hydrogen-free CO₂–CO fluid
+
+**Event.** `Solve aC (S.7)`, cells whose fluid holds no hydrogen (dry, or all H in the melt).
+
+Hydrogen fixes how much C–O–H fluid there is (n_fluid = molH_fl/n_H, 9.3). With molH_fl = 0 the
+fluid has no carrier, but a CO₂–CO fluid can still exist: its composition follows from aC and f
+alone (9.1, XCO₂ and XCO ∝ aC), and closure fixes the activity at which it is a pure phase,
+
+```julia
+aC* = 1/(K1 fO₂/(φ_CO2 P) + K2 √fO₂/(φ_CO P)),   XCO₂ = aC* K1 fO₂/(φ_CO2 P),   XCO = 1 − XCO₂   (7b.1)   # Closure activity of a CO₂–CO fluid; φ iterated with ZD09 on the binary.
+```
+
+Like water and ice, the phases do not coexist away from the boundary. If aC* < aC_cap the fluid is
+stable before any solid saturates: the melt takes its share at aC* and the fluid takes the rest,
+nC_fluid = nC_total − nC_melt(aC*), with n_fluid = nC_fluid (one C per molecule). If aC* > aC_cap
+the solid saturates first and S.7 stands. aC* = aC_cap is the validity edge of S.7 (above EMOG,
+the decarbonation en + mag = fo + CO₂) and, below EMOG, CCO (aC* = 1). With hydrogen present the
+fluid is diluted and coexists with carbonate deeper than the edge; without it there is no such
+field. The switch is ramped like EMOG (S.6) so F(f) stays continuous,
+
+```julia
+nC_fluid = (nC_total − nC_melt(aC_u)) / (1 + exp(−log₁₀(aC_cap/aC*)/w_CO)),   aC_u = min(aC*, aC_cap),   w_CO = 0.05   (7b.2)   # Fluid share of the carbon the melt leaves, ramped across the edge.
+```
+
+the remainder going to solid carbon on the S.6 ramp. If the melt holds all carbon below aC*, no
+fluid forms. Not applied above fluid_Pmax (S.9). The fluid carries 2XCO₂ + XCO excess oxygen per
+carbon (S.1) and no hydrogen, so it passes the window of S.14 at h = 0. It cannot migrate (S.18
+needs a hydrogen carrier), stays on its tracers and is re-solved in place, degasses on eruption
+(S.19), and leaves the solid's water activity scaling off (S.15, no water in the fluid).
+
+Effect: dry carbon-bearing cells shallower than the edge are buffered at CCO by graphite + fluid
+instead of EMOG by graphite + carbonate, 0.3 to 1.6 log units more reduced at 0.5 to 2.5 GPa;
+oxidised cells exchange carbonate for CO₂ fluid at unchanged fO₂; deeper than the edge nothing
+moves. Wet cells with hydrogen in the fluid are bit-identical.
+
+Code: `toex_co_fluid` and the branch in `toex_coh_state`; Julia `_co_fluid`, `coh_state`.
 
 ## S.8 Melt CO₂ and its ceiling
 
@@ -473,7 +514,14 @@ at the old φ and the loop alternates them. The first pass starts from φ = 1 (i
 moves XCO₂ by a factor 1200. Convergence is geometric at ~10⁻² per pass. Only finite positive
 φᵢ are accepted; a failed EOS evaluation keeps the previous value.
 
-Code: the loop in `toex_coh_state`; Julia `coh_state`.
+Closure test of the unified engine (`toex_unified`, since 2026-11-08). The loop's final joint
+residual is kept as `res_ideality` = max(r_C, r_H), the relative closure of the carbon and hydrogen
+balances on the state the cell is written back with. A cell counts as converged only if the outer
+root converged and res_ideality ≤ `toex_closure_tol` = 10⁻⁶. Before, a cell whose hydrogen root had
+no sign change (the floor of S.15) was reported converged with r_H of order one. The log line
+`TOex: H floor ... closure failures` counts the cells that fail on this test alone.
+
+Code: the loop in `toex_coh_state`, `toex_coh_state_u`; Julia `coh_state`, `coh_state_u`.
 
 ## S.12 Bracket, root rule, warm start, failure
 
@@ -488,7 +536,9 @@ Outer bracket [−120, +40] in f, wider than any physical value on purpose: ever
 saturates outside its range, so the bracket only has to straddle the root. No sign change means
 no root anywhere: the cell is reported FAILED, the closer endpoint is returned, the caller keeps
 the cell's previous partition, counts it and never stops the run. A collapsed bracket with |F|
-still large means F is discontinuous there and is also reported as failure, never success.
+still large means F is discontinuous there and is also reported as failure, never success. The
+unified engine adds two causes: a hydrogen floor in a cell with melt (S.15, eq. 15.3) and a C or H
+closure above `toex_closure_tol` (S.11). Both keep the previous partition in the same way.
 
 Step: bisection first, then Illinois once bracketed (S.26), ≤ `toex_maxiter_O2` = 500 iterations. The
 outer method stays bracketed because the solid demand is a table, piecewise linear in u, whose
@@ -608,6 +658,37 @@ minus-ulp melt water is floored before it becomes a negative S.
 
 Code: `toex_solve_cells` post-pass (`toex_aH2O_scaling`), `eval_fO2_traWsol` in `tracers.f90`,
 `thermochem_int('solubility')`.
+
+**Unified engine: the solid inside the hydrogen root.** With `toex_unified` the solid is a hydrogen
+sink of the hydrogen balance itself (S.10), at the trial f_H2. Its capacity C(P, T, p, a) is read
+from `StagH2Oa.dat` at 16 water-activity nodes from 1 down to 10⁻³, log-log between nodes, with the
+last slope continued below 10⁻³. The bound water is shared among the cell's solid tracers by their
+own capacities at the solved activity a_solid (`toex_apply_bound`).
+
+Hydrogen floor (2026-11-08). Hydrous phases can hold C(a) on a plateau as a falls, so the solid
+may need more water at a = 10⁻³ than the cell owns, and the continued last slope does not bring it
+down to the budget. In the logged cell (0.27 GPa, 575 K, p = 0.06, no melt) C(10⁻³) = 0.26 wt%
+and C(10⁻²⁰) = 0.22 wt% against a water budget of 0.003 wt%. The hydrogen balance has no root there.
+The solver returned its lower bracket end and reported a split of 48.7 (solid) and −47.7 (melt)
+times the budget as converged. The write-back min(m_H(solid), H_tot − m_H(fluid)) capped the
+solid at the budget, so no water was created, but the reported partition was wrong. The floor is
+flagged when the root ends on its lower bracket end with the demand there still above the budget:
+
+```julia
+floor, Mf = 0:  n_H(solid) = molH_tot − n_H(fluid),   a_solid = 10⁻³ (lowest node)   (15.2)   # No melt: the solid takes what the fluid leaves, closing the balance exactly.
+floor, Mf > 0:  cell FAILED, previous partition kept (S.12)                          (15.3)   # With melt the solid–melt split below the table is undetermined.
+```
+
+Without melt the solid is the only condensed sink, so (15.2) is exact in mass. Its activity lies
+below the table and is not resolved; the lowest node stands in for it, also as the weight of
+`toex_apply_bound`. With melt any split satisfies the balance, so the cell is not solved. The floor
+occurs in the upper-mantle sector below about 600 to 810 K at P ≤ 2 GPa, and in the cold corners of
+the transition-zone and lower-mantle sectors (20 to 60 GPa, 350 to 800 K) where water-rich hydrous
+phases are stable. In a 12-step continuation of the newcode2 frame 600 it fired in one cell per
+step and never with melt.
+
+Code: `toex_u_xy` (flag `toex_u_hfloor`), `toex_coh_state_u` (fields `h_floor`, `h_floor_melt`),
+`toex_solve_cells` (counters); Julia `coh_state_u` (`h_floor`), `partition_Oₑₓ` (`closure_tol`).
 
 ## S.16 Volatile-enhanced melting
 
@@ -1047,8 +1128,8 @@ carbon line excludes fluid carbon; the stored slot does not).
 ## S.25 Constants and sources
 
 Constants: Mt = 10³ g; outer bracket [−120, +40], ≤ 500 iterations; ideality passes 2–30, tol
-10⁻⁸; wEMOG 0.25; toex_XCO2max 0.5; toex_XH2max 0.3; toex_fluid_Pmax 50 GPa; aC bracket
-log₁₀ ∈ [−300, log₁₀ aC_use], ceiling walk ≤ 320 decades; λ bracket log₁₀ ∈ [−60, 0]; isotonic
+10⁻⁸; wEMOG 0.05; toex_XCO2max 0.5; toex_XH2max 0.3; toex_fluid_Pmax 50 GPa; aC bracket
+log₁₀ ∈ [−300, log₁₀ aC_use], ceiling walk ≤ 320 decades then 60 edge halvings; λ bracket log₁₀ ∈ [−60, 0]; isotonic
 tilt 10⁻⁶; warm-start windows 0.25 / 2.0 log units; tolerance (3.2); softmin2(a, b, β) =
 −softmax2(−a, −b, β) for every cap.
 

@@ -32,6 +32,8 @@ Al_pv       = true                                             # bridgmanite wat
 dhms        = true                                             # DHMS term (Komabayashi & Omori 2006 MSH, Brodholt & Wood 1993 H2O)
 PDmax, PHmax = 50.0, 60.0                                      # GPa: no phase D beyond (Nishi 2014), no DHMS beyond (Ohtani 2014)
 TDmax       = 1873.0                                           # K, K&O calibration limit of the DHMS term
+aw          = sort(parse.(Float64, split(get(ENV, "SFO2_AW", "1,0.5,0.25,0.1,0.05,0.025,0.01,0.005,0.0025,0.001"), ",")), rev=true)
+                                                               # water activities of StagH2Oa; StagH2O is the a = 1 slice
 
 # fO2 and native iron (StagfO2, StagMetal): signed Fe3+/ΣFe axis, asinh to the knee then logit
 nR          = 36                                               # R nodes
@@ -60,25 +62,28 @@ dummy()  = (X=zeros(length(Xox24)), Xox=copy(Xox24), mm=get_Xoxmm(Xox24))
 sb24bulk(X, R) = oxidize_bulk(X, R, dummy(); wt_in=(sys_in=="wt"), wt_out=(sys_in=="wt"), FeFormat="Fe_O", oldXox=Xox)
 mkpath(outdir)
 
-S     = fill(NaN, nP, nT, 3, nEM)          # capacity wt% [P, T, sector, composition]
-Shyd  = fill(NaN, nP, nT, 3, nEM)          # part held by hydrous phases
-Shost = fill("", nP, nT, 3, nEM)           # phase holding most water
+aw[1] == 1.0 || error("SFO2_AW must contain a = 1 (the StagH2O slice)")
+nA    = length(aw)
+S     = fill(NaN, nP, nT, 3, nEM, nA)      # capacity wt% [P, T, sector, composition, activity]
+Shyd  = fill(NaN, nP, nT, 3, nEM, nA)      # part held by hydrous phases
+Shost = fill("", nP, nT, 3, nEM, nA)       # phase holding most water
 F     = fill(NaN, nP, nT, nR, nEM, 3)      # log10 fO2 [P, T, R, composition, sector]
 M     = fill(NaN, nP, nT, nR, nEM, 3)      # native-iron weight fraction, same layout
 if :sH2O_um in todo || :sH2O_deep in todo
     t0 = time(); Ffit = nam_fits(); Afit, Kfit = msh_setup(Pmax=PHmax); ph = Kfit[end]
     @printf("NAM fits + DHMS setup: %.1f s (phase H: ΔfH %.2f kJ, S %.2f J/K, V0 %.4f J/bar, K' %.2f)\n",
             time() - t0, ph.H/1e3, ph.S, ph.V0, ph.Kp)
-    # ume/mbe runs: bulk with excess water, pure-H2O fluid (aH2O buffer), melt and DEW fluid removed; mbe has no Cr2O3
-    function um_run(db, X, P, T)
+    # ume/mbe runs: bulk with excess water, H2O fluid at activity a (aH2O buffer); melt, DEW and the database fluid "fl"
+    #  removed ("fl" undercuts the buffer at a ≈ 1 and oxidises the rock, so bound water rose as a fell); mbe has no Cr2O3
+    function um_run(db, X, P, T; a=1.0)
         ox = vcat(Xox24, "H2O")
         Xb = vcat(oxidize_bulk(X, Rsol, dummy(); wt_in=true, wt_out=true, FeFormat="FeO_O", oldXox=Xox), X[end])
         db == "mbe" && (keep = ox .!= "Cr2O3"; ox = ox[keep]; Xb = Xb[keep])
         inf = retrieve_solution_phase_information(db)
-        rml = remove_phases([n for n in ("liq", "DEW") if n in inf.ss_name || n in inf.data_pp], db)
+        rml = remove_phases([n for n in ("liq", "DEW", "fl") if n in inf.ss_name || n in inf.data_pp], db)
         du  = Initialize_MAGEMin(db, verbose=false, buffer="aH2O")
         ou  = multi_point_minimization(10 .* P, T .- 273.15, du, X=[Xb for _ in P], Xoxides=ox, sys_in=sys_in,
-                                       B=ones(length(P)), rm_list=rml, name_solvus=true, progressbar=false)
+                                       B=fill(a, length(P)), rm_list=rml, name_solvus=true, progressbar=false)
         Finalize_MAGEMin(du)
         return ou
     end
@@ -88,12 +93,13 @@ end
 if :sH2O_um in todo
     Pg = vec([Pum[i] for i in 1:nP, j in 1:nT]); Tg = vec([Tum[j] for i in 1:nP, j in 1:nT])
     L  = nam_laws(Pg, Tg, Ffit; alpv=Al_pv)
-    for c in 1:nEM
+    for c in 1:nEM, ka in 1:nA
         db = pX[c] >= pmbe ? "mbe" : "ume"; tc = time(); unk = Set{String}()
-        ou = um_run(db, Xf[c], Pg, Tg)
-        assemble!(view(S, :, :, 1, c), view(Shyd, :, :, 1, c), view(Shost, :, :, 1, c), unk, ou, L; alpv=Al_pv)
+        ou = um_run(db, Xf[c], Pg, Tg; a=aw[ka])
+        assemble!(view(S, :, :, 1, c, ka), view(Shyd, :, :, 1, c, ka), view(Shost, :, :, 1, c, ka), unk, ou, L; alpv=Al_pv, a=aw[ka])
         isempty(unk) || error("UM p = $(pX[c]) ($db): unclassified phases $(collect(unk)), add them to NAMLAW or DRY")
-        @printf("sH2O UM   p = %.2f %s: %d points in %.1f s, %d not converged\n", pX[c], db, length(ou), time() - tc, count(o -> o.status > 1, ou))
+        @printf("sH2O UM   p = %.2f %s a = %.4g: %d points in %.1f s, %d not converged\n", pX[c], db, aw[ka], length(ou),
+                time() - tc, count(o -> o.status > 1, ou))
     end
     # Over Phand the ume compositions blend linearly (wt%) into sb24 + DHMS, held beyond: they leave ume before
     #  its brucite field (no phase A there). mbe compositions stay on mbe up to the TZ sector
@@ -106,13 +112,15 @@ if :sH2O_um in todo
                                    name_solvus=true, progressbar=false)
     Finalize_MAGEMin(d)
     n = length(out); cap = zeros(n); hyd = zeros(n); host = fill("", n); unknown = Set{String}(); sub = zeros(4, n)
-    assemble!(cap, hyd, host, unknown, out, Lr; sub=sub, alpv=Al_pv)
-    isempty(unknown) || error("UM hand-over: unclassified phases $(collect(unknown)), add them to NAMLAW or DRY")
-    dhms && dhms!(cap, hyd, host, sub, Pr, Tr, Lr, Afit, Kfit; Pmax=PHmax, Tmax=TDmax, PDmax=PDmax)
-    for (k, (i, j, c)) in enumerate(rix)
-        w = min((Pum[i] - Phand[1])/(Phand[2] - Phand[1]), 1.0)
-        S[i, j, 1, c] = (1 - w)*S[i, j, 1, c] + w*cap[k]; Shyd[i, j, 1, c] = (1 - w)*Shyd[i, j, 1, c] + w*hyd[k]
-        w >= 0.5 && (Shost[i, j, 1, c] = host[k])
+    for ka in 1:nA                                                  # the sb24 assemblage is dry: one run, re-read per activity
+        assemble!(cap, hyd, host, unknown, out, Lr; sub=sub, alpv=Al_pv, a=aw[ka])
+        isempty(unknown) || error("UM hand-over: unclassified phases $(collect(unknown)), add them to NAMLAW or DRY")
+        dhms && dhms!(cap, hyd, host, sub, Pr, Tr, Lr, Afit, Kfit; Pmax=PHmax, Tmax=TDmax, PDmax=PDmax, a=aw[ka])
+        for (k, (i, j, c)) in enumerate(rix)
+            w = min((Pum[i] - Phand[1])/(Phand[2] - Phand[1]), 1.0)
+            S[i, j, 1, c, ka] = (1 - w)*S[i, j, 1, c, ka] + w*cap[k]; Shyd[i, j, 1, c, ka] = (1 - w)*Shyd[i, j, 1, c, ka] + w*hyd[k]
+            w >= 0.5 && (Shost[i, j, 1, c, ka] = host[k])
+        end
     end
     @printf("sH2O UM   hand-over: %d sb24%s points above %.2f GPa\n", n, dhms ? " + DHMS" : "", Phand[1])
 end
@@ -128,23 +136,27 @@ if :sH2O_deep in todo
                                    name_solvus=true, progressbar=false)
     Finalize_MAGEMin(d)
     n = length(out); cap = zeros(n); hyd = zeros(n); host = fill("", n); unknown = Set{String}(); sub = zeros(4, n)
-    assemble!(cap, hyd, host, unknown, out, L; sub=sub, alpv=Al_pv)
-    isempty(unknown) || error("TZ/LM: unclassified phases $(collect(unknown)), add them to NAMLAW or DRY")
-    dhms && dhms!(cap, hyd, host, sub, Pg, Tg, L, Afit, Kfit; Pmax=PHmax, Tmax=TDmax, PDmax=PDmax)
-    for (k, (i, j, q, c)) in enumerate(idx); S[i, j, q, c] = cap[k]; Shyd[i, j, q, c] = hyd[k]; Shost[i, j, q, c] = host[k]; end
+    for ka in 1:nA
+        assemble!(cap, hyd, host, unknown, out, L; sub=sub, alpv=Al_pv, a=aw[ka])
+        isempty(unknown) || error("TZ/LM: unclassified phases $(collect(unknown)), add them to NAMLAW or DRY")
+        dhms && dhms!(cap, hyd, host, sub, Pg, Tg, L, Afit, Kfit; Pmax=PHmax, Tmax=TDmax, PDmax=PDmax, a=aw[ka])
+        for (k, (i, j, q, c)) in enumerate(idx)
+            S[i, j, q, c, ka] = cap[k]; Shyd[i, j, q, c, ka] = hyd[k]; Shost[i, j, q, c, ka] = host[k]
+        end
+    end
     @printf("sH2O TZ+LM: %d points in %.1f s, %d not converged\n", n, time() - t0, count(o -> o.status > 1, out))
     # mbe compositions below Pmbe[2]: mbe as in the UM (continuous 7 GPa seam), blended linearly into sb24 over Pmbe
     ix = [(i, j) for j in 1:nT for i in 1:nP if Ptz[i] < Pmbe[2]]
     Pb = [Ptz[i] for (i, j) in ix]; Tb = [Ttz[j] for (i, j) in ix]; Lb = nam_laws(Pb, Tb, Ffit; alpv=Al_pv)
     cb = zeros(length(ix)); hb = zeros(length(ix)); sb = fill("", length(ix))
-    for c in 1:nEM
+    for c in 1:nEM, ka in 1:nA
         pX[c] < pmbe && continue
-        assemble!(cb, hb, sb, unknown, um_run("mbe", Xf[c], Pb, Tb), Lb; alpv=Al_pv)
+        assemble!(cb, hb, sb, unknown, um_run("mbe", Xf[c], Pb, Tb; a=aw[ka]), Lb; alpv=Al_pv, a=aw[ka])
         isempty(unknown) || error("TZ mbe p = $(pX[c]): unclassified phases $(collect(unknown)), add them to NAMLAW or DRY")
         for (k, (i, j)) in enumerate(ix)
             w = clamp((Ptz[i] - Pmbe[1])/(Pmbe[2] - Pmbe[1]), 0.0, 1.0)
-            S[i, j, 2, c] = (1 - w)*cb[k] + w*S[i, j, 2, c]; Shyd[i, j, 2, c] = (1 - w)*hb[k] + w*Shyd[i, j, 2, c]
-            w < 0.5 && (Shost[i, j, 2, c] = sb[k])
+            S[i, j, 2, c, ka] = (1 - w)*cb[k] + w*S[i, j, 2, c, ka]; Shyd[i, j, 2, c, ka] = (1 - w)*hb[k] + w*Shyd[i, j, 2, c, ka]
+            w < 0.5 && (Shost[i, j, 2, c, ka] = sb[k])
         end
     end
     @printf("sH2O TZ   mbe: %d points per composition below %.2f GPa\n", length(ix), Pmbe[2])
@@ -243,11 +255,26 @@ end
 # ---- Export. Same layout and number format as the reference writers
 header(io) = for (P, T) in sectors; println(io, P[1], " ", P[end], " ", T[1], " ", T[end]); end
 if :sH2O_um in todo && :sH2O_deep in todo
-    savemaps && serialize(joinpath(outdir, "sH2O_maps.jls"), (sectors=sectors, pX=pX, S=S, Shyd=Shyd, Shost=Shost))
+    # Bound water cannot rise as the activity falls; a rise is a MAGEMin local minimum. Capped from a = 1 down
+    nbad = count(t -> S[t] > S[t + CartesianIndex(0, 0, 0, 0, -1)]*(1 + 1e-4), CartesianIndices((nP, nT, 3, nEM, 2:nA)))
+    for t in CartesianIndices((nP, nT, 3, nEM)), ka in 2:nA
+        S[t, ka] = min(S[t, ka], S[t, ka-1]); Shyd[t, ka] = min(Shyd[t, ka], S[t, ka])
+    end
+    nbad > 0 && println("Capped $nbad capacity node(s) that rose as the activity fell (more than 0.01 %).")
+    savemaps && serialize(joinpath(outdir, "sH2O_maps.jls"), (sectors=sectors, pX=pX, aw=aw, S=S, Shyd=Shyd, Shost=Shost))
     open(joinpath(outdir, "StagH2O.dat"), "w") do io
         println(io, nP, " ", nT, " ", nEM, " ", join(fO2_Xmix, " "), "\n"); header(io); println(io)
         for q in 1:3, c in vcat([2, 1], 3:nEM)                         # per sector: basalt, harzburgite, mixes (as StagfO2)
-            for i in 1:nP; for j in 1:nT; print(io, fmtv(max(1e-10, S[i, j, q, c]), 4), " "); end; println(io, ""); end
+            for i in 1:nP; for j in 1:nT; print(io, fmtv(max(1e-10, S[i, j, q, c, 1]), 4), " "); end; println(io, ""); end
+            println(io, "")
+        end
+    end
+    nA > 1 && open(joinpath(outdir, "StagH2Oa.dat"), "w") do io  # StagfO2 layout with the activity in place of R;
+        # 5 significant digits, not 4 decimals: low-activity values fall below 1e-3 wt% and are interpolated in log
+        println(io, nP, " ", nT, " ", nA, " ", nEM, " ", join(fO2_Xmix, " "), "\n"); header(io)
+        println(io, join(aw, " "), "\n")
+        for ka in 1:nA, q in 1:3, c in vcat([2, 1], 3:nEM)
+            for i in 1:nP; for j in 1:nT; print(io, round(max(1e-10, S[i, j, q, c, ka]), sigdigits=5), " "); end; println(io, ""); end
             println(io, "")
         end
     end
