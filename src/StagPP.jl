@@ -42,6 +42,7 @@ module StagPP
         include("misc.jl")
     # === Misc (ground-up rewrite, WIP — see misc_corrected.jl header)
         include("TOex.jl")
+        include("TOex_opt.jl")    # same engine, hot paths rewritten: partition_Oₑₓ_opt
 
     # Structure export
     export DataBlock, sᴴ²ᴼ, min_sᴴ²ᴼ

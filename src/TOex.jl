@@ -486,18 +486,27 @@ function ps94_pure(Pbar, T, k)
     return vb, best - log(Pbar)
 end
 
+# Pure H2O and CO2 shifts (PS94 against MRK) depend on (P, T) only: built once per cell, passed down
+function hyb_pure(Pbar, TK)
+    return ntuple(2) do k
+        vps, lps = ps94_pure(Pbar, TK, k)
+        isfinite(lps) || return (vps, lps, NaN, NaN)
+        e = zeros(7); e[k+1] = 1.0
+        vm, lm = mrk_lnφ(e, Pbar, TK)
+        (vps, lps, vm, lm[k+1])
+    end
+end
+
 # Hybrid fugacities: MRK mixture, with H2O and CO2 shifted by ln φ(PS94, pure) - ln φ(MRK, pure).
 # The volume takes the same per-species shift, weighted by mole fraction.
-function hyb_fugacity(vx, Pbar, TK)
+function hyb_fugacity(vx, Pbar, TK; pure=nothing)
     v, lnφ = mrk_lnφ(vx, Pbar, TK)
     isfinite(v) || return NaN, fill(NaN, 7)
-    a, b = mrk_ab(TK)
+    pp = pure === nothing ? hyb_pure(Pbar, TK) : pure
     for (i, k) in ((2, 1), (3, 2))
-        vps, lps = ps94_pure(Pbar, TK, k)
+        vps, lps, vm, lmi = pp[k]
         isfinite(lps) || continue
-        e = zeros(7); e[i] = 1.0
-        vm, lm = mrk_lnφ(e, Pbar, TK)
-        lnφ[i] += lps - lm[i]
+        lnφ[i] += lps - lmi
         v += vx[i]*(vps - vm)
     end
     fug = [vx[i] > 0 ? vx[i]*Pbar*exp(lnφ[i]) : 0.0 for i in 1:7]
@@ -506,9 +515,9 @@ end
 
 # The fluid EoS used by every TOex speciation: hybrid below FL_T_LO, ZD09 above FL_T_HI, ln φ and ln V
 # blended with a smoothstep weight in between (both are finite there; either alone if the other fails).
-function fluid_fugacity(vx, Pbar, TK)
+function fluid_fugacity(vx, Pbar, TK; pure=nothing)
     TK >= FL_T_HI && return zd_fugacity(vx, Pbar, TK)
-    vh, fh = hyb_fugacity(vx, Pbar, TK)
+    vh, fh = hyb_fugacity(vx, Pbar, TK; pure=pure)
     TK <= FL_T_LO && return vh, fh
     vz, fz = zd_fugacity(vx, Pbar, TK)
     okz = isfinite(vz) && all(i -> vx[i] <= 0 || (isfinite(fz[i]) && fz[i] > 0), 1:7)
@@ -932,9 +941,9 @@ end
 const SY_TMIN = 933.15
 
 # Fugacity coefficient of pure water at (P, T), same fluid EoS: the reference of the table activity
-function pure_water_φ(P, T)
+function pure_water_φ(P, T; pure=nothing)
     vw = zeros(7); vw[2] = 1.0; Pbar = 1e4*P
-    _, fug = fluid_fugacity(vw, Pbar, T); φ = fug[2]/Pbar
+    _, fug = fluid_fugacity(vw, Pbar, T; pure=pure); φ = fug[2]/Pbar
     return isfinite(φ) && φ > 0 ? φ : 1.0
 end
 
@@ -955,7 +964,8 @@ function _coh_derive(f, ctx)
     cs      = coh_state_u(f, T, P, Mh, Mc, nOxideTotal, TOₑₓ;
                         melt_H2=melt_H2, melt_H2O=melt_H2O, h2_comp=h2_comp, XH2max=XH2max,
                         XCO2max=XCO2max, Mf=Mf, molfracXB=molfracXB, h2o_law=h2o_law,
-                        fluid_Pmax=fluid_Pmax, φ0=ctx.φseed[], sol=sol, seed=ctx.rseed)
+                        fluid_Pmax=fluid_Pmax, φ0=ctx.φseed[], sol=sol, seed=ctx.rseed,
+                        pt = haskey(ctx, :pt) ? ctx.pt : nothing)
     cs.φ_seed === nothing || (ctx.φseed[] = cs.φ_seed)
     XCO₂    = cs.XCO2_melt
     carbonO = Φ*XCO₂/(1 - XCO₂)
@@ -997,7 +1007,8 @@ function partition_Oₑₓ(P::Real, T::Real, p::Real, ϕ::Real, TOex::Real, TC::
     # fluid is ideal pure water) to turn the fluid's f_H2O into the table's activity
     tbl  = sH2Oa === nothing ? load_StagH2Oa() : sH2Oa
     Csat = solid_h2o_curve(tbl, P, T, p)
-    sol  = (; Ms, C = (la = log.(tbl.aw), lC = log.(max.(Csat, 1e-12))), φw0 = P <= fluid_Pmax ? pure_water_φ(P, T) : 1.0)
+    pt   = cell_consts(T, P, 1e4*P, h2_comp; pure = T < FL_T_HI ? hyb_pure(1e4*P, T) : nothing)
+    sol  = (; Ms, C = (la = log.(tbl.aw), lC = log.(max.(Csat, 1e-12))), φw0 = P <= fluid_Pmax ? pure_water_φ(P, T; pure=pt.pure) : 1.0)
 
     IDV = nancheck("solve_∫ΔVdP", solve_∫ΔVdP(P, T), P, T)   # kJ/mol, 1 bar to P
 
@@ -1025,7 +1036,8 @@ function partition_Oₑₓ(P::Real, T::Real, p::Real, ϕ::Real, TOex::Real, TC::
     ctx = (; sfO2, T, P, IDV, TOₑₓ, Mf, Mc, molfracXB, nB_per_mass, Φ, Mh, nOxideTotal, maxmOₑₓ,
              maxsOₑₓ, minsOₑₓ, lowclip, melt_H2, melt_H2O, h2_comp, XH2max, XCO2max, h2o_law,
              fluid_Pmax, sol, φseed = Ref{Union{Nothing,Vector{Float64}}}(nothing),   # φ seed of the ideality loop, reset per cell as in Fortran
-             rseed = RootSeed())                           # and the inner roots' seeds, likewise
+             rseed = RootSeed(),                           # and the inner roots' seeds, likewise
+             pt)                                           # the cell's (P, T)-only constants
 
     # Bracket far wider than physical; demands saturate outside their range, so it only straddles the root.
     # The residual is in grams, so `tol` is relative: scaled by the budget, floored by sink capacity (S.12).
@@ -1603,9 +1615,22 @@ function u_solve_n(t::UTrial, sd::RootSeed)
     return (n = exp(u), xy = xy)
 end
 
+# The (P, T)-only constants of a cell: reaction K, EMOG, melt H2 Henry constant, Sun & Yao and Katz terms
+function cell_consts(T, P, Pbar, h2_comp; pure=nothing)
+    # Sun & Yao at a = 1 with P held at their 2 GPa ceiling; the activity then enters as a power law
+    Tm  = max(T, SY_TMIN)
+    Pc  = min(Pbar, SY_PMAX)
+    a   = SY_H2O
+    kSm = a[1]*log(Pc) + a[2]*log(Tm) + a[3]*Pc^2/Tm + (a[4]*sqrt(Pc) + a[5])*MELT_XNA2O/Tm
+    kSo = a[6]*log(Pc) + a[7]*log(Tm) + (a[8] + a[9]*MELT_XAL2O3 + a[10]*MELT_XNA2O)*Pc/Tm
+    kKatz = min(12*P^0.6 + P, 12*10.0^0.6 + 10.0)   # Katz (2003) with the Rozel (2018) cutoff
+    return (; K = reaction_Ks(T, Pbar), fE = logfO2_EMOG(T, Pbar), KH2 = h2_melt_K(T, Pbar; comp=h2_comp),
+              kSm, kSo, kKatz, pure)
+end
+
 # Everything UTrial holds, from the trial fO2, the current φ and the cell
 function u_trial(f, T, P, Pbar, fO₂, K, φ, nC, nH, nOx, Mf, Ms, fl_ok, sol_on, la, lC, φw0, ylo, yhi,
-                 melt_H2, melt_H2O, h2_comp, XH2max, XCO2max, h2o_law, wGs)
+                 melt_H2, melt_H2O, h2_comp, XH2max, XCO2max, h2o_law, wGs; pt=nothing)
     K1, K2, K3, K4 = K                              # reaction constants of the four C-O-H equilibria
     sf  = sqrt(fO₂)
     c   = (K3*sf/(φ[2]*Pbar),                       # H2O
@@ -1614,18 +1639,12 @@ function u_trial(f, T, P, Pbar, fO₂, K, φ, nC, nH, nOx, Mf, Ms, fl_ok, sol_on
            K2*sf/(φ[5]*Pbar),                       # CO
            1/(φ[4]*Pbar))                           # H2
     caw = K3*sf/((sol_on ? φw0 : φ[2])*Pbar)        # a_H2O = f_H2O / f_H2O(pure water)
-    x_cap = log(min(1.0, 10.0^(logfO2_EMOG(T, Pbar) - f)))   # ln aC where solid carbon saturates
-    # Sun & Yao at a = 1 with P held at their 2 GPa ceiling; the activity then enters as a power law
-    Tm  = max(T, SY_TMIN)
-    Pc  = min(Pbar, SY_PMAX)
-    a   = SY_H2O
-    kSm = a[1]*log(Pc) + a[2]*log(Tm) + a[3]*Pc^2/Tm + (a[4]*sqrt(Pc) + a[5])*MELT_XNA2O/Tm
-    kSo = a[6]*log(Pc) + a[7]*log(Tm) + (a[8] + a[9]*MELT_XAL2O3 + a[10]*MELT_XNA2O)*Pc/Tm
-    kKatz = min(12*P^0.6 + P, 12*10.0^0.6 + 10.0)   # Katz (2003) with the Rozel (2018) cutoff
+    pc  = pt === nothing ? cell_consts(T, P, Pbar, h2_comp) : pt
+    x_cap = log(min(1.0, 10.0^(pc.fE - f)))        # ln aC where solid carbon saturates
     return UTrial(fl_ok, c, caw, nC, nH, nOx, Mf, Ms, invert_carbon_buffer_fO2(f, P, T),
                   min(max(XCO2max, 1e-6), 0.95), x_cap, wGs*log(10.0),
-                  melt_H2, h2_melt_K(T, Pbar; comp=h2_comp), XH2max,
-                  melt_H2O, h2o_law === :katz, kSm, kSo, kKatz,
+                  melt_H2, pc.KH2, XH2max,
+                  melt_H2O, h2o_law === :katz, pc.kSm, pc.kSo, pc.kKatz,
                   sol_on, la, lC, x_cap - 700.0, x_cap, ylo, yhi)
 end
 
@@ -1635,9 +1654,10 @@ function coh_state_u(f, T, P, Mh, Mc, nOxideTotal, TOₑₓ; nit_min=2, nit_max=
                      wEMOG=0.05, wCO=0.05, XCO2max=0.5,
                      melt_H2=true, melt_H2O=true, h2_comp=:basalt, XH2max=0.3,
                      Mf=0.0, molfracXB=nothing, h2o_law=:sunyao, fluid_Pmax=50.0, φ0=nothing, sol=nothing, wGs=0.01,
-                     seed=nothing)
+                     seed=nothing, pt=nothing)
     Pbar, fO₂ = 1e4*P, 10.0^f
-    K  = reaction_Ks(T, Pbar)
+    K  = pt === nothing ? reaction_Ks(T, Pbar) : pt.K
+    pure = pt === nothing ? nothing : pt.pure
     nH, nC = 2*Mh/mm.H2O, Mc/mm.C                   # budgets: mol H, mol C
     fl_ok = P <= fluid_Pmax
     φ  = (φ0 === nothing || !fl_ok) ? ones(7) : Vector{Float64}(φ0)   # φ from the previous trial, or ideal
@@ -1651,7 +1671,7 @@ function coh_state_u(f, T, P, Mh, Mc, nOxideTotal, TOₑₓ; nit_min=2, nit_max=
     ylo, yhi = y_ref - 140.0, y_ref + 20.0          # hydrogen search range
     nothing_there = nC <= 0 && nH <= 0
     mk() = u_trial(f, T, P, Pbar, fO₂, K, φ, nC, nH, Float64(nOxideTotal), Float64(Mf), Ms, fl_ok, sol_on,
-                   la, lC, φw0, ylo, yhi, melt_H2, melt_H2O, h2_comp, XH2max, XCO2max, h2o_law, wGs)
+                   la, lC, φw0, ylo, yhi, melt_H2, melt_H2O, h2_comp, XH2max, XCO2max, h2o_law, wGs; pt=pt)
     t  = mk()
     n, x, y, hfloor, it, vol_fluid = 0.0, -Inf, -Inf, false, 0, NaN
     vx = zeros(7)                                   # fluid composition in ZD09 order: CH4 H2O CO2 H2 CO O2 C2H6
@@ -1664,7 +1684,7 @@ function coh_state_u(f, T, P, Mh, Mc, nOxideTotal, TOₑₓ; nit_min=2, nit_max=
         vx .= 0.0
         vx[1], vx[2], vx[3], vx[4], vx[5] = sp[3], sp[1], sp[2], sp[5], sp[4]
         S > 0 && (vx ./= S)                         # the fluid, or the incipient one
-        vol_fluid, fug = fluid_fugacity(vx, Pbar, T)
+        vol_fluid, fug = fluid_fugacity(vx, Pbar, T; pure=pure)
         dφ = 0.0                                    # largest relative change of φ this pass
         for i in 1:7
             vx[i] > 0 || continue
@@ -1682,7 +1702,7 @@ function coh_state_u(f, T, P, Mh, Mc, nOxideTotal, TOₑₓ; nit_min=2, nit_max=
     hs  = nothing_there ? (nH2 = 0.0, nHw = 0.0, nHs = 0.0, aw = 0.0, fH2 = 0.0) : u_hsinks(t, y, sp)
     XH2O, XCO2, XCH4, XCO, XH2 = S > 0 ? (sp[1]/S, sp[2]/S, sp[3]/S, sp[4]/S, sp[5]/S) : (0.0, 0.0, 0.0, 0.0, 0.0)
     aC  = isfinite(x) ? exp(x) : 0.0
-    fE  = logfO2_EMOG(T, Pbar)
+    fE  = pt === nothing ? logfO2_EMOG(T, Pbar) : pt.fE
     aC_cap   = exp(t.x_cap)
     molH_fl  = n*(2sp[1] + 4sp[3] + 2sp[5])         # fluid hydrogen [mol H]
     nC_fluid = n*(sp[2] + sp[3] + sp[4])            # fluid carbon [mol]
@@ -1699,7 +1719,7 @@ function coh_state_u(f, T, P, Mh, Mc, nOxideTotal, TOₑₓ; nit_min=2, nit_max=
     O_rel = n > 0 ? n*(2sp[3] + sp[5])*mm.O : 0.0   # O it releases as CH4 and H2
     if !fl_ok && n > 0                              # Darcy density above Pmax: the pure-water ZD09 root
         vw = zeros(7); vw[2] = 1.0
-        vpw, _ = fluid_fugacity(vw, Pbar, T)
+        vpw, _ = fluid_fugacity(vw, Pbar, T; pure=pure)
         isfinite(vpw) && (vol_fluid = vpw)
     end
     nH2_melt, nH_H2O_melt, fH2 = hs.nH2, hs.nHw, hs.fH2

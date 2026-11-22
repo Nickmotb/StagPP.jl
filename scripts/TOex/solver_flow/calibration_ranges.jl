@@ -2,13 +2,15 @@
 # Boxes are the source data ranges; dashed edges mark a bound not yet checked against the paper.
 using CairoMakie
 
-const OUT = joinpath(@__DIR__, "figs")
+const SLIDE = get(ENV, "SLIDE", "") == "1"   # slide version: larger text, no note line, written to the Biannual figs
+const SC  = SLIDE ? 1.8 : 1.0                 # font scale
+const OUT = SLIDE ? joinpath(homedir(), "Desktop", "Drafts", "Presentations", "Biannual", "figs") : joinpath(@__DIR__, "figs")
 const PLO = 0.01                                                           # log axis floor (GPa)
 sectors = [(PLO, 7, 500, 2000), (7, 25, 700, 4000), (25, 135, 700, 4000)]   # model tables: P (GPa), T (K)
 
 rect(P1, P2, T1, T2) = Point2f[(T1, P1), (T2, P1), (T2, P2), (T1, P2)]
 function box!(ax, P1, P2, T1, T2, col; dash=(false, false, false), alpha=0.12, lw=2)
-    P1 = max(P1, PLO)
+    P1 = max(P1, PLO); lw *= SLIDE ? 1.5 : 1.0
     poly!(ax, rect(P1, P2, T1, T2), color=(col, alpha), strokewidth=0)
     ls(d) = d ? :dash : :solid
     lines!(ax, [T1, T2], [P1, P1], color=col, linewidth=lw)
@@ -16,10 +18,10 @@ function box!(ax, P1, P2, T1, T2, col; dash=(false, false, false), alpha=0.12, l
     lines!(ax, [T1, T2], [P2, P2], color=col, linewidth=lw, linestyle=ls(dash[1]))   # high-P edge
     lines!(ax, [T2, T2], [P1, P2], color=col, linewidth=lw, linestyle=ls(dash[2]))   # high-T edge
 end
-lab!(ax, T, P, s, col; al=(:left, :center), fs=13) = text!(ax, T, P, text=s, color=col, fontsize=fs, align=al, font=:bold)
+lab!(ax, T, P, s, col; al=(:left, :center), fs=13) = text!(ax, T, P, text=s, color=col, fontsize=SC*fs, align=al, font=:bold)
 function frame(pos, title)
     ax = Axis(pos, title=title, xlabel="Temperature (K)", ylabel="Pressure (GPa)", yreversed=true, yscale=log10,
-              yticks=([0.01, 0.1, 1, 10, 100], ["0.01", "0.1", "1", "10", "100"]), titlesize=17)
+              yticks=([0.01, 0.1, 1, 10, 100], ["0.01", "0.1", "1", "10", "100"]), titlesize=SC*17)
     for (P1, P2, T1, T2) in sectors
         poly!(ax, rect(P1, P2, T1, T2), color=(:gray, 0.10), strokecolor=(:gray, 0.6), strokewidth=1)
     end
@@ -27,7 +29,7 @@ function frame(pos, title)
     return ax
 end
 
-f = Figure(size=(1900, 980), fontsize=15)
+f = Figure(size=(1900, SLIDE ? 1050 : 980), fontsize=SC*15)
 
 # (a) melt, fluid, redox and phase equilibria
 a = frame(f[1, 1], "(a) Melt, fluid, redox and phase-equilibrium laws")
@@ -41,14 +43,16 @@ box!(a, PLO, 2, 933, 1700, "#009E73"; dash=(false, true, false), alpha=0.25)   #
 box!(a, PLO, 150, 1523, 1773, "#D55E00"; dash=(true, false, false), alpha=0.08, lw=1.5)  # H22 T band
 lab!(a, 2600, 0.03, "ZD09 fluid EoS: calibrated\n(used above 773 K)", "#2b7fb0")
 lab!(a, 2600, 20, "ZD09 extrapolated", "#2b7fb0")
-lab!(a, 2600, 55, "above 50 GPa: ideal pure-water fluid", "#2b7fb0")
+SLIDE ? lab!(a, 2600, 46, "above 50 GPa:\nideal pure-water fluid", "#2b7fb0"; al=(:left, :bottom)) :
+        lab!(a, 2600, 55, "above 50 GPa: ideal pure-water fluid", "#2b7fb0")
 lab!(a, 290, 0.02, "PS94 pure H₂O, CO₂\n(hybrid, below 773 K)", "#B07800"; al=(:left, :top))
 lab!(a, 790, 30, "DHMS κ map\n(K&O 2006,\nNishi et al. 2014)", "#7E57C2")
 lab!(a, 1890, 6, "Melt CO₂, Stagno & Frost (2010)", "#A0507F")
 lab!(a, 1740, 1.4, "Melt H₂, Hirschmann\net al. (2012)", "#0072B2")
 lab!(a, 950, 0.5, "Melt H₂O\nSun & Yao (2026)", "#00775A")
-lab!(a, 1648, 120, "Melt Fe³⁺, Hirschmann (2022):\nT of the experiments, P to check", "#D55E00"; al=(:center, :center), fs=12)
-text!(a, 3300, 140, text="sb24 (MAGEMin): whole mantle", fontsize=13, align=(:center, :bottom), color=:gray30)
+lab!(a, 1648, SLIDE ? 92 : 120, "Melt Fe³⁺, Hirschmann (2022):\nT of the experiments, P to check", "#D55E00"; al=(:center, :center), fs=12)
+SLIDE ? text!(a, 4180, 145, text="sb24 (MAGEMin):\nwhole mantle", fontsize=SC*12, align=(:right, :bottom), color=:gray30) :
+        text!(a, 3300, 140, text="sb24 (MAGEMin): whole mantle", fontsize=SC*13, align=(:center, :bottom), color=:gray30)
 
 # (b) NAM water laws
 b = frame(f[1, 2], "(b) Water in nominally anhydrous minerals")
@@ -72,9 +76,11 @@ for (k, (l, P1, P2, T1, T2, (tx, py, al))) in enumerate(nams)
     box!(b, P1, P2, T1, T2, pal[k]; alpha=0.10, lw=1.8)
     lab!(b, tx, py, l, pal[k]; al=al, fs=12)
 end
-text!(b, 3300, 0.012, text="bridgmanite: Al₂O₃ law (Litasov et al. 2003)\nferropericlase, CF, Ca-pv: constants", fontsize=12, align=(:center, :top), color=:gray30)
+SLIDE ? text!(b, 2200, 47, text="lower mantle: bridgmanite,\nAl₂O₃ law (Litasov et al. 2003);\nferropericlase, CF, Ca-pv:\nconstants", fontsize=SC*10, align=(:center, :center), color=:gray30) :
+        text!(b, 3300, 0.012, text="bridgmanite: Al₂O₃ law (Litasov et al. 2003)\nferropericlase, CF, Ca-pv: constants", fontsize=SC*12, align=(:center, :top), color=:gray30)
 
-Label(f[2, 1:2], "Grey: the model's table sectors (upper mantle 0–7 GPa, transition zone 7–25 GPa, lower mantle 25–135 GPa). Dashed edges: a bound not yet checked against the source.",
+SLIDE || Label(f[2, 1:2], "Grey: the model's table sectors (upper mantle 0–7 GPa, transition zone 7–25 GPa, lower mantle 25–135 GPa). Dashed edges: a bound not yet checked against the source.",
       fontsize=13, tellwidth=false)
-save(joinpath(OUT, "calibration.png"), f, px_per_unit=2)
-println("wrote ", joinpath(OUT, "calibration.png"))
+fn = SLIDE ? "calibration_slide.png" : "calibration.png"
+save(joinpath(OUT, fn), f, px_per_unit=2)
+println("wrote ", joinpath(OUT, fn))
